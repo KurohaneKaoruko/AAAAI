@@ -17,8 +17,11 @@ import type { EngineController, StartOptions } from "./engineController.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import { listAdapterMetas } from "../exchanges/registry.js";
 import { serializeConfig } from "../configSchema.js";
-import { OpenAICompatClient } from "../llm/openaiClient.js";
+import { fromEnv } from "../config.js";
 import type { WatchlistManager } from "../watchlist.js";
+import type { AuthService } from "../auth/auth.js";
+import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
+import { STRATEGY_LABEL } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
 
 const log = getLogger("http");
@@ -26,6 +29,8 @@ const log = getLogger("http");
 export interface ServerOptions {
   connections: ConnectionManager;
   watchlist: WatchlistManager;
+  llm: LlmManager;
+  auth: AuthService;
   /** 配置文件路径，「保存到文件」时写回此处 */
   configPath?: string;
   webDist?: string;
@@ -33,7 +38,7 @@ export interface ServerOptions {
 
 export function createServer(controller: EngineController, options: ServerOptions): Express {
   const app = express();
-  const { connections, watchlist, configPath } = options;
+  const { connections, watchlist, llm, auth, configPath } = options;
   app.use(express.json({ limit: "1mb" }));
 
   // 开发期跨域（Vite 5173 -> 本服务 8787）
@@ -46,6 +51,34 @@ export function createServer(controller: EngineController, options: ServerOption
       return;
     }
     next();
+  });
+
+  // 鉴权中间件（默认关闭；开启后保护所有 /api 请求）
+  app.use(auth.middleware());
+
+  // ---------- 鉴权接口（需在中间件后、但自身免鉴权） ----------
+  app.get("/api/auth/status", (req, res) => {
+    ok(res, {
+      ...auth.publicConfig(),
+      authenticated: auth.authenticate(req),
+    });
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    const body = (req.body ?? {}) as { username?: string; password?: string };
+    const token = auth.login(String(body.username ?? ""), String(body.password ?? ""));
+    if (!token) {
+      res.status(401).json({ error: "用户名或口令不正确" });
+      return;
+    }
+    auth.setSessionCookie(res, token);
+    log.info("用户 %s 登录成功", String(body.username));
+    ok(res, { ok: true });
+  });
+
+  app.post("/api/auth/logout", (_req, res) => {
+    auth.clearSessionCookie(res);
+    ok(res, { ok: true });
   });
 
   const ok = <T>(res: Response, data: T): void => {
@@ -93,26 +126,72 @@ export function createServer(controller: EngineController, options: ServerOption
     }
   });
 
-  // LLM 连通性测试
-  app.post("/api/llm/test", (req, res) => {
-    const llm = controller.getConfig().llm;
-    const prompt = String((req.body as { prompt?: string })?.prompt ?? "用一句话说明：你现在是交易助理。");
-    if (!llm.apiKey) {
-      res.status(400).json({ error: `未检测到密钥环境变量 ${llm.apiKeyEnv}` });
-      return;
+  // ---------- LLM 多实例管理 ----------
+
+  app.get("/api/llm/profiles", (_req, res) =>
+    ok(res, {
+      profiles: llm.list(),
+      overview: llm.overview(),
+      strategy: llm.getStrategy(),
+      strategies: Object.entries(STRATEGY_LABEL).map(([value, label]) => ({ value, label })),
+    }),
+  );
+
+  app.post("/api/llm/profiles", (req, res) => {
+    try {
+      ok(res, { profile: llm.create((req.body ?? {}) as never) });
+    } catch (err) {
+      fail(res, err);
     }
-    const client = new OpenAICompatClient({
-      baseUrl: llm.baseUrl,
-      apiKey: llm.apiKey,
-      model: llm.model,
-      temperature: llm.temperature,
-      timeoutMs: llm.timeoutMs,
-    });
-    void client
-      .complete(prompt)
-      .then((text) => ok(res, { ok: true, text }))
+  });
+
+  app.put("/api/llm/profiles/:id", (req, res) => {
+    try {
+      ok(res, { profile: llm.update(req.params.id, (req.body ?? {}) as never) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.delete("/api/llm/profiles/:id", (req, res) => {
+    try {
+      llm.remove(req.params.id);
+      ok(res, { removed: req.params.id });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.post("/api/llm/profiles/:id/test", (req, res) => {
+    const prompt = String((req.body as { prompt?: string })?.prompt ?? "用一句话说明：你现在是交易助理。");
+    void llm
+      .testProfile(req.params.id, prompt)
+      .then((r) => ok(res, r))
       .catch((err) => fail(res, err, 502));
   });
+
+  app.post("/api/llm/profiles/:id/reset", (req, res) => {
+    llm.resetStats(req.params.id);
+    ok(res, { profiles: llm.list() });
+  });
+
+  /** 走真实负载均衡链路发一次请求（验证调度是否正常）。 */
+  app.post("/api/llm/test", (req, res) => {
+    const prompt = String((req.body as { prompt?: string })?.prompt ?? "用一句话说明：你现在是交易助理。");
+    const started = Date.now();
+    void llm
+      .complete(prompt)
+      .then((text) => ok(res, { ok: true, text, latencyMs: Date.now() - started }))
+      .catch((err) => fail(res, err, 502));
+  });
+
+  /** 从环境变量导入密钥的可用变量名提示。 */
+  app.get("/api/llm/env", (_req, res) =>
+    ok(res, {
+      apiKeyEnv: controller.getConfig().llm.apiKeyEnv,
+      present: Boolean(fromEnv(controller.getConfig().llm.apiKeyEnv)),
+    }),
+  );
 
   app.post("/api/tickers/refresh", (_req, res) => {
     void controller

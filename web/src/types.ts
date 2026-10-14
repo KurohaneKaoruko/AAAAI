@@ -99,6 +99,49 @@ export type LLMSection = AppConfig["llm"];
 export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
+export type BalanceStrategy = "round-robin" | "weighted" | "random" | "latency";
+
+export interface LlmStats {
+  calls: number;
+  success: number;
+  failures: number;
+  consecutiveFailures: number;
+  avgLatencyMs: number;
+  lastLatencyMs: number;
+  lastError: string;
+  lastUsedAt: string;
+  cooldownUntil: number;
+}
+
+export interface LlmProfile {
+  id: string;
+  label: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  temperature: number;
+  timeoutMs: number;
+  weight: number;
+  enabled: boolean;
+  createdAt: string;
+  hasKey: boolean;
+  healthy: boolean;
+  stats: LlmStats;
+}
+
+export interface LlmOverview {
+  total: number;
+  available: number;
+  calls: number;
+  success: number;
+  avgLatencyMs: number;
+}
+
+export interface AuthStatus {
+  authRequired: boolean;
+  authenticated: boolean;
+}
+
 export interface AppConfig {
   app: { name: string; logLevel: string };
   server: { host: string; port: number };
@@ -113,6 +156,7 @@ export interface AppConfig {
     temperature: number;
     timeoutMs: number;
     decisionInterval: number;
+    strategy: BalanceStrategy;
   };
   strategy: { name: string; fastWindow: number; slowWindow: number; maxTargetWeight: number };
   risk: {
@@ -124,6 +168,7 @@ export interface AppConfig {
     maxDrawdownPct: number;
   };
   execution: { mode: "paper" | "live"; connectionId: string };
+  auth: { enabled: boolean; username: string; sessionTtlHours: number };
 }
 
 export interface EngineState {

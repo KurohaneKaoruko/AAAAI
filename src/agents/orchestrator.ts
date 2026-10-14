@@ -17,7 +17,7 @@ import { RiskRules } from "../risk/rules.js";
 import { MomentumStrategy } from "../strategies/momentum.js";
 import { LLMStrategy } from "../strategies/llmStrategy.js";
 import type { Strategy } from "../strategies/strategy.js";
-import { createLLMClient } from "../llm/nullClient.js";
+import type { LLMClient } from "../llm/llmClient.js";
 import type { AppConfig } from "../configSchema.js";
 
 export interface PipelineOptions {
@@ -25,6 +25,8 @@ export interface PipelineOptions {
   adapter: ExchangeAdapter;
   /** true = 真实下单（需适配器支持且已配 Key） */
   liveTrading: boolean;
+  /** LLM 客户端（多实例负载均衡时为 LlmManager）；null = 纯规则模式 */
+  llm?: LLMClient | null;
 }
 
 export interface Pipeline {
@@ -40,14 +42,14 @@ export function buildPipeline(config: AppConfig, options: PipelineOptions): Pipe
   const book = new PriceBook();
   const portfolio = new PortfolioManager(bus, config.risk.initialCash);
 
-  const llm = createLLMClient(config.llm);
+  const llm = options.llm ?? null;
   const momentum = new MomentumStrategy(
     config.strategy.fastWindow,
     config.strategy.slowWindow,
     config.strategy.maxTargetWeight,
   );
   const strategy: Strategy =
-    llm && config.strategy.name !== "momentum"
+    llm && config.llm.enabled && config.strategy.name !== "momentum"
       ? new LLMStrategy(momentum, llm, config.llm.decisionInterval)
       : momentum;
 

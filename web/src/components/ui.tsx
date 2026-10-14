@@ -1,6 +1,7 @@
 /** 共享 UI 原子组件：面板、表单、按钮、徽章、表格、空态、提示条。 */
 
 import type { ReactNode } from "react";
+import { Select, type SelectOption } from "./Select";
 
 export function Panel({
   title,
@@ -127,18 +128,12 @@ export function SelectField<T extends string>({
   label: string;
   hint?: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: SelectOption<T>[];
   onChange: (v: T) => void;
 }) {
   return (
     <Field label={label} hint={hint}>
-      <select value={value} onChange={(e) => onChange(e.target.value as T)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <Select value={value} options={options} onChange={onChange} />
     </Field>
   );
 }

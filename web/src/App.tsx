@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sidebar, Toasts, TopBar } from "./components/Shell";
 import { RunControls } from "./components/RunControls";
 import { useAppStore } from "./state/useAppStore";
@@ -11,11 +11,28 @@ import { StrategyPage } from "./pages/StrategyPage";
 import { RiskPage } from "./pages/RiskPage";
 import { LlmPage } from "./pages/LlmPage";
 import { SystemPage } from "./pages/SystemPage";
+import { LoginPage } from "./pages/LoginPage";
+import { api } from "./api";
 
 export function App() {
   const store = useAppStore();
   const { theme, toggle } = useTheme();
   const [page, setPage] = useState<PageId>("dashboard");
+  const [auth, setAuth] = useState<{ required: boolean; username: string; ok: boolean } | null>(null);
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const s = await api.authStatus();
+      setAuth({ required: s.authRequired, username: s.username, ok: s.authenticated });
+    } catch {
+      // 鉴权接口不可用时（例如旧版本服务端）直接放行
+      setAuth({ required: false, username: "", ok: true });
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkAuth();
+  }, [checkAuth]);
 
   const render = () => {
     switch (page) {
@@ -36,11 +53,20 @@ export function App() {
     }
   };
 
+  if (auth?.required && !auth.ok) {
+    return <LoginPage username={auth.username} onSuccess={() => void checkAuth()} />;
+  }
+
   return (
     <div className="app">
       <Sidebar page={page} onNavigate={setPage} connections={store.connections} />
       <div className="app-main">
-        <TopBar store={store} actions={<RunControls store={store} compact />} theme={theme} onToggleTheme={toggle} />
+        <TopBar
+          store={store}
+          actions={<RunControls store={store} compact />}
+          theme={theme}
+          onToggleTheme={toggle}
+        />
         <main className="content">{render()}</main>
       </div>
       <Toasts store={store} />

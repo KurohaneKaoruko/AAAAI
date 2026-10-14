@@ -61,7 +61,10 @@ export function bool(
   return typeof raw === "boolean" ? raw : fallback;
 }
 
-/** 从环境变量读取字符串（用于 API Key 等敏感配置）。 */
+/**
+ * 读取第三方生态变量（原名，不加前缀），用于 OPENAI_API_KEY、BINANCE_API_KEY 等。
+ * AAAAI 自有配置项请用 env.readEnv()。
+ */
 export function fromEnv(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
