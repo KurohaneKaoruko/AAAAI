@@ -11,24 +11,47 @@
 
 ## 项目简介
 
-AAAAAI 探索「LLM Agent × 量化投资」的自动化投研流程。系统由一条事件驱动的 Agent 流水线构成：
+AAAAAI 探索「LLM Agent × 量化投资」的自动化投研流程。一条事件驱动的 Agent 流水线贯穿全部环节：
 
 ```
 行情数据 ─▶ 分析Agent ─▶ 策略Agent ─▶ 风控Agent ─▶ 执行(券商) ─▶ 组合记账
 ```
 
-每个环节都是可替换组件，Agent 之间只通过事件总线（EventBus）通信，互不直接调用。内置 **WebUI 看板**，实时观察权益曲线、持仓、事件流，并可在线操控引擎。
+配套一个完整的 **WebUI 面板**：交易所连接、自选标的、策略、风控、LLM、日志各自独立成页，互不挤在一起。
 
-## 核心特性
+## 功能一览
 
-- **多 Agent 流水线**：`MarketAnalyst → Strategist → RiskGuard → Broker → Portfolio`
-- **事件驱动内核**：同步派发 + 全量留痕，回测与实盘共用同一条流水线
-- **可插拔接口**：`DataSource` / `Strategy` / `Agent` / `Broker` 四类抽象，替换实现即可扩展
-- **两种数据源**：`stub`（内置确定性假数据，零依赖）与 `binance`（币安真实公共行情）
-- **两种券商**：`paper`（模拟成交）与 `binance`（HMAC 签名实盘网关，默认 dryRun + 测试网）
-- **LLM 决策**：OpenAI 兼容客户端，`llm-momentum` 策略由 LLM 拍仓位、动量基线兜底，可整体退化为纯规则
-- **风控熔断**：权重上限、单笔金额上限、组合回撤熔断（live 模式触发即自动停机）
-- **WebUI 看板**：React + Vite，SSE 实时推送，权益曲线/持仓/事件流/参数配置/引擎控制
+### 多交易所 · 多资产
+
+| 交易所 | 品类 | 行情 | 下单 | 密钥 |
+| --- | --- | --- | --- | --- |
+| 模拟交易所 | 全品类 | 离线生成，可复现 | 模拟成交 | 不需要 |
+| Binance 币安 | 加密货币 | 公共接口 | HMAC 签名下单 | 需要 |
+| OKX | 加密货币 | 公共接口 | OK-ACCESS 签名下单 | 需要 |
+| 东方财富 | A 股 / 港股 / ETF | 实时 + K 线 | 仅行情（可模拟盘交易） | 不需要 |
+| Stooq | 美股 | 日线 | 仅行情（可模拟盘交易） | 不需要 |
+
+- 股票没有免费实盘接口，因此 A 股 / 美股连接默认 **真实行情 + 模拟成交**，策略照样能跑真实价格；
+- 加密货币连接配好 Key 后可切「真实下单」，默认走测试网。
+
+### WebUI 面板（7 个独立页面）
+
+| 页面 | 能做什么 |
+| --- | --- |
+| **仪表盘** | 运行控制（回测/实时）、6 项关键指标、权益曲线（悬停查看）、持仓/成交/事件三分页、顶栏行情跑马灯 |
+| **自选标的** | 按连接搜索标的、查看现价涨跌、手动添加、移除；回测运行时按标的挑选 |
+| **交易所连接** | 交易所目录（能力标签）、连接增删改、连通性测试、设为默认、密钥安全存储 |
+| **策略** | 策略选择（动量 / LLM 决策）、均线窗口、目标仓位上限、Agent 流水线图、执行模式 |
+| **风控** | 初始资金、手续费、滑点、单笔上限、仓位上限、回撤熔断，附每条规则的作用说明 |
+| **LLM 大模型** | 开关、接口地址、模型、温度、决策节流、密钥环境变量、一键连通性测试 |
+| **系统与日志** | 运行信息、配置写回文件、行情刷新、配置 JSON、服务端日志（按级别过滤） |
+
+### 智能体流水线
+
+- **可插拔接口**：`ExchangeAdapter` / `Strategy` / `Agent` / `Broker` 四类抽象，换实现即可扩展；
+- **事件驱动内核**：同步派发 + 顺序 `publishAsync`，事件全量留痕（上限 5000）便于审计；
+- **LLM 决策**：OpenAI 兼容客户端，按 `decision_interval` 节流调用，失败/超时/输出非法自动回退动量基线；
+- **风控熔断**：权重上限、单笔金额截断、组合回撤熔断（实时模式触发自动停机）。
 
 ## 快速开始
 
@@ -36,97 +59,98 @@ AAAAAI 探索「LLM Agent × 量化投资」的自动化投研流程。系统由
 # 1. 安装（Node >= 20）
 npm install
 
-# 2. 一键开发（后端 8787 + 前端 5173 热更新）
+# 2. 开发模式（后端 8787 + 前端 5173 热更新）
 npm run dev
 # 打开 http://localhost:5173
 
-# 3. 或者生产模式：构建后单进程服务（WebUI 由 Express 托管）
+# 3. 生产模式：构建后单进程托管（WebUI 由 Express 提供）
 npm run build
 npm start
 # 打开 http://localhost:8787
 ```
 
-服务启动后会自动跑一次 stub 回测，WebUI 打开即有数据；`AAAAI_AUTOSTART=0` 可关闭。
+首次启动会自动创建一个「模拟交易所」连接和 `DEMO-BTC` 自选，**开箱即用，无需任何密钥或外网**。
 
 ### 测试与检查
 
 ```bash
-npm test          # node:test 单元/集成测试
-npm run typecheck # TS 全量类型检查（服务端 + WebUI）
+npm test          # node:test：39 个用例
+npm run typecheck # 服务端 + WebUI 全量类型检查
 ```
 
-## 使用指南
+## 接入真实行情
 
-### 启用 LLM 决策
-
-```bash
-cp .env.example .env
-# 编辑 .env 填入 OPENAI_API_KEY
-# config/default.yaml: llm.enabled = true
-```
-
-LLM 策略按 `llm.decision_interval` 节流调用（默认每 10 根 K 线一次）；无 Key / 请求失败 / 输出非法时自动回退动量基线，流水线不中断。
-
-### 接入真实行情
-
-`config/default.yaml` 中 `market.source: binance`，`symbols: [BTCUSDT]` 按需改（币安现货代码，如 `ETHUSDT`）。回测与实时模式都会走真实 K 线。
+1. 进入 **交易所连接** 页 → 新建连接 → 选择 `Binance 币安`（或东财 / Stooq）→ 保存；
+2. 进入 **自选标的** 页 → 选择该连接 → 搜索 `BTC` / `600519` / `AAPL` → 加入自选；
+3. 回仪表盘 → 运行引擎选择该连接与标的 → 开始回测。
 
 ### 实盘交易（高危）
 
-```yaml
-execution:
-  broker: binance
-  dry_run: false            # 只有这一行改成 false 才会真实下单
-  base_url: https://testnet.binance.vision   # 默认测试网；主网改为 https://api.binance.com
+```bash
+# .env
+BINANCE_API_KEY=...
+BINANCE_API_SECRET=...
 ```
 
-并在 `.env` 配置 `BINANCE_API_KEY` / `BINANCE_API_SECRET`。**默认 dryRun=true，任何配置缺失都会自动降级为模拟模式。实盘有资金风险，请自行负责。**
+在连接表单里填好 Key，并在 **策略页 → 执行模式** 切到「真实下单」。
+**默认 `paper` 模拟成交**：适配器不支持交易或未配 Key 时会自动降级为模拟，界面顶部会显示「模拟成交 / 真实下单」标识。实盘有资金风险，请自行负责。
+
+### 启用 LLM
+
+```bash
+# .env
+OPENAI_API_KEY=...
+```
+
+在 **LLM 页** 打开开关并「测试连通性」。未配置 Key 时策略自动以纯规则模式运行，流水线不中断。
 
 ## 目录结构
 
 ```
 AAAAI/
-├── config/default.yaml     # 全局配置（行情/LLM/策略/风控/执行）
+├── config/default.yaml     # 默认配置（WebUI 保存时写回）
+├── data/                   # 运行时数据（已 gitignore）
+│   ├── connections.json    #   交易所连接元信息
+│   ├── secrets.json        #   API 密钥（0600）
+│   └── watchlist.json      #   自选标的
 ├── src/
-│   ├── index.ts            # 服务入口（装配 + 启动 HTTP + 自动回测）
-│   ├── config.ts           # YAML 加载 + 安全取值工具
-│   ├── configSchema.ts     # 类型化配置 + 默认值 + 脱敏
-│   ├── core/               # 内核：types / eventBus / logger
+│   ├── core/               # 内核：类型 / 事件总线 / 日志环形缓冲
+│   ├── exchanges/          # 交易所适配层
+│   │   ├── types.ts        #   ExchangeAdapter 统一接口
+│   │   ├── registry.ts     #   适配器注册与工厂
+│   │   ├── connectionManager.ts # 连接 CRUD + 密钥保管
+│   │   ├── simulated.ts / binance.ts / okx.ts / eastmoney.ts / stooq.ts
 │   ├── agents/             # 智能体：analyst / strategist / riskGuard / orchestrator
 │   ├── strategies/         # 策略：momentum / llmStrategy
-│   ├── data/               # 数据：stubSource / binanceSource / marketDataService
+│   ├── data/streaming.ts   # 价格簿、K 线归并、实时轮询
 │   ├── risk/               # 风控规则
-│   ├── portfolio/          # 组合管理（现金/持仓/权益曲线）
-│   ├── execution/          # 执行：paperBroker / binanceBroker
-│   ├── llm/                # LLM：llmClient / openaiClient / nullClient
-│   ├── backtest/           # 回测引擎
-│   └── server/             # HTTP API + SSE + 引擎控制器
+│   ├── portfolio/          # 组合记账（现金/持仓/权益曲线/流水）
+│   ├── execution/          # 执行：paperBroker / exchangeBroker
+│   ├── llm/                # LLM：协议 / OpenAI 兼容 / 空实现
+│   ├── backtest/           # 回测引擎（多标的）
+│   ├── server/             # HTTP API + SSE + 引擎控制器
+│   ├── watchlist.ts        # 自选管理
+│   └── index.ts            # 入口
 ├── web/                    # WebUI（React + Vite）
-│   └── src/components/     # 看板/图表/持仓/事件流/控制台/参数面板
-├── test/                   # node:test 测试
+│   └── src/{pages,components,state,lib}
+├── test/                   # node:test
 └── docs/architecture.md    # 架构与扩展指南
 ```
 
-## 工作原理（一次 BAR 的生命周期）
+## HTTP API
 
-1. `fetchBars` 从数据源取 K 线，`streamBars` 逐根广播 `market.bar`；
-2. `MarketAnalystAgent` 维护快/慢均线，产出 `agent.market_view`（可选 LLM 点评）；
-3. `StrategistAgent` 调用可插拔 `Strategy`（`llm-momentum` 或 `momentum`），产出 `strategy.signal`；
-4. `RiskGuardAgent` 按 `RiskRules` 校验（权重/回撤熔断），通过则折算为 `exec.order_intent`；
-5. `PaperBroker` / `BinanceBroker` 成交并广播 `exec.fill`；
-6. `PortfolioManager` 更新现金与持仓，记录权益曲线；回撤越限时 live 模式自动停机。
-
-## 开发路线图
-
-- [x] 事件驱动内核与领域模型
-- [x] 多 Agent 流水线（分析/策略/风控/执行/记账）
-- [x] 双数据源（stub / Binance）与双券商（paper / Binance+dryRun）
-- [x] LLM 决策接入（OpenAI 兼容，带节流与兜底）
-- [x] WebUI 看板（SSE 实时 + 引擎控制 + 参数配置）
-- [ ] 更多策略与参数寻优
-- [ ] 多标的组合级风控
-- [ ] 监控告警与持久化
-- [ ] WebUI 增加回测对比与报告导出
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/state` `/api/config` `/api/logs` | 状态 / 配置 / 服务日志 |
+| POST | `/api/engine/start` `/api/engine/stop` | 引擎控制 |
+| POST | `/api/config` `/api/config/persist` | 热更新 / 写回文件 |
+| GET | `/api/exchanges` | 交易所目录 |
+| GET/POST/PUT/DELETE | `/api/connections[/:id]` | 连接管理 |
+| POST | `/api/connections/:id/test` | 连通性测试 |
+| GET | `/api/markets/search` | 标的搜索 |
+| GET/POST/DELETE | `/api/watchlist[/:id]` | 自选管理 |
+| POST | `/api/llm/test` `/api/tickers/refresh` | LLM 测试 / 行情刷新 |
+| GET | `/api/events` | SSE：状态与事件流 |
 
 ## 免责声明
 

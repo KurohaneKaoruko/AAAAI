@@ -1,20 +1,30 @@
 /**
- * 引擎控制器：管理一次"回测"或"实时"运行，
- * 统一维护可观测状态（指标/持仓/权益曲线/事件流），并向订阅者广播。
+ * 引擎控制器：管理一次「回测」或「实时」运行。
+ *
+ * 职责：
+ * - 依据「连接 + 自选标的」拉取多标的历史/实时 K 线
+ * - 广播状态与事件（SSE 给 WebUI）
+ * - 组合指标、持仓、成交流水与行情快照
+ * - 回撤熔断自动停机
  */
 
 import { EventBus, Topic } from "../core/eventBus.js";
 import type { Event } from "../core/eventBus.js";
-import type { EquityPoint, PortfolioMetrics, Position } from "../core/types.js";
-import { streamBars, LivePoller, type PriceBook } from "../data/marketDataService.js";
+import type {
+  Bar,
+  EquityPoint,
+  PortfolioMetrics,
+  Position,
+  TradeRecord,
+} from "../core/types.js";
+import { LivePoller, mergeBarsByTime, streamBars } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
 import { buildPipeline, type Pipeline } from "../agents/orchestrator.js";
-import type { Broker } from "../execution/broker.js";
-import type { DataSource } from "../data/dataSource.js";
-import type { Strategy } from "../strategies/strategy.js";
-import type { PortfolioManager } from "../portfolio/portfolioManager.js";
+import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
+import type { ConnectionManager } from "../exchanges/connectionManager.js";
+import type { WatchlistManager } from "../watchlist.js";
 
 const log = getLogger("engine");
 
@@ -26,46 +36,67 @@ export interface EngineEventLine {
   topic: string;
   timestamp: string;
   summary: string;
-  payload?: unknown;
 }
 
 export interface EngineState {
   status: EngineStatus;
   mode: EngineMode | null;
-  symbol: string | null;
+  /** 本次运行的标的 */
+  symbols: string[];
+  /** 行情连接 ID */
+  connectionId: string | null;
+  connectionLabel: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
   metrics: PortfolioMetrics | null;
   positions: Position[];
+  trades: TradeRecord[];
+  /** 实时行情快照（自选标的） */
+  tickers: Ticker[];
+  /** 本次运行各标的的标记价（持仓浮盈按此计算） */
   prices: Record<string, number>;
   equityCurve: EquityPoint[];
   events: EngineEventLine[];
   broker: { name: string; paper: boolean } | null;
   strategy: string | null;
+  realizedPnl: number;
   config: Record<string, unknown>;
 }
 
-export interface Broadcast {
-  type: "state" | "event" | "log";
-  data: unknown;
+export type Broadcast =
+  | { type: "state"; data: EngineState }
+  | { type: "event"; data: EngineEventLine };
+
+export interface StartOptions {
+  mode: EngineMode;
+  /** 指定标的；缺省用自选列表（按连接过滤） */
+  symbols?: string[];
+  connectionId?: string;
+  bars?: number;
+  interval?: string;
 }
 
-const MAX_EVENT_LINES = 300;
+const MAX_EVENT_LINES = 400;
 
 export class EngineController {
   private state: EngineState;
   private listeners = new Set<(b: Broadcast) => void>();
   private pipeline: Pipeline | null = null;
   private poller: LivePoller | null = null;
+  private tickerTimer: NodeJS.Timeout | null = null;
   private stopRequested = false;
   private eventLines: EngineEventLine[] = [];
 
-  constructor(private config: AppConfig) {
+  constructor(
+    private config: AppConfig,
+    private readonly connections: ConnectionManager,
+    private readonly watchlist: WatchlistManager,
+  ) {
     this.state = this.freshState();
   }
 
-  // ---------- 订阅 ----------
+  // ---------------- 订阅 / 状态 ----------------
 
   onBroadcast(listener: (b: Broadcast) => void): () => void {
     this.listeners.add(listener);
@@ -77,12 +108,10 @@ export class EngineController {
       try {
         listener(b);
       } catch {
-        /* 单个订阅者异常不影响他人 */
+        /* 单个订阅者异常不影响其他订阅者 */
       }
     }
   }
-
-  // ---------- 状态 ----------
 
   snapshot(): EngineState {
     return { ...this.state, config: redactConfig(this.config) };
@@ -96,33 +125,32 @@ export class EngineController {
     return {
       status: "idle",
       mode: null,
-      symbol: null,
+      symbols: [],
+      connectionId: null,
+      connectionLabel: null,
       startedAt: null,
       finishedAt: null,
       error: null,
       metrics: null,
       positions: [],
+      trades: [],
+      tickers: [],
       prices: {},
       equityCurve: [],
       events: [],
       broker: null,
       strategy: null,
+      realizedPnl: 0,
       config: {},
     };
   }
 
-  private refreshFromPipeline(): void {
-    if (!this.pipeline) return;
-    const { portfolio, broker, book, strategy } = this.pipeline;
-    this.state.metrics = portfolio.metrics();
-    this.state.positions = portfolio.positionsSnapshot();
-    this.state.prices = book.snapshot();
-    this.state.equityCurve = portfolio.equityCurve().slice(-1000);
-    this.state.broker = { name: broker.name, paper: broker.paper };
-    this.state.strategy = strategy.name;
+  private emitState(): void {
+    this.broadcast({ type: "state", data: this.snapshot() });
   }
 
-  /** 把总线事件转成一行可读日志。 */
+  // ---------------- 事件转译 ----------------
+
   private attachEventRelay(bus: EventBus): void {
     const relay = (event: Event): void => {
       const line: EngineEventLine = {
@@ -130,7 +158,6 @@ export class EngineController {
         topic: event.topic,
         timestamp: new Date(event.timestamp).toISOString(),
         summary: summarize(event),
-        payload: event.payload,
       };
       this.eventLines.push(line);
       if (this.eventLines.length > MAX_EVENT_LINES) this.eventLines.shift();
@@ -140,21 +167,93 @@ export class EngineController {
     for (const topic of Object.values(Topic)) bus.subscribe(topic, relay);
   }
 
-  // ---------- 运行控制 ----------
+  // ---------------- 行情快照 ----------------
 
-  async start(mode: EngineMode, options: { symbol?: string; bars?: number } = {}): Promise<void> {
+  /** 拉取自选标的行情（页面顶栏 ticker）。 */
+  async refreshTickers(): Promise<Ticker[]> {
+    const items = this.watchlist.list();
+    if (items.length === 0) return this.state.tickers;
+    const byConnection = new Map<string, string[]>();
+    for (const item of items) {
+      const list = byConnection.get(item.connectionId) ?? [];
+      list.push(item.symbol);
+      byConnection.set(item.connectionId, list);
+    }
+    const out: Ticker[] = [];
+    for (const [connectionId, symbols] of byConnection) {
+      try {
+        const adapter = this.connections.adapter(connectionId);
+        out.push(...(await adapter.fetchTickers(symbols)));
+      } catch (err) {
+        log.warn("行情刷新失败[%s]: %s", connectionId, (err as Error).message);
+      }
+    }
+    this.state.tickers = out;
+    return out;
+  }
+
+  private startTickerPolling(intervalMs = 10_000): void {
+    this.tickerTimer = setInterval(() => {
+      void this.refreshTickers().then(() => this.emitState()).catch(() => undefined);
+    }, intervalMs);
+  }
+
+  // ---------------- 运行控制 ----------------
+
+  private resolveConnection(connectionId?: string): { id: string; label: string } {
+    const connections = this.connections.list();
+    if (connections.length === 0) {
+      throw new Error("尚未配置任何交易所连接，请先在「交易所」页添加连接");
+    }
+    const id = connectionId || this.config.execution.connectionId || connections[0]!.id;
+    const found = connections.find((c) => c.id === id);
+    if (!found) throw new Error(`连接不存在: ${id}`);
+    return { id: found.id, label: found.label };
+  }
+
+  private resolveSymbols(connectionId: string, requested?: string[]): string[] {
+    if (requested && requested.length > 0) return requested;
+    const fromConfig = this.config.market.symbols.filter(Boolean);
+    if (fromConfig.length > 0) return fromConfig;
+    const fromWatchlist = this.watchlist
+      .list()
+      .filter((w) => w.connectionId === connectionId)
+      .map((w) => w.symbol);
+    if (fromWatchlist.length > 0) return fromWatchlist;
+    throw new Error("没有可运行的标的：请在「自选标的」页添加，或在运行面板手动输入");
+  }
+
+  async start(options: StartOptions): Promise<void> {
     if (this.state.status === "running") {
       throw new Error("引擎正在运行，请先停止");
     }
     this.stopRequested = false;
     this.eventLines = [];
-    this.pipeline = buildPipeline(this.config);
-    const symbol = options.symbol ?? this.config.market.symbols[0] ?? "BTCUSDT";
+
+    const connection = this.resolveConnection(options.connectionId);
+    const symbols = this.resolveSymbols(connection.id, options.symbols);
+    const interval = options.interval ?? this.config.market.interval;
+    const adapter = this.connections.adapter(connection.id);
+
+    const liveTrading =
+      this.config.execution.mode === "live" &&
+      Boolean(adapter.meta.supportsTrading) &&
+      adapter.meta.requiresKeys;
+
+    this.pipeline = buildPipeline(this.config, { adapter, liveTrading });
+    if (this.config.execution.mode === "live" && !liveTrading) {
+      log.warn("实盘模式不可用（适配器不支持交易或未配 Key），已自动降级为模拟成交");
+    }
+
     this.state = {
       ...this.freshState(),
+      // 保留已有行情快照，避免顶栏在运行期间空白
+      tickers: this.state.tickers,
       status: "running",
-      mode,
-      symbol,
+      mode: options.mode,
+      symbols,
+      connectionId: connection.id,
+      connectionLabel: connection.label,
       startedAt: new Date().toISOString(),
       config: redactConfig(this.config),
     };
@@ -162,11 +261,17 @@ export class EngineController {
     this.emitState();
 
     try {
-      if (mode === "backtest") {
-        await this.runBacktest(this.pipeline, symbol, options.bars ?? this.config.market.barCount);
-        this.finish();
+      if (options.mode === "backtest") {
+        await this.runBacktest(adapter, symbols, interval, options.bars ?? this.config.market.barCount);
+        this.state.status = "stopped";
+        this.state.finishedAt = new Date().toISOString();
+        this.emitState();
+        // 回测结束后刷新一次最新行情，供顶栏展示
+        void this.refreshTickers()
+          .then(() => this.emitState())
+          .catch(() => undefined);
       } else {
-        await this.runLive(this.pipeline, symbol);
+        await this.runLive(adapter, symbols, interval);
       }
     } catch (err) {
       this.state.status = "error";
@@ -177,54 +282,60 @@ export class EngineController {
     }
   }
 
-  private async runBacktest(pipeline: Pipeline, symbol: string, limit: number): Promise<void> {
-    log.info("回测开始 %s 共 %d 根 K 线", symbol, limit);
-    const bars = await pipeline.source.fetchBars({
-      symbol,
-      limit,
-      interval: this.config.market.interval,
-    });
-    await streamBars(pipeline.bus, pipeline.book, bars);
+  private async runBacktest(
+    adapter: ExchangeAdapter,
+    symbols: string[],
+    interval: string,
+    limit: number,
+  ): Promise<void> {
+    log.info("回测开始 %s 共 %d 根 K 线", symbols.join(","), limit);
+    const groups = await Promise.all(symbols.map((s) => adapter.fetchKlines(s, interval, limit)));
+    const bars = mergeBarsByTime(groups);
+    const pipeline = this.pipeline!;
+    for (const bar of bars) {
+      if (this.stopRequested) break;
+      await streamBars(pipeline.bus, pipeline.book, [bar]);
+    }
     this.refreshFromPipeline();
     this.emitState();
   }
 
-  private async runLive(pipeline: Pipeline, symbol: string): Promise<void> {
-    // 1) 先拉历史预热策略，再进入轮询
-    const warmup = await pipeline.source.fetchBars({
-      symbol,
-      limit: this.config.market.barCount,
-      interval: this.config.market.interval,
-    });
-    await streamBars(pipeline.bus, pipeline.book, warmup);
+  private async runLive(adapter: ExchangeAdapter, symbols: string[], interval: string): Promise<void> {
+    const pipeline = this.pipeline!;
+    // 1) 预热历史
+    const warmup = await Promise.all(
+      symbols.map((s) => adapter.fetchKlines(s, interval, this.config.market.barCount)),
+    );
+    await streamBars(pipeline.bus, pipeline.book, mergeBarsByTime(warmup));
     this.refreshFromPipeline();
     this.emitState();
 
     // 2) 轮询新 K 线
-    const poller = new LivePoller(pipeline.source, pipeline.bus, pipeline.book, {
-      symbol,
-      interval: this.config.market.interval,
+    const poller = new LivePoller(adapter, pipeline.bus, pipeline.book, {
+      symbols,
+      interval,
       pollMs: this.config.market.pollMs,
     });
     this.poller = poller;
-    poller.start(async (bars) => {
+    poller.start(async (bars: Bar[]) => {
       if (this.stopRequested) return;
       await streamBars(pipeline.bus, pipeline.book, bars);
       this.refreshFromPipeline();
       this.emitState();
-      // 3) 回撤熔断
-      const dd = pipeline.portfolio.drawdownPct;
-      if (dd >= this.config.risk.maxDrawdownPct) {
-        log.warn("回撤 %.2f%% 达到熔断线，自动停机", dd * 100);
+      if (pipeline.portfolio.drawdownPct >= this.config.risk.maxDrawdownPct) {
+        log.warn("回撤 %.2f%% 达到熔断线，自动停机", pipeline.portfolio.drawdownPct * 100);
         this.stop();
       }
     });
-    log.info("实时模式已启动: %s 每 %dms 轮询", symbol, this.config.market.pollMs);
+    this.startTickerPolling();
+    log.info("实时模式已启动: %s 每 %dms 轮询", symbols.join(","), this.config.market.pollMs);
   }
 
   stop(): void {
     this.poller?.stop();
     this.poller = null;
+    if (this.tickerTimer) clearInterval(this.tickerTimer);
+    this.tickerTimer = null;
     this.stopRequested = true;
     if (this.state.status === "running") {
       this.state.status = "stopped";
@@ -233,7 +344,7 @@ export class EngineController {
     this.emitState();
   }
 
-  /** 运行中更新风控/策略参数（下一次流水线生效）。 */
+  /** 运行中更新参数（下次流水线生效）。 */
   applyConfig(patch: Partial<AppConfig>): AppConfig {
     this.config = {
       ...this.config,
@@ -249,21 +360,23 @@ export class EngineController {
     return this.config;
   }
 
-  private finish(): void {
-    this.state.status = "stopped";
-    this.state.finishedAt = new Date().toISOString();
-    this.emitState();
-  }
-
-  private emitState(): void {
-    this.broadcast({ type: "state", data: this.snapshot() });
+  private refreshFromPipeline(): void {
+    if (!this.pipeline) return;
+    const { portfolio, broker, strategy } = this.pipeline;
+    this.state.metrics = portfolio.metrics();
+    this.state.positions = portfolio.positionsSnapshot();
+    this.state.trades = portfolio.tradeHistory();
+    this.state.realizedPnl = portfolio.realizedPnl();
+    this.state.equityCurve = portfolio.equityCurve().slice(-1500);
+    this.state.prices = this.pipeline.book.snapshot();
+    this.state.broker = { name: broker.name, paper: broker.paper };
+    this.state.strategy = strategy.name;
   }
 }
 
 /** 事件 -> 一行摘要。 */
 function summarize(event: Event): string {
   const p = event.payload as Record<string, unknown> | undefined;
-  const price = typeof p?.price === "number" ? p.price.toFixed(4) : undefined;
   switch (event.topic) {
     case Topic.BAR: {
       const bar = p as unknown as { symbol: string; close: number };
@@ -281,13 +394,14 @@ function summarize(event: Event): string {
       const o = p as unknown as { symbol: string; side: string; quantity: number };
       return `${o.side} ${o.symbol} qty=${o.quantity.toFixed(6)}`;
     }
-    case Topic.FILL:
-      return `成交 ${String((p as { order?: { symbol?: string } })?.order?.symbol ?? "")} @ ${price ?? "?"}`;
-    case Topic.ORDER_REJECTED:
+    case Topic.FILL: {
+      const f = p as unknown as { order?: { symbol?: string; side?: string }; price: number };
+      return `成交 ${f.order?.side ?? ""} ${f.order?.symbol ?? ""} @ ${f.price.toFixed(4)}`;
+    }
+    case Topic.ORDER_REJECTED: {
       return `被拒 ${String((p as { symbol?: string })?.symbol ?? "")}`;
+    }
     default:
       return "";
   }
 }
-
-export type { Broker, DataSource, Strategy, PortfolioManager, PriceBook };

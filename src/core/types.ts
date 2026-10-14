@@ -61,6 +61,19 @@ export interface Position {
   avgCost: number;
 }
 
+/** 一笔成交流水（含已实现盈亏）。 */
+export interface TradeRecord {
+  id: number;
+  timestamp: string;
+  symbol: string;
+  side: Side;
+  quantity: number;
+  price: number;
+  fee: number;
+  /** 卖出/减仓时按均价结算的已实现盈亏；买入为 0 */
+  realizedPnl: number;
+}
+
 /** 某一时刻的组合快照。 */
 export interface PortfolioSnapshot {
   timestamp: Date;

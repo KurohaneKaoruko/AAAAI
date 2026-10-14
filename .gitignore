@@ -65,7 +65,8 @@ Thumbs.db
 desktop.ini
 
 # ---- 项目运行时产物 ----
-data/          # 行情缓存与本地数据库
+# 注意：gitignore 不支持行尾注释，规则必须单独成行
+data/
 logs/
 *.log
 *.db

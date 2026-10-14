@@ -1,26 +1,65 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runBacktest } from "../src/backtest/engine.js";
-import { testConfig } from "./helpers.js";
+import { testAdapter, testConfig } from "./helpers.js";
 import { dig, num, str, bool } from "../src/config.js";
 import { buildConfig } from "../src/configSchema.js";
 import { parseDecision } from "../src/llm/llmClient.js";
+import { mergeBarsByTime } from "../src/data/streaming.js";
 
-test("runBacktest: stub 数据全链路跑通", async () => {
-  const result = await runBacktest(testConfig(), { symbol: "TEST", bars: 120 });
+test("runBacktest: 模拟交易所全链路跑通", async () => {
+  const adapter = testAdapter();
+  const result = await runBacktest(testConfig(), {
+    adapter,
+    symbols: ["DEMO-BTC"],
+    bars: 120,
+    interval: "1m",
+    liveTrading: false,
+  });
   assert.equal(result.bars, 120);
   assert.ok(result.metrics.finalEquity > 0, "权益应为正");
   assert.equal(result.metrics.equityPoints, 120);
   assert.ok(result.events > 100, "事件应覆盖 BAR 及各 Agent 事件");
-  assert.ok(Array.isArray(result.equityCurve));
-  assert.ok(result.positions.every((p) => Number.isFinite(p.quantity)));
+  assert.ok(result.equityCurve.length === 120);
+});
+
+test("runBacktest: 多标的时间序列正确归并", async () => {
+  const adapter = testAdapter();
+  const result = await runBacktest(testConfig(), {
+    adapter,
+    symbols: ["DEMO-BTC", "DEMO-ETH"],
+    bars: 60,
+    interval: "1m",
+    liveTrading: false,
+  });
+  assert.equal(result.symbols.length, 2);
+  // 归并后按时间升序：权益曲线时间戳必须单调不减
+  const times = result.equityCurve.map((p) => Date.parse(p.timestamp));
+  const sorted = [...times].sort((a, b) => a - b);
+  assert.deepEqual(times, sorted);
+  assert.ok(result.bars >= 120, "两个标的的 K 线都应汇入");
 });
 
 test("runBacktest: 结果确定可复现", async () => {
-  const a = await runBacktest(testConfig(), { symbol: "TEST", bars: 60 });
-  const b = await runBacktest(testConfig(), { symbol: "TEST", bars: 60 });
+  const a = await runBacktest(testConfig(), { adapter: testAdapter(), symbols: ["DEMO-BTC"], bars: 60, interval: "1m", liveTrading: false });
+  const b = await runBacktest(testConfig(), { adapter: testAdapter(), symbols: ["DEMO-BTC"], bars: 60, interval: "1m", liveTrading: false });
   assert.equal(a.metrics.finalEquity, b.metrics.finalEquity);
   assert.equal(a.metrics.totalFills, b.metrics.totalFills);
+});
+
+test("mergeBarsByTime: 多组 K 线按时间升序合并", () => {
+  const t = (n: number) => new Date(1_700_000_000_000 + n * 1000);
+  const merged = mergeBarsByTime([
+    [
+      { symbol: "A", timestamp: t(3), open: 1, high: 1, low: 1, close: 1, volume: 0 },
+      { symbol: "A", timestamp: t(1), open: 1, high: 1, low: 1, close: 1, volume: 0 },
+    ],
+    [{ symbol: "B", timestamp: t(2), open: 1, high: 1, low: 1, close: 1, volume: 0 }],
+  ]);
+  assert.deepEqual(
+    merged.map((b) => `${b.symbol}@${b.timestamp.getTime()}`),
+    ["A@1700000001000", "B@1700000002000", "A@1700000003000"],
+  );
 });
 
 test("config: dig / num / str / bool 安全取值", () => {
@@ -39,12 +78,13 @@ test("config: dig / num / str / bool 安全取值", () => {
 
 test("config: buildConfig 默认值与脱敏", () => {
   const config = buildConfig({});
-  assert.equal(config.market.source, "stub");
-  assert.equal(config.market.symbols[0], "BTCUSDT");
-  assert.equal(config.execution.dryRun, true);
+  assert.equal(config.market.symbols.length, 0);
+  assert.equal(config.market.interval, "1m");
+  assert.equal(config.execution.mode, "paper");
   assert.equal(config.server.port, 8787);
   assert.equal(config.llm.enabled, false);
   assert.equal(config.llm.apiKey, "");
+  assert.equal(config.risk.initialCash, 100000);
 });
 
 test("llm: parseDecision 容忍围栏与越界", () => {

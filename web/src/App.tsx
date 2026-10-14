@@ -1,107 +1,47 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, subscribeEvents } from "./api";
-import type { Broadcast, EngineEventLine, EngineState } from "./types";
-import { StatusBar } from "./components/StatusBar";
-import { MetricsCards } from "./components/MetricsCards";
-import { EquityChart } from "./components/EquityChart";
-import { PositionsTable } from "./components/PositionsTable";
-import { EventLog } from "./components/EventLog";
-import { ControlPanel } from "./components/ControlPanel";
-import { ConfigPanel } from "./components/ConfigPanel";
-
-const MAX_EVENTS = 200;
+import { useState } from "react";
+import { Sidebar, Toasts, TopBar } from "./components/Shell";
+import { RunControls } from "./components/RunControls";
+import { useAppStore } from "./state/useAppStore";
+import type { PageId } from "./components/Shell";
+import { DashboardPage } from "./pages/DashboardPage";
+import { MarketsPage } from "./pages/MarketsPage";
+import { ExchangesPage } from "./pages/ExchangesPage";
+import { StrategyPage } from "./pages/StrategyPage";
+import { RiskPage } from "./pages/RiskPage";
+import { LlmPage } from "./pages/LlmPage";
+import { SystemPage } from "./pages/SystemPage";
 
 export function App() {
-  const [state, setState] = useState<EngineState | null>(null);
-  const [events, setEvents] = useState<EngineEventLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const initialLoaded = useRef(false);
+  const store = useAppStore();
+  const [page, setPage] = useState<PageId>("dashboard");
 
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    const boot = async () => {
-      try {
-        const initial = await api.state();
-        setState(initial);
-        setEvents(initial.events ?? []);
-      } catch (err) {
-        setError((err as Error).message);
-      }
-      off = subscribeEvents((b: Broadcast) => {
-        if (b.type === "state") {
-          setState(b.data);
-        } else if (b.type === "event") {
-          setEvents((prev) => [b.data, ...prev].slice(0, MAX_EVENTS));
-        }
-      });
-    };
-    void boot();
-    return () => off?.();
-  }, []);
-
-  const handleStart = useCallback(async (mode: "backtest" | "live", symbol: string, bars: number) => {
-    setError(null);
-    try {
-      await api.start(mode, { symbol: symbol || undefined, bars });
-    } catch (err) {
-      setError((err as Error).message);
+  const render = () => {
+    switch (page) {
+      case "dashboard":
+        return <DashboardPage store={store} />;
+      case "markets":
+        return <MarketsPage store={store} />;
+      case "exchanges":
+        return <ExchangesPage store={store} />;
+      case "strategy":
+        return <StrategyPage store={store} />;
+      case "risk":
+        return <RiskPage store={store} />;
+      case "llm":
+        return <LlmPage store={store} />;
+      case "system":
+        return <SystemPage store={store} />;
     }
-  }, []);
-
-  const handleStop = useCallback(async () => {
-    try {
-      await api.stop();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  const handleSaveConfig = useCallback(async (patch: unknown) => {
-    try {
-      await api.saveConfig(patch);
-      const next = await api.state();
-      setState(next);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  const running = state?.status === "running";
-  const symbol = state?.symbol ?? state?.config?.market?.symbols?.[0] ?? "—";
-  const initialCash = useMemo(
-    () => state?.config?.risk?.initialCash ?? 0,
-    [state?.config?.risk?.initialCash],
-  );
+  };
 
   return (
     <div className="app">
-      <StatusBar state={state} error={error} />
-      <main className="grid">
-        <section className="col col-left">
-          <ControlPanel
-            state={state}
-            running={running}
-            onStart={handleStart}
-            onStop={handleStop}
-          />
-          <ConfigPanel
-            config={state?.config ?? null}
-            disabled={running}
-            onSave={handleSaveConfig}
-          />
-        </section>
-        <section className="col col-main">
-          <MetricsCards state={state} initialCash={initialCash} symbol={symbol} />
-          <EquityChart curve={state?.equityCurve ?? []} initialCash={initialCash} />
-          <PositionsTable positions={state?.positions ?? []} prices={state?.prices ?? {}} />
-        </section>
-        <section className="col col-right">
-          <EventLog events={events} />
-        </section>
-      </main>
-      <footer className="footer">
-        AAAAAI · Ai-Agent-Auto-Asset-Investment · 仅供学习研究，不构成投资建议
-      </footer>
+      <Sidebar page={page} onNavigate={setPage} connections={store.connections} />
+      <div className="app-main">
+        <TopBar store={store} actions={<RunControls store={store} compact />} />
+        <main className="content">{render()}</main>
+      </div>
+      <Toasts store={store} />
     </div>
   );
 }

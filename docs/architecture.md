@@ -3,26 +3,55 @@
 ## 分层
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ WebUI (React+Vite)      web/          SSE + REST             │  界面
-├──────────────────────────────────────────────────────────────┤
-│ Server                  src/server/   Express + 引擎控制器     │  接入层
-├──────────────────────────────────────────────────────────────┤
-│ Backtest                src/backtest/                         │  回测
-│ Agents                  src/agents/   分析师/策略/风控/装配    │  智能体
-│ Strategies              src/strategies/ momentum / llm       │  可插拔策略
-│ Risk                    src/risk/                            │  风控红线
-│ Portfolio               src/portfolio/                       │  记账与权益曲线
-│ Execution               src/execution/  paper / binance      │  券商
-│ Data                    src/data/       stub / binance       │  数据源
-├──────────────────────────────────────────────────────────────┤
-│ Core                    src/core/       EventBus / 类型 / 日志 │  内核
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ WebUI (React+Vite)      web/src/pages   7 个独立页面               │  界面
+├──────────────────────────────────────────────────────────────────┤
+│ Server                  src/server      REST + SSE + 引擎控制器     │  接入层
+├──────────────────────────────────────────────────────────────────┤
+│ Agents                  src/agents      分析/策略/风控/装配          │  智能体
+│ Strategies              src/strategies  动量 / LLM 决策              │
+│ Risk                    src/risk        仓位与熔断规则               │
+│ Portfolio               src/portfolio   记账、流水、权益曲线          │
+│ Execution               src/execution   paper / exchange 券商       │
+│ Backtest                src/backtest    多标的回测                   │
+├──────────────────────────────────────────────────────────────────┤
+│ Exchanges               src/exchanges   适配器 + 连接管理 + 密钥       │  数据/交易
+│ Watchlist               src/watchlist   自选标的                      │
+├──────────────────────────────────────────────────────────────────┤
+│ Core                    src/core        事件总线 / 类型 / 日志        │  内核
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+## 交易所适配层
+
+`ExchangeAdapter` 是行情与交易的唯一抽象（`src/exchanges/types.ts`）：
+
+```ts
+interface ExchangeAdapter {
+  meta: AdapterMeta;                       // 名称、品类、能力、密钥字段、周期
+  init(cred): void;                         // 注入密钥与测试网开关
+  testConnection(): Promise<ConnectionTest>;
+  searchSymbols(q, limit?): Promise<SymbolInfo[]>;
+  fetchTickers(symbols): Promise<Ticker[]>;
+  fetchKlines(symbol, interval, limit): Promise<Bar[]>;
+  placeOrder?(req): Promise<OrderResult>;   // 可选：仅支持交易的适配器实现
+}
+```
+
+新增交易所只需实现该接口并在 `registry.ts` 注册，UI 的目录、连接表单、周期下拉会自动出现。
+
+**连接与密钥分离**：
+
+- `Connection`（元信息）→ `data/connections.json`
+- 密钥 → `data/secrets.json`（0600，`data/` 已在 `.gitignore`）
+- `ConnectionView` 只暴露 `hasKey/hasSecret`，API 响应永远不含明文密钥
+
+**实盘降级链**：`execution.mode=live` 且适配器 `supportsTrading` 且已配 Key → `ExchangeBroker`；
+否则自动使用 `PaperBroker`，并在日志中告警、界面顶栏显示「模拟成交」。
 
 ## 通信约定
 
-Agent 之间**不允许**直接引用对方实例（装配层 `orchestrator.ts` 与控制器除外），一律通过 EventBus 广播：
+Agent 之间不允许直接引用对方实例（装配层除外），一律经 EventBus 广播：
 
 | Topic | 载荷 | 生产者 | 消费者 |
 | --- | --- | --- | --- |
@@ -30,33 +59,55 @@ Agent 之间**不允许**直接引用对方实例（装配层 `orchestrator.ts` 
 | `agent.market_view` | `MarketView` | `MarketAnalystAgent` | `StrategistAgent` |
 | `strategy.signal` | `Signal` | `StrategistAgent` | `RiskGuardAgent` |
 | `exec.order_intent` | `OrderIntent` | `RiskGuardAgent` | Broker |
-| `exec.order_rejected` | `Signal | OrderIntent` | 各处 | 监控（预留） |
+| `exec.order_rejected` | `Signal \| OrderIntent` | 各处 | 监控（预留） |
 | `exec.fill` | `Fill` | Broker | `PortfolioManager` |
 
-- `publish` 同步派发；`publishAsync` 顺序 await 每个处理器，流水线统一使用后者保证顺序确定。
-- EventBus 全量留痕（上限 5000），WebUI 事件流即由控制器转发而来。
+- `publish` 同步派发；`publishAsync` 顺序 await 每个处理器，流水线统一用后者保证顺序确定。
+- Broker 在 `buildPipeline` 中订阅 `exec.order_intent`，成交后广播 `exec.fill`。
 
 ## 关键流程
 
-**回测**：`runBacktest(config)` → `buildPipeline` → 一次性 `fetchBars` → `streamBars` 逐根广播 → 汇总 `metrics`。
+**回测**：`runBacktest(config, {adapter, symbols, bars, interval, liveTrading})`
+→ `buildPipeline` → 各标的并发拉 K 线 → `mergeBarsByTime` 归并为全局时间序列 → 逐根 `streamBars` → 汇总指标。
 
-**实时**：`EngineController.start('live')` → 先拉 `bar_count` 根预热 → `LivePoller` 每 `poll_ms` 拉新收盘 K 线 → 广播 → 刷新状态 → 回撤越限自动 `stop()`。
+**实时**：`EngineController.start({mode:'live'})` → 拉 `bar_count` 根预热 → `LivePoller` 每 `poll_ms`
+轮询各标的最新 2 根 K 线，仅广播新 K 线 → 刷新状态 → 回撤越限 `stop()`；另有一条 10s 定时器刷新行情快照供顶栏。
 
-**LLM 决策**：`LLMStrategy` 包装饰动量基线；命中 `decision_interval` 时才请求 LLM，输出 JSON 决策；失败/非法 → 回落基线并打 `[fallback]` 标记。
+**多标的**：K 线先按 `timestamp` 全局排序再广播，因此组合层在同一时刻只看到一个标的一根 K 线，跨标的调仓顺序确定。
 
-**实盘下单**：`BinanceBroker` 仅当 `broker=binance && dryRun=false && Key 齐全` 时真实签名下单；否则以 dry-run 路径本地模拟成交并告警。
+## WebUI 结构
 
-## 如何扩展
+```
+web/src/
+├── App.tsx                 # 壳：侧边导航 + 顶栏 + 页面路由（state 驱动，无路由库）
+├── state/useAppStore.ts    # 全局状态：引擎快照 + SSE + 连接/自选缓存 + Toast
+├── api.ts                  # REST 客户端 + EventSource 订阅
+├── pages/                  # dashboard / markets / exchanges / strategy / llm / risk / system
+├── components/             # Shell / 图表 / 表格 / 事件流 / 运行控制 / UI 原子组件
+└── lib/format.ts           # 金额、百分比、数量、时间的统一格式化
+```
 
-- **新数据源**：实现 `DataSource.fetchBars()`，在 `binanceSource.ts` 的 `createDataSource` 注册。
-- **新策略**：实现 `Strategy.generate(ctx)`（可 async，可注入 LLM），在 `orchestrator.ts` 选择。
-- **新 Agent**：继承 `Agent`，实现 `subscriptions()` 返回「Topic -> 处理方法」，在 `buildPipeline` 装配。
-- **新券商**：实现 `Broker.submit(intent)`，订阅 `exec.order_intent`、广播 `exec.fill`。
-- **新 LLM**：实现 `LLMClient.complete(prompt)`，在 `createLLMClient` 注册（非 OpenAI 兼容的本地模型亦可）。
+- 实时性靠 SSE：`state` 事件整体刷新，`event` 事件增量追加到事件流（保留最近 300 条）。
+- 所有页面共享同一个 `useAppStore`，切换页面不丢状态、不重复请求。
+
+## 安全与一致性
+
+- **密钥三不原则**：不进配置文件、不进日志、不进 API 响应（`redactConfig` + `ConnectionView`）。
+- **标记价一致性**：持仓浮盈用本次运行的 `prices`（PriceBook 快照），不用实时报价，
+  避免回测时用现价与历史成本混算产生虚假盈亏。
+- **类型严格**：`strict` + `noUncheckedIndexedAccess`，数组与字典访问显式判空。
+- **可复现**：模拟交易所行情由 symbol 哈希决定种子，同一代码价格轨迹固定。
 
 ## 设计取舍
 
-- **同步事件总线**：回测/实盘同构、可复现；单标的、分钟级频率下性能足够。
-- **TypeScript 严格模式 + `noUncheckedIndexedAccess`**：数组/映射访问显式判空，杜绝运行时 `undefined`。
-- **密钥三不原则**：不进配置文件、不进日志、不进 API 响应（`redactConfig` 脱敏）。
-- **零运行时重型依赖**：服务端仅 `express` / `js-yaml` / `dotenv`；图表为手写 SVG，无 UI 框架债。
+- **同步事件总线**：回测/实盘同构、可复现；分钟级、少量标的足够。高频场景可在 Broker 边界换异步实现，内核不动。
+- **交易所内聚**：交易与行情都收敛到适配器，Agent 层完全不感知具体交易所。
+- **零重型运行时依赖**：服务端仅 `express` / `js-yaml` / `dotenv`；图表为手写 SVG，无 UI 框架债。
+- **日志环形缓冲**：`core/logger` 保留最近 1000 条，`/api/logs` 供系统页查看，避免额外日志文件依赖。
+
+## 如何扩展
+
+- **新交易所**：实现 `ExchangeAdapter`，在 `registry.ts` 的 `createAdapter` 与 `listAdapterMetas` 注册。
+- **新策略**：实现 `Strategy.generate(ctx)`（可 async、可注入 LLM），在 `orchestrator.ts` 选择。
+- **新 Agent**：继承 `Agent`，实现 `subscriptions()`，在 `buildPipeline` 装配。
+- **新页面**：`web/src/pages` 加文件，在 `App.tsx` 的 `NAV` 与 `render()` 中登记。

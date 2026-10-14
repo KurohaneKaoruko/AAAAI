@@ -1,9 +1,77 @@
-/** 与后端 EngineState 对齐的视图模型。 */
+/** 与后端 API 对齐的类型。 */
+
+export type AssetClass = "crypto" | "stock";
+export type EngineStatus = "idle" | "running" | "stopped" | "error";
+export type EngineMode = "backtest" | "live";
+
+export interface AdapterMeta {
+  id: string;
+  name: string;
+  assetClass: AssetClass | "mixed";
+  description: string;
+  requiresKeys: boolean;
+  supportsTrading: boolean;
+  supportsTestnet: boolean;
+  klineIntervals: string[];
+  keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
+  notes?: string[];
+}
+
+export interface Connection {
+  id: string;
+  adapterId: string;
+  label: string;
+  testnet: boolean;
+  enabled: boolean;
+  createdAt: string;
+  hasKey: boolean;
+  hasSecret: boolean;
+  adapter: AdapterMeta;
+}
+
+export interface SymbolInfo {
+  symbol: string;
+  name: string;
+  assetClass: AssetClass;
+  currency: string;
+  lotSize: number;
+  pricePrecision: number;
+  qtyPrecision: number;
+}
+
+export interface Ticker {
+  symbol: string;
+  price: number;
+  changePct: number;
+  volume: number;
+  timestamp: number;
+}
+
+export interface WatchItem {
+  id: string;
+  symbol: string;
+  name: string;
+  assetClass: AssetClass;
+  currency: string;
+  connectionId: string;
+  addedAt: string;
+}
 
 export interface Position {
   symbol: string;
   quantity: number;
   avgCost: number;
+}
+
+export interface TradeRecord {
+  id: number;
+  timestamp: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  fee: number;
+  realizedPnl: number;
 }
 
 export interface EquityPoint {
@@ -27,9 +95,25 @@ export interface EngineEventLine {
   summary: string;
 }
 
-export interface EngineConfig {
+export type LLMSection = AppConfig["llm"];
+export type RiskSection = AppConfig["risk"];
+export type StrategySection = AppConfig["strategy"];
+
+export interface AppConfig {
   app: { name: string; logLevel: string };
-  market: { source: string; symbols: string[]; interval: string; barCount: number };
+  server: { host: string; port: number };
+  market: { symbols: string[]; interval: string; barCount: number; pollMs: number };
+  llm: {
+    enabled: boolean;
+    provider: string;
+    baseUrl: string;
+    apiKeyEnv: string;
+    apiKey: string;
+    model: string;
+    temperature: number;
+    timeoutMs: number;
+    decisionInterval: number;
+  };
   strategy: { name: string; fastWindow: number; slowWindow: number; maxTargetWeight: number };
   risk: {
     initialCash: number;
@@ -39,25 +123,30 @@ export interface EngineConfig {
     maxPositionWeight: number;
     maxDrawdownPct: number;
   };
-  execution: { broker: string; dryRun: boolean; baseUrl: string };
-  llm: { enabled: boolean; model: string; apiKey: string };
+  execution: { mode: "paper" | "live"; connectionId: string };
 }
 
 export interface EngineState {
-  status: "idle" | "running" | "stopped" | "error";
-  mode: "backtest" | "live" | null;
-  symbol: string | null;
+  status: EngineStatus;
+  mode: EngineMode | null;
+  symbols: string[];
+  connectionId: string | null;
+  connectionLabel: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
   metrics: PortfolioMetrics | null;
   positions: Position[];
+  trades: TradeRecord[];
+  tickers: Ticker[];
+  /** 本次运行各标的标记价 */
   prices: Record<string, number>;
   equityCurve: EquityPoint[];
   events: EngineEventLine[];
   broker: { name: string; paper: boolean } | null;
   strategy: string | null;
-  config: EngineConfig;
+  realizedPnl: number;
+  config: AppConfig;
 }
 
 export type Broadcast =

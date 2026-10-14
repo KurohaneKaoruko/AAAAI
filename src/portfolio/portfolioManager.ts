@@ -1,18 +1,21 @@
-/** 组合管理：现金、持仓、权益曲线、回撤统计。 */
+/** 组合管理：现金、持仓、权益曲线、成交流水与已实现盈亏。 */
 
 import { EventBus, Topic } from "../core/eventBus.js";
 import type {
   Bar,
   EquityPoint,
   Fill,
-  OrderIntent,
   PortfolioMetrics,
   PortfolioSnapshot,
   Position,
+  Side,
+  TradeRecord,
 } from "../core/types.js";
 import { getLogger } from "../core/logger.js";
 
 const log = getLogger("portfolio");
+
+export type { TradeRecord };
 
 export class PortfolioManager {
   cash: number;
@@ -21,6 +24,8 @@ export class PortfolioManager {
   private curve: EquityPoint[] = [];
   private peak: number;
   private fills = 0;
+  private tradeSeq = 0;
+  private trades: TradeRecord[] = [];
 
   constructor(
     private readonly bus: EventBus,
@@ -45,28 +50,45 @@ export class PortfolioManager {
     const notional = Math.abs(signed) * fill.price;
     this.cash += (order.side === "BUY" ? -notional : notional) - fill.fee;
 
+    let realizedPnl = 0;
     const newQty = pos.quantity + signed;
     if (Math.abs(newQty) < 1e-9) {
+      // 清仓：轧差结算
+      if (order.side === "SELL") realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
       this.positions.delete(order.symbol);
     } else {
       const sameDirection = pos.quantity === 0 || Math.sign(pos.quantity) === Math.sign(signed);
       if (sameDirection) {
+        // 加仓：滚动均价
         const total = Math.abs(pos.quantity) * pos.avgCost + Math.abs(signed) * fill.price;
         pos.avgCost = total / Math.abs(newQty);
       } else {
-        pos.avgCost = fill.price;
+        // 减仓：已实现盈亏，均价不变
+        realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
+        pos.avgCost = pos.avgCost;
       }
       pos.quantity = newQty;
       this.positions.set(order.symbol, pos);
     }
     this.fills += 1;
+    this.tradeSeq += 1;
+    this.trades.push({
+      id: this.tradeSeq,
+      timestamp: fill.timestamp.toISOString(),
+      symbol: order.symbol,
+      side: order.side,
+      quantity: order.quantity,
+      price: fill.price,
+      fee: fill.fee,
+      realizedPnl,
+    });
+    if (this.trades.length > 500) this.trades.shift();
     log.debug(
-      "成交 %s %s %.6f @ %.4f (fee %.4f)",
+      "成交 %s %s %s @ %s",
       order.side,
       order.symbol,
-      order.quantity,
-      fill.price,
-      fill.fee,
+      order.quantity.toFixed(6),
+      fill.price.toFixed(4),
     );
   }
 
@@ -101,6 +123,16 @@ export class PortfolioManager {
 
   equityCurve(): EquityPoint[] {
     return [...this.curve];
+  }
+
+  /** 成交流水（新->旧）。 */
+  tradeHistory(): TradeRecord[] {
+    return [...this.trades].reverse();
+  }
+
+  /** 累计已实现盈亏。 */
+  realizedPnl(): number {
+    return this.trades.reduce((sum, t) => sum + t.realizedPnl, 0);
   }
 
   snapshot(): PortfolioSnapshot {
