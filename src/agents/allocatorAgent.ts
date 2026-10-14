@@ -27,6 +27,13 @@ export interface AssetAllocator {
   allocate(snapshots: AssetSnapshot[]): Promise<AllocationResult>;
 }
 
+/** 逐标的决策的回调（混合决策下：分析一次，再逐标的让决策模型定档位）。 */
+export interface PerSymbolDecision {
+  weights: Record<string, number>;
+  confidence: number;
+  reason: string;
+}
+
 export interface AllocatorOptions {
   fastWindow: number;
   slowWindow: number;
@@ -37,6 +44,8 @@ export interface AllocatorOptions {
   limits: AllocationLimits;
   allocator: AssetAllocator;
   portfolio: PortfolioManager;
+  /** 给了它就走逐标的决策（不走资产配置器） */
+  perSymbolDecide?: (snapshots: AssetSnapshot[]) => Promise<PerSymbolDecision>;
 }
 
 export class AllocatorAgent extends Agent {
@@ -48,7 +57,8 @@ export class AllocatorAgent extends Agent {
   private round = new Set<string>();
   /** 上一轮的标的集合，用来判断本轮是否收齐 */
   private expected = new Set<string>();
-  private decisions = 0;
+  /** 已完成的有效轮次（预热未结束不计），用于按 interval 节流 */
+  private rounds = 0;
   private busy = false;
 
   constructor(
@@ -71,38 +81,43 @@ export class AllocatorAgent extends Agent {
 
   private async onBar(bar: Bar): Promise<void> {
     const list = this.bars.get(bar.symbol) ?? [];
-    if (list.length > 0 && bar.timestamp.getTime() > list[list.length - 1]!.timestamp.getTime()) {
-      // 新的时间戳 = 上一轮结束。若上一轮没收齐（如实盘轮询缺某个标的），先把已有数据用掉。
-      if (this.round.size > 0) await this.decide(list[list.length - 1]!.timestamp);
-      this.expected = new Set(this.round);
-      this.round = new Set();
-    }
-    this.round.add(bar.symbol);
+    const isNewRound = list.length === 0 || bar.timestamp.getTime() > list[list.length - 1]!.timestamp.getTime();
 
     list.push(bar);
     if (list.length > BUFFER) list.shift();
     this.bars.set(bar.symbol, list);
 
-    // 本轮收齐（模拟盘/回测下所有标的同一时间戳）时立刻决策
-    if (this.expected.size > 0 && this.round.size >= this.expected.size) {
-      await this.decide(bar.timestamp);
-    }
+    // 每个时间戳只决策一次：
+    // 多个标的共享同一时间戳时，等这一批都到齐再决策；实盘轮询缺标的时，
+    // 下一个时间戳到来时用已有数据决策，不无限等待。
+    this.round.add(bar.symbol);
+    if (!isNewRound) return;
+    const previousTs = list.length > 1 ? list[list.length - 2]!.timestamp : bar.timestamp;
+    const complete = this.expected.size > 0 && this.round.size >= this.expected.size;
+    if (this.round.size > 1 && !complete) return;
+    this.expected = new Set(this.round);
+    this.round = new Set();
+    await this.decide(previousTs);
   }
 
-  /** 一轮行情 = 一次资产配置。 */
+  /** 一轮行情 = 一次决策机会；按 interval 节流后再真正调用模型。 */
   private async decide(timestamp: Date): Promise<void> {
-    if (this.decisions % Math.max(1, this.opts.interval) !== 0) return;
+    // 预热未完成时不计入节流计数，保证预热一结束就能做第一次决策
+    if (this.snapshots().length === 0) return;
+    const due = this.rounds % Math.max(1, this.opts.interval) === 0;
+    this.rounds += 1;
+    if (!due) return;
     if (this.busy) {
-      log.debug("上一轮配置仍在进行，跳过本轮");
+      log.debug("上一轮决策仍在进行，跳过本轮");
       return;
     }
     const snapshots = this.snapshots();
-    if (snapshots.length === 0) return;
 
     this.busy = true;
-    this.decisions += 1;
     try {
-      const result = await this.opts.allocator.allocate(snapshots);
+      const result = this.opts.perSymbolDecide
+        ? await this.decidePerSymbol(snapshots)
+        : await this.opts.allocator.allocate(snapshots);
       const allocation: Allocation = {
         timestamp,
         weights: result.weights,
@@ -125,6 +140,30 @@ export class AllocatorAgent extends Agent {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** 逐标的决策：权重直接给到标的级，无需再走资产配置的额度裁剪。 */
+  private async decidePerSymbol(snapshots: AssetSnapshot[]): Promise<AllocationResult> {
+    const r = await this.opts.perSymbolDecide!(snapshots);
+    const sum = Object.values(r.weights).reduce((a, b) => a + b, 0);
+    const clamped: Record<string, number> = {};
+    for (const [symbol, w] of Object.entries(r.weights)) {
+      const capped = Math.min(w, this.opts.limits.maxPositionWeight);
+      if (capped > 0) clamped[symbol] = Number(capped.toFixed(6));
+    }
+    const total = Object.values(clamped).reduce((a, b) => a + b, 0);
+    if (total > this.opts.limits.grossCap) {
+      const scale = this.opts.limits.grossCap / total;
+      for (const k of Object.keys(clamped)) clamped[k] = Number(((clamped[k] ?? 0) * scale).toFixed(6));
+    }
+    return {
+      weights: clamped,
+      cashWeight: Number(Math.max(0, 1 - Math.min(total, this.opts.limits.grossCap)).toFixed(6)),
+      confidence: r.confidence,
+      reason: r.reason,
+      source: "hybrid",
+      notes: [],
+    };
   }
 
   /** 拆成逐标的信号：被选中的给目标权重，已持有但落选的给 0（触发清仓）。 */

@@ -9,78 +9,10 @@ import type { BalanceStrategy } from "./llm/llmManager.js";
 
 const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random", "latency"]);
 
-const DECISION_SOURCES = new Set<DecisionSource>(["rules", "chat", "systemone"]);
+const DECISION_SOURCES = new Set<DecisionSource>(["rules", "chat", "systemone", "hybrid"]);
 
 function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
-}
-
-/**
- * 读取混合决策配置：
- * - decision_sources：参与决策的来源列表；缺省用 decision_source 单选；
- * - blend：各来源配比；缺省给选中项等权。
- * 返回对象会展开进 strategy 小节。
- */
-function sourcesOf(
-  raw: Record<string, unknown>,
-  fallback: DecisionSource,
-): { sources: DecisionSource[]; blend: Record<DecisionSource, number> } {
-  const list = Array.isArray(raw.strategy ? (raw.strategy as Record<string, unknown>).decision_sources : undefined)
-    ? ((raw.strategy as Record<string, unknown>).decision_sources as unknown[])
-        .map((v) => String(v))
-        .filter((v): v is DecisionSource => DECISION_SOURCES.has(v as DecisionSource))
-    : [];
-  const sources = list.length > 0 ? [...new Set(list)] : [fallback];
-
-  const rawBlend = (raw.strategy as Record<string, unknown> | undefined)?.blend;
-  const blend: Record<DecisionSource, number> = { rules: 0, chat: 0, systemone: 0 };
-  if (rawBlend && typeof rawBlend === "object") {
-    for (const key of Object.keys(blend) as DecisionSource[]) {
-      const v = Number((rawBlend as Record<string, unknown>)[key]);
-      if (Number.isFinite(v) && v >= 0) blend[key] = v;
-    }
-  }
-  const anyPositive = sources.some((s) => blend[s] > 0);
-  if (!anyPositive) {
-    for (const s of sources) blend[s] = 1;
-  }
-  return { sources, blend };
-}
-
-/**
- * 归一化决策路：sources / blend / decisionSource 三者可能不同步
- * （例如只改了 decisionSource），这里以「sources 为主、decisionSource 兜底」对齐。
- * 返回的配比保证：至少一路 > 0，且 sources 之外的路权重为 0。
- */
-export function resolveDecisionLanes(strategy: {
-  decisionSource: DecisionSource;
-  sources: DecisionSource[];
-  blend: Record<DecisionSource, number>;
-}): { sources: DecisionSource[]; blend: Record<DecisionSource, number> } {
-  // decisionSource 不在 sources 里 -> 旧式单路配置（只改过 decision_source），
-  // 此时以 decisionSource 为准，避免出现「选了 chat 但配比为 0」的诡异状态。
-  if (!strategy.sources.includes(strategy.decisionSource)) {
-    return {
-      sources: [strategy.decisionSource],
-      blend: { rules: 0, chat: 0, systemone: 0, [strategy.decisionSource]: 1 },
-    };
-  }
-
-  const sources: DecisionSource[] = [];
-  for (const s of [...strategy.sources, strategy.decisionSource]) {
-    if (DECISION_SOURCES.has(s) && !sources.includes(s)) sources.push(s);
-  }
-  if (sources.length === 0) sources.push("rules");
-
-  const blend: Record<DecisionSource, number> = { rules: 0, chat: 0, systemone: 0 };
-  for (const s of sources) {
-    const v = Number(strategy.blend?.[s] ?? 0);
-    if (Number.isFinite(v) && v > 0) blend[s] = v;
-  }
-  if (sources.every((s) => blend[s] === 0)) {
-    for (const s of sources) blend[s] = 1;
-  }
-  return { sources, blend };
 }
 
 /** 限制到 0~1。 */
@@ -129,8 +61,14 @@ export interface LLMSection {
   strategy: BalanceStrategy;
 }
 
-/** 智能体决策来源：纯规则 / 对话模型 / System One 决策模型 */
-export type DecisionSource = "rules" | "chat" | "systemone";
+/**
+ * 智能体决策来源：
+ * - rules      纯规则：双均线动量本地计算
+ * - chat       对话模型：大模型直接给每个标的的目标仓位
+ * - systemone  决策模型：System One 逐标的定档位，档位概率换算仓位
+ * - hybrid     混合决策：大模型分析行情 -> 决策模型据此定仓位（职责分离）
+ */
+export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
 
 export interface StrategySection {
   /** 决策来源（三选一），决定智能体由谁做仓位决策 */
@@ -148,10 +86,13 @@ export interface StrategySection {
   maxGrossExposure: number;
   /** 每 N 轮行情做一次资产配置 */
   allocationInterval: number;
-  /** 参与决策的来源（可多路 = 混合决策），至少一路 */
-  sources: DecisionSource[];
-  /** 各来源配比（>=0，0 = 不参与）；sources 里没有的路忽略 */
-  blend: Record<DecisionSource, number>;
+  /**
+   * 混合决策：大模型分析结论对决策模型的影响力（0~1）。
+   * 0 = 决策模型看不到分析；0.5 = 参考；1 = 以分析结论为主要依据。
+   */
+  hybridInfluence: number;
+  /** 混合决策：分析结论的有效期（秒），期内不重复调用大模型 */
+  hybridAnalysisTtlMs: number;
 }
 
 export interface RiskSection {
@@ -243,10 +184,8 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       maxPositions: Math.max(1, Math.round(num(raw, ["strategy", "max_positions"], 3))),
       maxGrossExposure: clamp01(num(raw, ["strategy", "max_gross_exposure"], 1)),
       allocationInterval: Math.max(1, Math.round(num(raw, ["strategy", "allocation_interval"], 5))),
-      ...sourcesOf(
-        raw,
-        safeDecisionSource(str(raw, ["strategy", "decision_source"], bool(raw, ["llm", "enabled"], false) ? "chat" : "rules")),
-      ),
+      hybridInfluence: clamp01(num(raw, ["strategy", "hybrid_influence"], 0.6)),
+      hybridAnalysisTtlMs: Math.max(0, num(raw, ["strategy", "hybrid_analysis_ttl_ms"], 60_000)),
     },
     risk: {
       initialCash: num(raw, ["risk", "initial_cash"], 100000),
@@ -307,8 +246,8 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       max_positions: config.strategy.maxPositions,
       max_gross_exposure: config.strategy.maxGrossExposure,
       allocation_interval: config.strategy.allocationInterval,
-      decision_sources: config.strategy.sources,
-      blend: config.strategy.blend,
+      hybrid_influence: config.strategy.hybridInfluence,
+      hybrid_analysis_ttl_ms: config.strategy.hybridAnalysisTtlMs,
     },
     risk: {
       initial_cash: config.risk.initialCash,

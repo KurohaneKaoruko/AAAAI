@@ -18,6 +18,8 @@ export interface BotStrategy {
   maxGrossExposure: number;
   /** 每 N 轮行情配置一次 */
   allocationInterval: number;
+  /** 混合决策：分析结论对决策模型的影响力（0~1） */
+  hybridInfluence: number;
 }
 
 /** 机器人的风控参数（覆盖全局 risk）。 */
@@ -44,12 +46,8 @@ export interface BotConfig {
   barCount: number;
   /** 轮询间隔（毫秒，实时模式） */
   pollMs: number;
-  /** 决策来源（主路；混合决策时取第一路） */
+  /** 决策来源：rules | chat | systemone | hybrid */
   decisionSource: DecisionSource;
-  /** 参与决策的路：纯规则 / 对话模型 / System One，可多路按配比融合 */
-  sources: DecisionSource[];
-  /** 各路配比（>=0，0 = 不参与） */
-  blend: Record<DecisionSource, number>;
   /** 本机器人专用的模型实例 ID 列表（留空 = 用该类型的全部实例） */
   modelProfileIds: string[];
   /** 每 N 根 K 线问一次模型 */
@@ -128,8 +126,6 @@ export interface BotInput {
   barCount?: number;
   pollMs?: number;
   decisionSource?: DecisionSource;
-  sources?: DecisionSource[];
-  blend?: Partial<Record<DecisionSource, number>>;
   modelProfileIds?: string[];
   decisionInterval?: number;
   strategy?: Partial<BotStrategy>;

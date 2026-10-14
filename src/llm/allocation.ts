@@ -1,7 +1,6 @@
 /**
  * 资产配置（AI 自己选资产/配权重）的 Prompt 构造与输出解析。
- *
- * 传入 JointBoard 时，prompt 会带上另一路模型的判断，实现「对话模型 + 决策模型一起决策」。
+
  *
  * 与「单标的仓位决策」（llmClient.ts）的区别：
  * - 单标的决策：模型只回答「这个标的多重」，标的由人指定；
@@ -12,8 +11,7 @@
  *     "confidence": 0.6, "reason": "..." }
  */
 
-import type { DecisionSource } from "../configSchema.js";
-import type { JointBoard } from "./jointBoard.js";
+
 
 /** 模型给出的原始资产配置（尚未做上限裁剪）。 */
 export interface AllocationDecision {
@@ -62,7 +60,6 @@ export interface NormalizedAllocation {
 export function buildAllocationPrompt(
   snapshots: AssetSnapshot[],
   limits: AllocationLimits,
-  board?: { board: JointBoard; source: DecisionSource },
 ): string {
   const rows = snapshots
     .map((s) =>
@@ -80,13 +77,11 @@ export function buildAllocationPrompt(
     )
     .join("\n");
 
-  const others = board ? board.board.renderOthers(board.source) : "";
   return [
     "你是一名资产配置经理，需要为组合决定下一轮的资金分配。",
     "",
     "候选资产技术面（由已发生的 K 线计算，没有未来信息）：",
     rows,
-    others,
     "",
     "硬性约束：",
     `- 最多持有 ${limits.maxPositions} 个资产；`,

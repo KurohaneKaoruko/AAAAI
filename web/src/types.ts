@@ -106,7 +106,7 @@ export type LLMSection = AppConfig["llm"];
 export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
-export type DecisionSource = "rules" | "chat" | "systemone";
+export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
 
 export interface PoolCounts {
   chat: { total: number; available: number };
@@ -206,24 +206,19 @@ export interface Bot {
   interval: string;
   barCount: number;
   pollMs: number;
-  /** 主决策路（sources 的第一路） */
   decisionSource: DecisionSource;
-  /** 参与决策的路（混合决策可多路） */
-  sources: DecisionSource[];
-  /** 各路配比，0 = 不参与 */
-  blend: Record<DecisionSource, number>;
   modelProfileIds: string[];
   decisionInterval: number;
   strategy: {
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
-    sources: DecisionSource[];
-    blend: Record<DecisionSource, number>;
     selfAllocating: boolean;
     maxPositions: number;
     maxGrossExposure: number;
     allocationInterval: number;
+    /** 混合决策：分析结论对决策模型的影响力（0~1） */
+    hybridInfluence: number;
   };
   risk: {
     initialCash: number;
@@ -258,8 +253,6 @@ export interface BotInput {
   barCount?: number;
   pollMs?: number;
   decisionSource?: DecisionSource;
-  sources?: DecisionSource[];
-  blend?: Partial<Record<DecisionSource, number>>;
   modelProfileIds?: string[];
   decisionInterval?: number;
   strategy?: {
@@ -270,6 +263,7 @@ export interface BotInput {
     maxPositions?: number;
     maxGrossExposure?: number;
     allocationInterval?: number;
+    hybridInfluence?: number;
   };
   risk?: {
     initialCash?: number;
@@ -341,15 +335,14 @@ export interface AppConfig {
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
-    /** 参与决策的路（混合决策可多路） */
-    sources: DecisionSource[];
-    /** 各路配比，0 = 不参与 */
-    blend: Record<DecisionSource, number>;
     /** AI 在候选池里自行选资产并配权重 */
     selfAllocating: boolean;
     maxPositions: number;
     maxGrossExposure: number;
     allocationInterval: number;
+    /** 混合决策：分析结论对决策模型的影响力（0~1） */
+    hybridInfluence: number;
+    hybridAnalysisTtlMs: number;
   };
   risk: {
     initialCash: number;

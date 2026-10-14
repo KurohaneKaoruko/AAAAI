@@ -41,8 +41,8 @@ test("机器人：可创建多个，各自保存独立配置", () => {
     assert.equal(bots.get(b.id)!.name, "A股改");
     assert.equal(bots.get(b.id)!.strategy.slowWindow, 9);
     assert.equal(bots.get(b.id)!.risk.initialCash, 5000);
-    // 规则路标注为纯规则，并显示配比
-    assert.deepEqual(bots.list()[0]!.modelLabels, ["规则 100%"]);
+    // 纯规则机器人标注清楚
+    assert.deepEqual(bots.list()[0]!.modelLabels, ["双均线动量（纯规则）"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -202,10 +202,9 @@ test("机器人：配置持久化到 bots.json，重启后仍在", async () => {
     assert.deepEqual(loaded[0]!.modelProfileIds, ["abc"]);
     assert.equal(loaded[0]!.state.status, "idle");
     assert.equal(loaded[0]!.state.events.length, 0);
-    // 指定了不存在的模型实例 -> 明确标出「未配置，不参与」
+    // 指定了不存在的模型实例 -> 明确标出未配置
     assert.match(loaded[0]!.modelLabels.join(" "), /对话模型.*未配置/);
-    assert.deepEqual(loaded[0]!.sources, ["chat"]);
-    assert.equal(loaded[0]!.blend.chat, 1);
+    assert.equal(loaded[0]!.decisionSource, "chat");
     assert.equal(created.id, loaded[0]!.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });

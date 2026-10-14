@@ -1,10 +1,12 @@
 /**
- * 智能体决策来源：可多选，按配比融合（混合决策）。
+ * 智能体决策来源：四选一，其中「混合决策」是独立设计的一条流水线。
  *
- * 这是全局唯一的「谁在做决策」开关，放在策略页顶部常驻：
- * - 只勾「纯规则」= 老样子，零成本；
- * - 勾「对话模型 + 决策模型」= 混合决策，两路各出权重后按配比融合；
- * - 勾多路但某类模型没配实例，该路自动退出，配比让给其余路（页面会提前标出来）。
+ *   纯规则     本地双均线动量，不调模型
+ *   对话模型   大模型直接给每个标的的目标仓位
+ *   决策模型   System One 逐标的定档位，档位概率换算仓位
+ *   混合决策   大模型分析行情 → 决策模型拿分析做仓位决策（职责分离，不投票）
+ *
+ * 原则：不做「勾了却没用」的死选项——没配模型实例的类型直接禁用并说明原因。
  */
 
 import type { DecisionSource } from "../types";
@@ -20,21 +22,14 @@ interface Option {
   desc: string;
 }
 
-export const SOURCE_OPTIONS: Option[] = [
+const OPTIONS: Option[] = [
+  { value: "rules", label: "纯规则", desc: "双均线动量本地计算，不调用任何模型。最快、最稳、零成本。" },
+  { value: "chat", label: "对话模型", desc: "大模型看行情后，直接给出每个标的的目标仓位。" },
+  { value: "systemone", label: "决策模型", desc: "System One（Jev / Laya / 百炼）逐标的定档位，低延迟。" },
   {
-    value: "rules",
-    label: "纯规则",
-    desc: "双均线动量本地计算，不调用任何模型。最快、最稳、零成本。",
-  },
-  {
-    value: "chat",
-    label: "对话模型",
-    desc: "OpenAI 兼容大模型，按负载均衡调度，失败自动回退规则。",
-  },
-  {
-    value: "systemone",
-    label: "决策模型",
-    desc: "System One（Jev / Laya / 百炼），低延迟、结构化输出。",
+    value: "hybrid",
+    label: "混合决策",
+    desc: "大模型只做行情分析（不给仓位），决策模型拿这份分析定仓位。两步各司其职，不投票。",
   },
 ];
 
@@ -42,88 +37,81 @@ export const SOURCE_ZH: Record<DecisionSource, string> = {
   rules: "纯规则",
   chat: "对话模型",
   systemone: "决策模型",
+  hybrid: "混合决策",
 };
 
-/** 归一化后的配比（%），用于展示。 */
-export function ratioPct(
-  sources: DecisionSource[],
-  blend: Record<DecisionSource, number>,
-): { source: DecisionSource; pct: number }[] {
-  const total = sources.reduce((acc, s) => acc + (blend[s] ?? 0), 0) || 1;
-  return sources.map((s) => ({ source: s, pct: Math.round(((blend[s] ?? 0) / total) * 100) }));
-}
+/** 分析影响力滑杆的档位说明。 */
+const INFLUENCE_STEPS = [
+  { v: 0, label: "不参考", hint: "决策模型看不到分析，完全独立决策" },
+  { v: 30, label: "弱参考", hint: "分析结论作为附带参考" },
+  { v: 60, label: "重要参考", hint: "分析结论是重要依据，冲突时以决策模型为准" },
+  { v: 100, label: "主要依据", hint: "决策模型以分析结论为主要依据" },
+];
 
 export function DecisionSourceSwitch({
-  sources,
-  blend,
+  value,
+  influence,
   counts,
   busy,
   onChange,
 }: {
-  sources: DecisionSource[];
-  blend: Record<DecisionSource, number>;
+  value: DecisionSource;
+  influence: number;
   counts: PoolCounts | null;
   busy: boolean;
-  onChange: (next: { sources: DecisionSource[]; blend: Record<DecisionSource, number> }) => void;
+  onChange: (next: { source: DecisionSource; influence: number }) => void;
 }) {
-  const badge = (v: DecisionSource): string | null => {
-    if (v === "rules" || !counts) return null;
-    const pool = counts[v];
-    if (pool.total === 0) return "未配置";
-    return pool.available === 0 ? "无可用" : `${pool.available}/${pool.total} 可用`;
+  const ready = (v: DecisionSource): boolean => {
+    if (v === "rules") return true;
+    if (v === "hybrid") return ready("chat") && ready("systemone");
+    const pool = counts?.[v];
+    return Boolean(pool && pool.total > 0 && pool.available > 0);
   };
 
-  const active: DecisionSource[] = sources.length > 0 ? sources : ["rules"];
-  const total: number = active.reduce((acc, s) => acc + (blend[s] ?? 0), 0) || 1;
-
-  const toggle = (v: DecisionSource) => {
-    const on = active.includes(v);
-    if (on && active.length === 1) return; // 至少留一路
-    const nextSources = on ? active.filter((s) => s !== v) : [...active, v];
-    const nextBlend = { ...blend };
-    if (!on) nextBlend[v] = nextBlend[v] > 0 ? nextBlend[v] : 1; // 新勾选的默认给 1
-    if (on) nextBlend[v] = 0;
-    onChange({ sources: nextSources, blend: nextBlend });
-  };
-
-  // 配比存相对权重，展示时才归一成百分比；只有一路时配比无意义，不给调。
-  const setRatio = (v: DecisionSource, raw: number) => {
-    if (active.length < 2) return;
-    const value = Math.max(0, Math.min(10, Math.round(raw)));
-    if (value === (blend[v] ?? 0)) return;
-    onChange({ sources: active, blend: { ...blend, [v]: value } });
-  };
+  const step = INFLUENCE_STEPS.reduce((best, s) =>
+    Math.abs(s.v - influence) < Math.abs(best.v - influence) ? s : best,
+  );
 
   return (
     <div className="decision-switch">
       <div className="decision-switch-head">
         <span className="decision-switch-title">智能体决策来源</span>
-        <span className="decision-switch-hint">
-          可多选并按配比融合（混合决策），运行时立即生效
-        </span>
+        <span className="decision-switch-hint">决定由谁产生目标仓位，运行时立即生效</span>
       </div>
-      <div className="decision-options" role="group" aria-label="智能体决策来源">
-        {SOURCE_OPTIONS.map((o) => {
-          const tag = badge(o.value);
-          const on = active.includes(o.value);
-          const missing = o.value !== "rules" && tag === "未配置";
+      <div className="decision-options" role="radiogroup" aria-label="智能体决策来源">
+        {OPTIONS.map((o) => {
+          const on = value === o.value;
+          const enabled = ready(o.value);
+          const pool = o.value === "chat" || o.value === "systemone" ? counts?.[o.value] : null;
+          const tag =
+            o.value === "hybrid"
+              ? !ready("chat")
+                ? "缺对话模型"
+                : !ready("systemone")
+                  ? "缺决策模型"
+                  : "可用"
+              : o.value === "rules"
+                ? null
+                : !pool || pool.total === 0
+                  ? "未配置"
+                  : pool.available === 0
+                    ? "无可用"
+                    : `${pool.available}/${pool.total} 可用`;
+          const tagOff = tag !== null && tag !== "可用" && !/可用$/.test(tag ?? "");
           return (
             <button
               key={o.value}
               type="button"
-              aria-pressed={on}
+              role="radio"
+              aria-checked={on}
               className={`decision-option ${on ? "decision-on" : ""}`}
-              disabled={busy}
-              title={missing ? "请先在「模型管理」页添加该类模型；不勾也可勾选，系统会自动把它的配比让给其他路" : undefined}
-              onClick={() => toggle(o.value)}
+              disabled={busy || !enabled}
+              title={!enabled ? hint(o.value, counts) : undefined}
+              onClick={() => onChange({ source: o.value, influence })}
             >
               <span className="decision-label">
                 {o.label}
-                {tag && (
-                  <span className={`decision-tag ${tag === "未配置" || tag === "无可用" ? "decision-tag-off" : ""}`}>
-                    {tag}
-                  </span>
-                )}
+                {tag && <span className={`decision-tag ${tagOff ? "decision-tag-off" : ""}`}>{tag}</span>}
               </span>
               <span className="decision-desc">{o.desc}</span>
             </button>
@@ -131,39 +119,43 @@ export function DecisionSourceSwitch({
         })}
       </div>
 
-      {active.length > 1 && (
+      {value === "hybrid" && (
         <div className="blend-rows">
           <div className="blend-title">
-            融合配比（按权重线性加权；某路无实例或失败时，其配比自动让给其余路）
+            分析影响力：<b>{step.label}</b> <span className="dim">· {step.hint}</span>
           </div>
-          {active.map((s) => {
-            const pctValue = Math.round(((blend[s] ?? 0) / total) * 100);
-            const pool = s === "rules" ? null : counts?.[s];
-            const offline = pool ? pool.available === 0 : false;
-            return (
-              <div className="blend-row" key={s}>
-                <span className="blend-name">{SOURCE_ZH[s]}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={10}
-                  step={1}
-                  value={blend[s] ?? 0}
-                  disabled={busy}
-                  onChange={(e) => setRatio(s, Number(e.target.value))}
-                />
-                <span className="blend-pct mono">{pctValue}%</span>
-                {offline && <span className="blend-warn">无可用实例 · 自动让位</span>}
-              </div>
-            );
-          })}
+          <div className="blend-row">
+            <span className="blend-name">影响力</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              disabled={busy}
+              value={influence}
+              onChange={(e) => onChange({ source: value, influence: Number(e.target.value) / 100 })}
+            />
+            <span className="blend-pct mono">{Math.round(influence * 100)}%</span>
+          </div>
           <div className="blend-preview small dim">
-            例：对话模型 {ratioPct(active, blend).find((r) => r.source === "chat")?.pct ?? 0}% +
-            决策模型 {ratioPct(active, blend).find((r) => r.source === "systemone")?.pct ?? 0}% →
-            最终目标仓位 = 各自权重按上述比例相加
+            流程：对话模型输出「怎么看」→ System One 读到这份分析后逐标的定档位 → 档位概率换算成目标仓位。
+            决策模型掉线时自动按分析的强弱换算；分析掉线时决策模型独立决策。
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/** 没配模型时给出的具体指引，而不是让用户猜。 */
+function hint(v: DecisionSource, counts: PoolCounts | null): string {
+  if (v === "hybrid") {
+    const chat = counts?.chat;
+    const so = counts?.systemone;
+    if (!chat || chat.available === 0) return "混合决策需要一个可用的对话模型（分析端），请先到「模型管理」页配置";
+    if (!so || so.available === 0) return "混合决策需要一个可用的 System One 决策模型（决策端），请先到「模型管理」页配置";
+    return "";
+  }
+  if (v === "rules") return "";
+  return `请先到「模型管理」页添加并配置${v === "chat" ? "对话模型" : "决策模型"}`;
 }

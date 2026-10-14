@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
 import { Button, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
-import { DecisionSourceSwitch, ratioPct, SOURCE_ZH } from "../components/DecisionSourceSwitch";
+import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
 import { CandidatePool } from "../components/CandidatePool";
 import { api } from "../api";
 import type { DecisionSource, PoolCounts } from "../types";
@@ -27,21 +27,19 @@ const AGENTS: AgentNode[] = [
   { name: "Portfolio", zh: "组合记账", in: "成交回报", out: "权益曲线 / 指标" },
 ];
 
-/** 决策来源的一句话说明（按参与的路与配比生成）。 */
-function sourceHint(form: {
-  sources?: DecisionSource[];
-  blend?: Record<DecisionSource, number>;
-}): string {
-  const sources: DecisionSource[] = form.sources?.length ? form.sources : ["rules"];
-  const parts = ratioPct(sources, form.blend ?? { rules: 1, chat: 0, systemone: 0 })
-    .map((r) => `${SOURCE_ZH[r.source]} ${r.pct}%`);
-  const tail =
-    sources.length > 1
-      ? "多路按配比线性融合；任一路无实例或调用失败会当场退出，配比自动让给其余路，组合不会停摆。"
-      : sources[0] === "rules"
-        ? "纯规则本地计算，不调用任何模型。"
-        : "由模型池决策，失败自动回退双均线动量。";
-  return `当前：${parts.join(" + ")}。${tail}模型配置在「模型管理」页；想比较谁更赚钱，去「模型对照」页跑对照实验。`;
+/** 决策来源的一句话说明（按当前选择生成）。 */
+function sourceHint(form: { decisionSource: DecisionSource; hybridInfluence?: number }): string {
+  const tail = "模型配置在「模型管理」页；想比较谁更赚钱，去「模型对照」页跑对照实验。";
+  switch (form.decisionSource) {
+    case "rules":
+      return "当前：纯规则。本地计算，不调用任何模型。" + tail;
+    case "chat":
+      return "当前：对话模型。大模型看行情后直接给目标仓位，失败自动回退双均线动量。" + tail;
+    case "systemone":
+      return "当前：决策模型。System One 逐标的定档位，失败自动回退双均线动量。" + tail;
+    case "hybrid":
+      return `当前：混合决策。大模型分析行情（影响力 ${Math.round((form.hybridInfluence ?? 0.6) * 100)}%），决策模型据此定仓位。` + tail;
+  }
 }
 
 /** 按当前模式挑流水线节点：配置器与逐标的决策互斥。 */
@@ -83,13 +81,16 @@ export function StrategyPage({ store }: { store: AppStore }) {
 
   const llmOn = config?.llm?.enabled;
 
-  /** 多路/配比变更：立即落库，并保持 decisionSource 与 llm.enabled 与之一致。 */
-  const setSources = (next: { sources: DecisionSource[]; blend: Record<DecisionSource, number> }) => {
+  /** 决策方式变更：立即落库；混合决策只改影响力时也要落库。 */
+  const setSource = (next: { source: DecisionSource; influence: number }) => {
     if (!config) return;
-    const sources = next.sources.length > 0 ? next.sources : (["rules"] as DecisionSource[]);
     void store.patchConfig({
-      strategy: { ...config.strategy, sources, blend: next.blend, decisionSource: sources[0]! },
-      llm: { ...config.llm, enabled: sources.some((s) => s !== "rules") },
+      strategy: {
+        ...config.strategy,
+        decisionSource: next.source,
+        hybridInfluence: next.influence,
+      },
+      llm: { ...config.llm, enabled: next.source !== "rules" },
     });
     void loadPools();
   };
@@ -98,11 +99,11 @@ export function StrategyPage({ store }: { store: AppStore }) {
     <div className="page page-strategy">
       <Panel title="智能体决策">
         <DecisionSourceSwitch
-          sources={form.sources ?? [form.decisionSource]}
-          blend={form.blend ?? { rules: 1, chat: 0, systemone: 0 }}
+          value={form.decisionSource}
+          influence={form.hybridInfluence ?? 0.6}
           counts={pools}
           busy={store.state?.status === "running"}
-          onChange={setSources}
+          onChange={setSource}
         />
         <div className="hint-line">{sourceHint(form)}</div>
       </Panel>
