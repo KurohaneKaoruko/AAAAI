@@ -25,6 +25,7 @@ import type { BotManager } from "../bots/botManager.js";
 import type { NewsService } from "../news/newsService.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
+import { robustness, walkForward } from "../validation/walkForward.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
@@ -224,6 +225,55 @@ export function createServer(controller: EngineController, options: ServerOption
       })
       .then(() => ok(res, { state: controller.snapshot() }))
       .catch((err) => fail(res, err, 409));
+  });
+
+  // ---------------- 前推验证 / 稳健性 ----------------
+
+  app.get("/api/validation/robustness", async (req, res) => {
+    const symbolParam = String(req.query.symbols ?? "").split(",").filter(Boolean);
+    const symbols = symbolParam.length > 0 ? symbolParam : controller.snapshot().symbols;
+    if (symbols.length === 0) {
+      res.status(400).json({ error: "请先在候选池里选好标的（或用 ?symbols=A,B 指定）" });
+      return;
+    }
+    try {
+      const target = controller.resolveRunTarget(undefined, symbols);
+      const adapter = connections.adapter(target.connection.id);
+      const interval = target.interval;
+      const report = await robustness(controller.getConfig(), {
+        adapter,
+        symbols,
+        interval,
+      });
+      ok(res, report);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.get("/api/validation/walk-forward", async (req, res) => {
+    const symbolParam = String(req.query.symbols ?? "").split(",").filter(Boolean);
+    const symbols = symbolParam.length > 0 ? symbolParam : controller.snapshot().symbols;
+    if (symbols.length === 0) {
+      res.status(400).json({ error: "请先在候选池里选好标的（或用 ?symbols=A,B 指定）" });
+      return;
+    }
+    try {
+      const target = controller.resolveRunTarget(undefined, symbols);
+      const adapter = connections.adapter(target.connection.id);
+      const interval = target.interval;
+      const folds = Number(req.query.folds ?? 4);
+      const foldBars = Number(req.query.foldBars ?? 120);
+      ok(res, await walkForward(controller.getConfig(), {
+        adapter,
+        symbols,
+        interval,
+        folds: Number.isFinite(folds) ? folds : 4,
+        foldBars: Number.isFinite(foldBars) ? foldBars : 120,
+      }));
+    } catch (err) {
+      fail(res, err);
+    }
   });
 
   // ---------------- 新闻情报 ----------------

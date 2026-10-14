@@ -67,6 +67,25 @@ strategy:
   hybrid_influence: 0.6      # 混合决策：分析结论对决策模型的影响力（0=不参考，1=主要依据）
   hybrid_analysis_ttl_ms: 60000  # 混合决策：分析结论有效期（期内不重复调用大模型）
 
+optimize:
+  # 权重生成方式（规则路径用；AI 自主配置时模型定方向，这里只做风险倾斜）
+  #   none        = 因子分直接给权重
+  #   score       = 因子分按相对强度加权（默认）
+  #   risk_parity = 分层风险平价（HRP）：按相关性聚类，簇内逆方差分配
+  method: score
+  factor_weights:               # 留空用默认：趋势1 动量1 突破0.6 反转0 量价0.4
+    trend: 1
+    momentum: 1
+    breakout: 0.6
+    reversal: 0
+    volume: 0.4
+  target_vol: 0                 # 组合目标年化波动率，0 = 不做波动率目标（如 0.15）
+  min_positions: 1              # 风险平价下至少保留几个标的
+
+cost:
+  impact_k: 0                   # 冲击成本系数（0 = 只用固定滑点；0.2~0.5 更真实）
+  max_slippage_bps: 200         # 滑点上限
+
 risk:
   initial_cash: 100000       # 初始资金
   fee_rate: 0.0003           # 模拟手续费率

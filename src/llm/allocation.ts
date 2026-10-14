@@ -38,6 +38,8 @@ export interface AssetSnapshot {
   bars: number;
   /** 模型或规则给出的文字点评（可选） */
   commentary?: string;
+  /** 真实 K 线明细：因子计算需要（只有配置器/策略层会填充） */
+  ohlcv?: { timestamp: Date; open: number; high: number; low: number; close: number; volume: number }[];
 }
 
 export interface AllocationLimits {

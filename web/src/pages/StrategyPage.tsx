@@ -7,6 +7,8 @@ import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
 import { CandidatePool } from "../components/CandidatePool";
 import { NewsPanel } from "../components/NewsPanel";
 import { EvolutionPanel } from "../components/EvolutionPanel";
+import { OptimizePanel } from "../components/OptimizePanel";
+import { ValidationPanel } from "../components/ValidationPanel";
 import { api } from "../api";
 import type { DecisionSource, PoolCounts } from "../types";
 import { pct } from "../lib/format";
@@ -109,6 +111,10 @@ export function StrategyPage({ store }: { store: AppStore }) {
         />
         <div className="hint-line">{sourceHint(form)}</div>
       </Panel>
+
+      <OptimizePanel store={store} />
+
+      <ValidationPanel store={store} />
 
       <CandidatePool store={store} />
 

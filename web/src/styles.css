@@ -1317,3 +1317,21 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .evo-param { font-weight: 600; }
 .evo-reason { color: var(--text-dim); line-height: 1.45; }
 .evo-reverted { opacity: 0.55; text-decoration: line-through; }
+
+/* ---------- 因子与验证 ---------- */
+
+.factor-grid { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.factor-row {
+  display: grid;
+  grid-template-columns: 88px 1fr 160px 40px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.factor-name { font-weight: 600; }
+.factor-desc { line-height: 1.4; }
+.factor-row input[type="range"] { accent-color: var(--accent); }
+.factor-w { text-align: right; color: var(--text-dim); }
+
+.val-block { margin-top: 14px; }
+.row-best { background: var(--notice-ok-bg); }

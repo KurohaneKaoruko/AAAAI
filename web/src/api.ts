@@ -106,6 +106,31 @@ export const api = {
       instructions: string;
     }>("/api/llm/presets"),
 
+  // 前推验证 / 稳健性
+  robustness: (symbols?: string[]) =>
+    request<{
+      best: { fast: number; slow: number; targetWeight: number; returnPct: number; drawdown: number } | null;
+      median: number;
+      plateauRatio: number;
+      overfitRisk: boolean;
+      cells: { fast: number; slow: number; targetWeight: number; returnPct: number; drawdown: number }[];
+    }>(`/api/validation/robustness${symbols?.length ? `?symbols=${symbols.join(",")}` : ""}`),
+  walkForward: (symbols?: string[]) =>
+    request<{
+      folds: {
+        fold: number;
+        isBars: number;
+        oosBars: number;
+        isReturn: number;
+        oosReturn: number;
+        oosFills: number;
+        gap: number;
+      }[];
+      avgOosReturn: number;
+      avgGap: number;
+      oosPositiveRatio: number;
+    }>(`/api/validation/walk-forward${symbols?.length ? `?symbols=${symbols.join(",")}` : ""}`),
+
   // 新闻情报
   news: () => request<{ items: NewsItem[]; status: NewsStatus }>("/api/news"),
   refreshNews: (symbols?: string[]) =>

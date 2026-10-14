@@ -13,7 +13,12 @@ import { MarketAnalystAgent } from "./marketAnalyst.js";
 import { RiskGuardAgent } from "./riskGuard.js";
 import { StrategistAgent } from "./strategist.js";
 import { AllocatorAgent, type AssetAllocator } from "./allocatorAgent.js";
-import { AIAllocator, CrossSectionalAllocator } from "../strategies/allocator.js";
+import { CrossSectionalAllocator } from "../strategies/allocator.js";
+import { AIAllocator, type AllocationResult } from "../strategies/allocator.js";
+import type { AssetSnapshot } from "../llm/allocation.js";
+import { allocateByFactors, riskTiltWeights, type OptimizeSettings } from "../strategies/factorAllocator.js";
+import type { OptimizeConstraints } from "../portfolio/optimizer.js";
+import type { FactorInput } from "../factors/index.js";
 import { PortfolioManager } from "../portfolio/portfolioManager.js";
 import { RiskRules } from "../risk/rules.js";
 import { MomentumStrategy } from "../strategies/momentum.js";
@@ -129,18 +134,57 @@ export function buildPipeline(
   };
   const baseline = new CrossSectionalAllocator(limits);
 
+  const optimizeSettings: OptimizeSettings = {
+    method: config.optimize.method,
+    factorWeights: config.optimize.factorWeights,
+    targetVol: config.optimize.targetVol,
+    minPositions: config.optimize.minPositions,
+  };
+  const optConstraints: OptimizeConstraints = {
+    maxPositionWeight: config.risk.maxPositionWeight,
+    grossCap: config.strategy.maxGrossExposure,
+  };
+  /** 纯规则模式：因子打分 + 可选风险平价/波动率目标 */
+  const factorAllocator: AssetAllocator = {
+    async allocate(inputs: AssetSnapshot[]): Promise<AllocationResult> {
+      const factorInputs: FactorInput[] = inputs.map((s) => ({
+        symbol: s.symbol,
+        // 因子需要真实 OHLCV（摘要里只有指标），配置器会把 K 线带过来
+        bars: s.ohlcv ?? [],
+      }));
+      if (factorInputs.every((f) => f.bars.length === 0)) {
+        // 没有 K 线明细时退回动量基线（不猜、不瞎算）
+        return baseline.allocate(inputs);
+      }
+      return allocateByFactors(factorInputs, {
+        limits: optConstraints,
+        optimize: optimizeSettings,
+        grossCap: config.strategy.maxGrossExposure,
+      }).result;
+    },
+  };
+  /** AI 配置：在模型判断之上只做风险层面倾斜，不改方向 */
+  const tiltAi = async (weights: Record<string, number>, inputs: AssetSnapshot[]): Promise<Record<string, number>> =>
+    riskTiltWeights(
+      weights,
+      inputs.map((s) => ({ symbol: s.symbol, bars: s.ohlcv ?? [] })),
+      optimizeSettings,
+      optConstraints,
+      config.strategy.maxGrossExposure,
+    );
+
   // 资产配置模式（AI 自己选资产）：混合决策下由「分析 -> 决策」产出权重；
   // 其余来源仍由对应模型直接给配置建议。
   const allocating = config.strategy.selfAllocating || hybrid;
   let allocator: AllocatorAgent | null = null;
   if (allocating) {
     const assetAllocator: AssetAllocator = hybrid
-      ? new HybridAllocator(analyst!, soClient, baseline, limits, hybridOpts)
+      ? withRiskTilt(new HybridAllocator(analyst!, soClient, baseline, limits, hybridOpts), tiltAi)
       : source === "chat"
-        ? new AIAllocator(baseline, chatClient, limits)
+        ? withRiskTilt(new AIAllocator(baseline, chatClient, limits), tiltAi)
         : source === "systemone"
-          ? new AIAllocator(baseline, soClient, limits)
-          : baseline;
+          ? withRiskTilt(new AIAllocator(baseline, soClient, limits), tiltAi)
+          : factorAllocator;
 
     allocator = new AllocatorAgent(bus, {
       fastWindow: config.strategy.fastWindow,
@@ -220,4 +264,25 @@ export function buildPipeline(
 export async function feed(pipeline: Pipeline, bars: Bar[]): Promise<void> {
   if (bars.length === 0) return;
   await streamBars(pipeline.bus, pipeline.book, bars);
+}
+
+/** 给 AI 配置器套一层风险倾斜：模型定方向，这里只调风险敞口。 */
+function withRiskTilt(
+  inner: AssetAllocator,
+  tilt: (weights: Record<string, number>, inputs: AssetSnapshot[]) => Promise<Record<string, number>>,
+): AssetAllocator {
+  return {
+    async allocate(inputs: AssetSnapshot[]): Promise<AllocationResult> {
+      const r = await inner.allocate(inputs);
+      const weights = await tilt(r.weights, inputs);
+      const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+      const changed = Object.keys(weights).some((s) => Math.abs((weights[s] ?? 0) - (r.weights[s] ?? 0)) > 1e-6);
+      return {
+        ...r,
+        weights,
+        cashWeight: Number(Math.max(0, 1 - sum).toFixed(6)),
+        notes: changed ? [...r.notes, "已按风险平价/波动率目标调整敞口（方向仍以模型判断为准）"] : r.notes,
+      };
+    },
+  };
 }

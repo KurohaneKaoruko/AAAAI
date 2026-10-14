@@ -408,6 +408,24 @@ export class EngineController {
 
   // ---------------- 运行控制 ----------------
 
+  /**
+   * 解析「验证类」请求要用的运行目标：连接、周期、候选池标的。
+   * 前推验证与稳健性体检都在这里复用，保证和真正跑回测用的是同一套标的。
+   */
+  resolveRunTarget(connectionId?: string, symbols?: string[]): {
+    connection: { id: string; label: string };
+    interval: string;
+    symbols: string[];
+  } {
+    const connection = this.resolveConnection(connectionId);
+    return {
+      connection,
+      interval: this.config.market.interval,
+      // 显式指定优先（验证接口会用），否则按当前运行标的 / 候选池解析
+      symbols: symbols && symbols.length > 0 ? symbols : this.resolveSymbols(connection.id),
+    };
+  }
+
   private resolveConnection(connectionId?: string): { id: string; label: string } {
     const connections = this.connections.list();
     if (connections.length === 0) {
