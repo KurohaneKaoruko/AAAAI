@@ -21,6 +21,8 @@ import { LLMStrategy } from "../strategies/llmStrategy.js";
 import type { Strategy } from "../strategies/strategy.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import type { AppConfig, DecisionSource } from "../configSchema.js";
+import type { NewsDigest, NewsItem } from "../news/types.js";
+import type { ToolBox, ToolContext } from "../llm/tools.js";
 import { HybridAnalyst, HybridAllocator, decideSingle, type HybridOptions } from "../strategies/hybrid.js";
 
 export interface PipelineOptions {
@@ -37,6 +39,25 @@ export interface PipelineOptions {
    * 不传时分别退回 llm / soClient。
    */
   hybrid?: { chat?: LLMClient | null; systemone?: LLMClient | null };
+  /** 新闻获取器（按标的返回摘要）；不传则决策链路完全看不到新闻 */
+  news?: (symbols: string[]) => Promise<NewsDigest[]>;
+  /** 决策留痕（自我进化用）；不传则不记录 */
+  journal?: PipelineJournal;
+  /** 大模型工具能力（只读工具箱）；不传则模型只能看拼好的 prompt */
+  tools?: { box: ToolBox; context: ToolContext };
+}
+
+/** 决策留痕接口：只依赖最小面，便于对照实验/测试替换实现。 */
+export interface PipelineJournal {
+  record(entry: {
+    source: string;
+    weights: Record<string, number>;
+    cashWeight: number;
+    confidence: number;
+    reason: string;
+    refPrices: Record<string, number>;
+    entryBarIndex: number;
+  }): void;
 }
 
 export interface Pipeline {
@@ -68,11 +89,18 @@ export function buildPipeline(
 
   const chatClient = options.hybrid?.chat ?? options.llm ?? null;
   const soClient = options.hybrid?.systemone ?? options.soClient ?? null;
+  const newsFn = options.news;
+  const toolBox = options.tools?.box;
+  const toolCtx = options.tools?.context;
+  const agentSteps = config.llm.agentEnabled ? config.llm.agentMaxSteps : 0;
   const hybridOpts: HybridOptions = {
     influence: config.strategy.hybridInfluence,
     analysisTtlMs: config.strategy.hybridAnalysisTtlMs,
     timeoutMs: config.llm.timeoutMs,
+    ...(newsFn ? { news: newsFn } : {}),
+    ...(toolBox && toolCtx ? { tools: toolBox, toolContext: toolCtx, agentMaxSteps: agentSteps } : {}),
   };
+  const newsProvider = newsFn ?? (async () => [] as NewsDigest[]);
 
   // 混合决策：大模型只做分析，决策模型拿分析做仓位决策
   const hybrid = source === "hybrid";
@@ -80,14 +108,19 @@ export function buildPipeline(
 
   let strategy: Strategy = momentum;
   if (source === "chat") {
-    strategy = chatClient ? new LLMStrategy(momentum, chatClient, config.llm.decisionInterval) : momentum;
+    strategy = chatClient
+      ? new LLMStrategy(momentum, chatClient, config.llm.decisionInterval, newsProvider, toolBox, toolCtx, agentSteps)
+      : momentum;
   } else if (source === "systemone") {
-    strategy = soClient ? new LLMStrategy(momentum, soClient, config.llm.decisionInterval) : momentum;
+    strategy = soClient
+      ? new LLMStrategy(momentum, soClient, config.llm.decisionInterval, newsProvider)
+      : momentum;
   }
 
   // 点评用第一个可用的模型（没有就纯规则，不影响主流程）
   const commentaryLlm = source === "chat" ? chatClient : source === "systemone" ? soClient : chatClient ?? soClient;
   new MarketAnalystAgent(bus, 3, 10, commentaryLlm).attach();
+
 
   const limits = {
     maxPositions: config.strategy.maxPositions,
@@ -116,6 +149,17 @@ export function buildPipeline(
       warmup: config.strategy.slowWindow,
       limits,
       allocator: assetAllocator,
+      // 留痕时把当时的价格一并记下，结算时才能算这段窗口的实际收益
+      journal: options.journal
+        ? (entry) => {
+            const refPrices: Record<string, number> = {};
+            for (const symbol of Object.keys(entry.weights)) {
+              const price = book.last(symbol);
+              if (price !== undefined) refPrices[symbol] = price;
+            }
+            options.journal!.record({ ...entry, refPrices });
+          }
+        : undefined,
       // 混合决策在逐标的模式下也走这里：分析一次，然后逐标的让决策模型定档位
       perSymbolDecide:
         hybrid && !config.strategy.selfAllocating && soClient

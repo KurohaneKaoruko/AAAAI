@@ -5,6 +5,8 @@ import type { AppStore } from "../state/useAppStore";
 import { Button, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
 import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
 import { CandidatePool } from "../components/CandidatePool";
+import { NewsPanel } from "../components/NewsPanel";
+import { EvolutionPanel } from "../components/EvolutionPanel";
 import { api } from "../api";
 import type { DecisionSource, PoolCounts } from "../types";
 import { pct } from "../lib/format";
@@ -109,6 +111,44 @@ export function StrategyPage({ store }: { store: AppStore }) {
       </Panel>
 
       <CandidatePool store={store} />
+
+      <NewsPanel store={store} />
+
+      <Panel title="大模型工具能力" subtitle="让模型自己查信息再决策">
+        <Toggle
+          label="允许大模型调用只读工具（查新闻、看历史走势、看当前配置与持仓、列候选池）"
+          checked={config?.llm.agentEnabled ?? true}
+          onChange={(v) => void store.patchConfig({ llm: { ...config!.llm, agentEnabled: v } })}
+        />
+        {config?.llm.agentEnabled && (
+          <>
+            <div className="grid-2">
+              <NumberField
+                label="单次决策工具轮数"
+                hint="每轮一次调用，0 = 不给工具"
+                value={config?.llm.agentMaxSteps ?? 4}
+                min={0}
+                max={10}
+                onChange={(v) => void store.patchConfig({ llm: { ...config!.llm, agentMaxSteps: v } })}
+              />
+            </div>
+            <div className="explain-box">
+              <strong>模型能做什么</strong>
+              <p>
+                决策前如果缺信息，它会自己调用工具去查：<b>search_news</b>（新闻与公告）、
+                <b>get_history</b>（历史走势、涨跌幅与回撤）、<b>get_quote</b>（最新价）、
+                <b>get_allocation</b>（当前资产配置）、<b>get_performance</b>（账户表现）、
+                <b>list_candidates</b>（候选池）。
+                工具全部只读，模型没有任何下单能力；每次调用都会记进日志，方便你核对它到底查了什么。
+              </p>
+              <p className="dim">
+                支持原生 function calling 的端点走原生协议；不支持的端点自动改用文本协议（模型输出一行工具调用 JSON），
+                因此国产模型等不支持 tools 的端点同样能用。
+              </p>
+            </div>
+          </>
+        )}
+      </Panel>
 
       <Panel
         title="AI 自主配置资产"
@@ -227,6 +267,8 @@ export function StrategyPage({ store }: { store: AppStore }) {
           )}
         </div>
       </Panel>
+
+      <EvolutionPanel store={store} />
 
       <Panel title="Agent 流水线" subtitle="所有 Agent 通过事件总线解耦通信">
         <div className="pipeline">

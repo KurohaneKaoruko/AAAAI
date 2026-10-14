@@ -15,6 +15,38 @@ function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
 }
 
+/** 新闻源列表：允许用户自己配 URL 模板，避免写死不可达的内置源。 */
+function parseNewsProviders(raw: Record<string, unknown>): NewsProviderConfig[] {
+  const list = (raw.news as Record<string, unknown> | undefined)?.providers;
+  if (!Array.isArray(list)) return [];
+  const out: NewsProviderConfig[] = [];
+  for (const item of list.slice(0, 8)) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const url = String(o.url ?? "").trim();
+    if (!url) continue;
+    out.push({
+      id: String(o.id ?? `p${out.length + 1}`),
+      label: String(o.label ?? o.id ?? `源${out.length + 1}`).slice(0, 40),
+      url: url.slice(0, 500),
+      assetClass: ["crypto", "stock", "any"].includes(String(o.asset_class))
+        ? String(o.asset_class)
+        : "any",
+    });
+  }
+  return out;
+}
+
+/** 允许自我进化的参数白名单（安全起见，只开放搜索类参数）。 */
+const TUNABLE_KEYS = ["strategy.fastWindow", "strategy.slowWindow", "strategy.maxTargetWeight", "risk.minTradeValue"];
+
+function parseTunables(raw: Record<string, unknown>): string[] {
+  const list = (raw.evolution as Record<string, unknown> | undefined)?.tunable;
+  const valid = new Set(TUNABLE_KEYS);
+  if (!Array.isArray(list)) return [...TUNABLE_KEYS];
+  const out = list.map((v) => String(v)).filter((v) => valid.has(v));
+  return out.length > 0 ? [...new Set(out)] : [...TUNABLE_KEYS];
+}
+
 /** 限制到 0~1。 */
 function clamp01(value: number): number {
   return Math.min(Math.max(value, 0), 1);
@@ -59,6 +91,13 @@ export interface LLMSection {
   decisionInterval: number;
   /** 多实例负载均衡策略 */
   strategy: BalanceStrategy;
+  /**
+   * 大模型「工具能力」：允许决策模型自己调用只读工具
+   * （查新闻、看走势、看当前配置…）后再决策。
+   */
+  agentEnabled: boolean;
+  /** 单次决策允许的工具调用轮数（0 = 不给工具） */
+  agentMaxSteps: number;
 }
 
 /**
@@ -106,6 +145,51 @@ export interface RiskSection {
   maxDrawdownPct: number;
 }
 
+export interface NewsProviderConfig {
+  id: string;
+  label: string;
+  /** 订阅地址模板，{symbol} 会替换为标的、{query} 替换为关键词 */
+  url: string;
+  /** 资产类别过滤：crypto / stock / any */
+  assetClass: string;
+}
+
+export interface NewsSection {
+  /** 总开关：关闭时决策链路完全不碰新闻 */
+  enabled: boolean;
+  providers: NewsProviderConfig[];
+  /** 只要这个小时数内的新闻 */
+  maxAgeHours: number;
+  /** 每个标的最多保留几条 */
+  maxPerSymbol: number;
+  /** 抓取间隔（毫秒），避免频繁打扰新闻源 */
+  refreshMs: number;
+  /** 是否把新闻写进分析/点评 prompt */
+  includeInAnalysis: boolean;
+}
+
+export interface EvolutionSection {
+  /**
+   * 总开关。自我进化会自动改策略参数，默认关闭：
+   * 交易参数由系统自己改是需要显式授权的事。
+   */
+  enabled: boolean;
+  /** 至少结算多少笔决策后才允许调参 */
+  minSamples: number;
+  /** 两次调参之间的冷却（毫秒） */
+  cooldownMs: number;
+  /** 评估间隔（毫秒） */
+  evaluateMs: number;
+  /** 单次调参最大变动幅度（0~1），防止一步走太远 */
+  maxChangeRatio: number;
+  /** 决策后的结算窗口（K 线根数） */
+  horizonBars: number;
+  /** 调参后是否写回配置文件（默认只改内存，页面可一键写回） */
+  persist: boolean;
+  /** 允许调整的参数 */
+  tunable: string[];
+}
+
 export interface ExecutionSection {
   /** paper = 本地模拟成交 | live = 走交易所真实下单 */
   mode: "paper" | "live";
@@ -132,6 +216,8 @@ export interface AppConfig {
   llm: LLMSection;
   strategy: StrategySection;
   risk: RiskSection;
+  news: NewsSection;
+  evolution: EvolutionSection;
   execution: ExecutionSection;
 }
 
@@ -170,6 +256,8 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       timeoutMs: num(raw, ["llm", "timeout_ms"], 20000),
       decisionInterval: Math.max(1, num(raw, ["llm", "decision_interval"], 10)),
       strategy: safeStrategy(str(raw, ["llm", "strategy"], "round-robin")),
+      agentEnabled: bool(raw, ["llm", "agent_enabled"], true),
+      agentMaxSteps: Math.max(0, Math.min(10, Math.round(num(raw, ["llm", "agent_max_steps"], 4)))),
     },
     strategy: {
       decisionSource: safeDecisionSource(
@@ -195,6 +283,24 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       maxOrderValue: num(raw, ["risk", "max_order_value"], 20000),
       maxPositionWeight: num(raw, ["risk", "max_position_weight"], 0.6),
       maxDrawdownPct: num(raw, ["risk", "max_drawdown_pct"], 0.15),
+    },
+    news: {
+      enabled: bool(raw, ["news", "enabled"], false),
+      providers: parseNewsProviders(raw),
+      maxAgeHours: Math.max(1, num(raw, ["news", "max_age_hours"], 48)),
+      maxPerSymbol: Math.max(1, Math.round(num(raw, ["news", "max_per_symbol"], 6))),
+      refreshMs: Math.max(30_000, num(raw, ["news", "refresh_ms"], 300_000)),
+      includeInAnalysis: bool(raw, ["news", "include_in_analysis"], true),
+    },
+    evolution: {
+      enabled: bool(raw, ["evolution", "enabled"], false),
+      minSamples: Math.max(5, Math.round(num(raw, ["evolution", "min_samples"], 20))),
+      cooldownMs: Math.max(0, num(raw, ["evolution", "cooldown_ms"], 6 * 3600_000)),
+      evaluateMs: Math.max(60_000, num(raw, ["evolution", "evaluate_ms"], 1800_000)),
+      maxChangeRatio: Math.min(Math.max(num(raw, ["evolution", "max_change_ratio"], 0.2), 0.05), 1),
+      horizonBars: Math.max(1, Math.round(num(raw, ["evolution", "horizon_bars"], 10))),
+      persist: bool(raw, ["evolution", "persist"], false),
+      tunable: parseTunables(raw),
     },
     execution: {
       mode: str(raw, ["execution", "mode"], "paper") === "live" ? "live" : "paper",
@@ -235,6 +341,8 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       timeout_ms: config.llm.timeoutMs,
       decision_interval: config.llm.decisionInterval,
       strategy: config.llm.strategy,
+      agent_enabled: config.llm.agentEnabled,
+      agent_max_steps: config.llm.agentMaxSteps,
     },
     strategy: {
       decision_source: config.strategy.decisionSource,
@@ -257,6 +365,24 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       max_order_value: config.risk.maxOrderValue,
       max_position_weight: config.risk.maxPositionWeight,
       max_drawdown_pct: config.risk.maxDrawdownPct,
+    },
+    news: {
+      enabled: config.news.enabled,
+      providers: config.news.providers,
+      max_age_hours: config.news.maxAgeHours,
+      max_per_symbol: config.news.maxPerSymbol,
+      refresh_ms: config.news.refreshMs,
+      include_in_analysis: config.news.includeInAnalysis,
+    },
+    evolution: {
+      enabled: config.evolution.enabled,
+      min_samples: config.evolution.minSamples,
+      cooldown_ms: config.evolution.cooldownMs,
+      evaluate_ms: config.evolution.evaluateMs,
+      max_change_ratio: config.evolution.maxChangeRatio,
+      horizon_bars: config.evolution.horizonBars,
+      persist: config.evolution.persist,
+      tunable: config.evolution.tunable,
     },
     execution: {
       mode: config.execution.mode,

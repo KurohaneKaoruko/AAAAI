@@ -40,6 +40,8 @@ llm:
   timeout_ms: 20000
   decision_interval: 10      # 每隔多少根 K 线请求一次模型（限流/控费）
   strategy: round-robin      # 多实例负载均衡：round-robin | weighted | random | latency
+  agent_enabled: true        # 大模型「工具能力」：允许自己调用只读工具（查新闻/走势/当前配置）后再决策
+  agent_max_steps: 4         # 单次决策允许的工具调用轮数（0 = 不给工具）
 
 strategy:
   # 智能体决策来源（三选一），WebUI「策略」页顶部可随时切换
@@ -77,3 +79,29 @@ risk:
 execution:
   mode: paper                # paper = 本地模拟成交 | live = 交易所真实下单（危险）
   connection_id: ""          # 行情/交易使用的连接 ID，留空用第一个连接
+
+news:
+  enabled: false             # 新闻总开关（外部内容不可信，仅作参考，不直接触发交易）
+  providers: []              # 新闻源（RSS/Atom 模板），{symbol} 会替换为标的代码
+    # - id: my-feed
+    #   label: 我的新闻源
+    #   url: "https://example.com/rss?kw={symbol}"
+    #   asset_class: any      # crypto | stock | any
+  max_age_hours: 48          # 只要这个小时数内的新闻
+  max_per_symbol: 6          # 每个标的最多保留几条
+  refresh_ms: 300000         # 抓取间隔（毫秒）
+  include_in_analysis: true  # 是否把新闻写进分析 prompt
+
+evolution:
+  enabled: false             # 自我进化总开关（会自动改策略参数，需显式开启）
+  min_samples: 20            # 至少结算多少笔决策后才调参
+  cooldown_ms: 21600000      # 两次调参之间的冷却（6 小时）
+  evaluate_ms: 1800000       # 评估间隔（30 分钟）
+  max_change_ratio: 0.2      # 单次调参最大变动幅度
+  horizon_bars: 10           # 决策后的结算窗口（K 线根数）
+  persist: false             # 调参后是否写回本文件（默认只改内存，页面可一键写回）
+  tunable:                   # 允许自动调整的参数（风控上限类永不在其中）
+    - strategy.fastWindow
+    - strategy.slowWindow
+    - strategy.maxTargetWeight
+    - risk.minTradeValue
