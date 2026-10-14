@@ -939,3 +939,89 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 }
 
 .select-option { min-height: 34px; }
+
+/* ---------- 决策来源选择器 ---------- */
+
+.decision-switch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.decision-switch-title { font-size: 13.5px; font-weight: 600; }
+.decision-switch-hint { font-size: 12px; color: var(--text-dim); }
+
+.decision-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.decision-option {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.decision-option:hover:not(:disabled) { border-color: var(--accent); }
+.decision-option:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.decision-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.decision-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.decision-on .decision-label { color: var(--accent); }
+
+.decision-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--notice-ok-bg);
+  color: var(--up);
+  font-family: var(--mono);
+}
+.decision-tag-off { background: var(--notice-warn-bg); color: var(--warn); }
+
+.decision-desc { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+/* 当前决策来源只读状态条 */
+.source-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.source-status-label { font-size: 12px; color: var(--text-dim); }
+.source-chip {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+}
+.source-rules { color: var(--text); }
+.source-chat { color: var(--warn); background: var(--notice-warn-bg); }
+.source-systemone { color: var(--accent); background: var(--accent-soft); }

@@ -2,6 +2,7 @@
 
 import type {
   AdapterMeta,
+  PoolCounts,
   AuthStatus,
   ComparisonResult,
   LlmOverview,
@@ -61,6 +62,7 @@ export const api = {
     request<{
       profiles: LlmProfile[];
       overview: LlmOverview;
+      pools: PoolCounts;
       strategy: string;
       strategies: { value: string; label: string }[];
     }>("/api/llm/profiles"),

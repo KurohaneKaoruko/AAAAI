@@ -99,6 +99,13 @@ export type LLMSection = AppConfig["llm"];
 export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
+export type DecisionSource = "rules" | "chat" | "systemone";
+
+export interface PoolCounts {
+  chat: { total: number; available: number };
+  systemone: { total: number; available: number };
+}
+
 export type BalanceStrategy = "round-robin" | "weighted" | "random" | "latency";
 
 export interface LlmStats {
@@ -202,7 +209,13 @@ export interface AppConfig {
     decisionInterval: number;
     strategy: BalanceStrategy;
   };
-  strategy: { name: string; fastWindow: number; slowWindow: number; maxTargetWeight: number };
+  strategy: {
+    decisionSource: DecisionSource;
+    name: string;
+    fastWindow: number;
+    slowWindow: number;
+    maxTargetWeight: number;
+  };
   risk: {
     initialCash: number;
     feeRate: number;
