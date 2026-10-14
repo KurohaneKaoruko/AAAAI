@@ -125,6 +125,7 @@ export class LlmManager implements LLMClient {
   private stats = new Map<string, LlmStats>();
   private clients = new Map<string, OpenAICompatClient | SystemOneClient>();
   private rrIndex = 0;
+  private activeKind: ModelKind = "chat";
   private readonly secrets: SecretStore;
   private readonly key: (id: string) => string;
   private readonly path: string;
@@ -226,6 +227,15 @@ export class LlmManager implements LLMClient {
 
   setStrategy(strategy: BalanceStrategy): void {
     this.strategy = strategy;
+  }
+
+  /** 设置当前生效的模型池（对话模型 or 决策模型）。 */
+  setActiveKind(kind: ModelKind): void {
+    this.activeKind = kind;
+  }
+
+  getActiveKind(): ModelKind {
+    return this.activeKind;
   }
 
   getStrategy(): BalanceStrategy {
@@ -334,17 +344,18 @@ export class LlmManager implements LLMClient {
    * 全部实例不可用或均失败则抛出最后一个错误，由上层回退规则策略。
    */
   async complete(prompt: string, kind?: ModelKind): Promise<string> {
-    const first = this.pick(kind);
+    const pool = kind ?? this.activeKind;
+    const first = this.pick(pool);
     if (!first) {
       throw new Error(
-        kind === "systemone"
-          ? "没有可用的 System One 决策模型（请在「LLM 大模型」页添加并配置密钥）"
-          : "没有可用的对话模型（请在「LLM 大模型」页添加并配置密钥）",
+        pool === "systemone"
+          ? "没有可用的 System One 决策模型（请在「模型管理 → 决策模型」页添加并配置密钥）"
+          : "没有可用的对话模型（请在「模型管理 → 对话模型」页添加并配置密钥）",
       );
     }
     let lastError: Error = new Error("未知错误");
     const tried = new Set<string>();
-    for (const profile of [first, ...this.available(kind).filter((p) => p.id !== first.id)]) {
+    for (const profile of [first, ...this.available(pool).filter((p) => p.id !== first.id)]) {
       if (tried.has(profile.id)) continue;
       tried.add(profile.id);
       try {
@@ -430,6 +441,15 @@ export class LlmManager implements LLMClient {
   }
 
   /** 全局汇总（面板顶部用）。 */
+  /** 各模型池的可用实例数（供决策来源选择器展示）。 */
+  poolCounts(): { chat: { total: number; available: number }; systemone: { total: number; available: number } } {
+    const count = (kind: ModelKind) => {
+      const all = this.profiles.filter((p) => p.kind === kind);
+      return { total: all.length, available: this.available(kind).length };
+    };
+    return { chat: count("chat"), systemone: count("systemone") };
+  }
+
   overview(): { total: number; available: number; calls: number; success: number; avgLatencyMs: number } {
     let calls = 0;
     let success = 0;

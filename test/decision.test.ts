@@ -233,3 +233,77 @@ test("buildRunners: 自动带上基线、跳过不可用实例", () => {
   const noBaseline = buildRunners({ profiles, clientFor, includeBaseline: false });
   assert.equal(noBaseline.length, 2);
 });
+
+
+test("决策来源：默认 rules，旧配置 llm.enabled=true 会迁移为 chat", async () => {
+  const { buildConfig } = await import("../src/configSchema.js");
+
+  // 未配置 -> 纯规则（最安全的默认值）
+  assert.equal(buildConfig({}).strategy.decisionSource, "rules");
+
+  // 旧字段：llm.enabled=true 且无 decision_source -> 迁移为 chat
+  const legacy = buildConfig({ llm: { enabled: true } });
+  assert.equal(legacy.strategy.decisionSource, "chat", "旧的 llm.enabled 应迁移为 chat");
+
+  // 显式值优先
+  assert.equal(buildConfig({ strategy: { decision_source: "systemone" } }).strategy.decisionSource, "systemone");
+  assert.equal(buildConfig({ strategy: { decision_source: "rules" }, llm: { enabled: true } }).strategy.decisionSource, "rules");
+
+  // 非法值回落 rules
+  assert.equal(buildConfig({ strategy: { decision_source: "瞎写" } }).strategy.decisionSource, "rules");
+});
+
+test("决策来源：配置可写回 YAML（decision_source）", async () => {
+  const { buildConfig, serializeConfig } = await import("../src/configSchema.js");
+  const raw = serializeConfig(buildConfig({ strategy: { decision_source: "systemone" } })) as {
+    strategy: Record<string, unknown>;
+  };
+  assert.equal(raw.strategy.decision_source, "systemone");
+});
+
+test("模型池：poolCounts 按类型统计可用实例", () => {
+  const dir = tmpDir();
+  try {
+    const m = new LlmManager(dir, "round-robin");
+    m.create({ label: "c1", kind: "chat", baseUrl: "https://a.test/v1", model: "m", apiKey: "k" });
+    m.create({ label: "c2", kind: "chat", baseUrl: "https://b.test/v1", model: "m", apiKey: "" });
+    m.create({ label: "s1", kind: "systemone", baseUrl: "https://c.test/v1", model: "m", apiKey: "k" });
+
+    const pools = m.poolCounts();
+    assert.deepEqual(pools.chat, { total: 2, available: 1 }, "对话池 2 个配置、1 个可用");
+    assert.deepEqual(pools.systemone, { total: 1, available: 1 });
+
+    // 当前生效的模型池可切换
+    assert.equal(m.getActiveKind(), "chat");
+    m.setActiveKind("systemone");
+    assert.equal(m.getActiveKind(), "systemone");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("决策来源为 rules 时不调用模型（纯规则流水线）", async () => {
+  const config = testConfig();
+  config.strategy.decisionSource = "rules";
+  let called = 0;
+  const spy: LLMClient = {
+    name: "spy",
+    async complete() {
+      called += 1;
+      return JSON.stringify({ target_weight: 0.5, confidence: 1, reason: "[llm]" });
+    },
+  };
+  const result = await runComparison(config, {
+    adapter: testAdapter(),
+    symbols: ["DEMO-BTC"],
+    bars: 40,
+    interval: "1m",
+    liveTrading: false,
+    runners: [
+      { id: "r", label: "规则", kind: "chat", client: spy },
+      { id: "b", label: "基线", kind: "baseline", client: null },
+    ],
+  });
+  assert.equal(called, 0, "决策来源为纯规则时不应调用模型");
+  assert.equal(result.results.length, 2);
+});

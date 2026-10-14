@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { BalanceStrategy, LlmOverview, LlmProfile } from "../types";
-import { Badge, Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
+import { Badge, Button, Empty, Notice, NumberField, Panel, SelectField, TextField } from "../components/ui";
 import { ASSET_LABEL } from "../lib/format";
 
 /** System One 预设地址/模型（与后端 SYSTEM_ONE_PRESETS 保持一致） */
@@ -191,17 +191,19 @@ export function LlmPage({ store }: { store: AppStore }) {
             : undefined
         }
       >
-        <Toggle
-          label="启用 LLM 决策"
-          hint={
-            profiles.length === 0
-              ? "尚未添加任何实例 —— 未启用时策略自动以纯规则模式运行"
-              : "关闭后策略回退为纯规则（动量）"
-          }
-          checked={config?.llm.enabled ?? false}
-          danger
-          onChange={(v) => config && void store.patchConfig({ llm: { ...config.llm, enabled: v } })}
-        />
+        <div className="source-status">
+          <span className="source-status-label">当前决策来源</span>
+          <span className={`source-chip source-${config?.strategy.decisionSource ?? "rules"}`}>
+            {config?.strategy.decisionSource === "rules"
+              ? "纯规则（动量）"
+              : config?.strategy.decisionSource === "chat"
+                ? "对话模型池"
+                : "决策模型池"}
+          </span>
+          <span className="dim small">
+            在「策略」页顶部切换决策来源；这里管理的是模型实例本身。
+          </span>
+        </div>
 
         <div className="grid-2">
           <NumberField

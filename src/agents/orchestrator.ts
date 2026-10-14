@@ -42,16 +42,15 @@ export function buildPipeline(config: AppConfig, options: PipelineOptions): Pipe
   const book = new PriceBook();
   const portfolio = new PortfolioManager(bus, config.risk.initialCash);
 
-  const llm = options.llm ?? null;
+  const llm = config.strategy.decisionSource === "rules" ? null : (options.llm ?? null);
   const momentum = new MomentumStrategy(
     config.strategy.fastWindow,
     config.strategy.slowWindow,
     config.strategy.maxTargetWeight,
   );
-  const strategy: Strategy =
-    llm && config.llm.enabled && config.strategy.name !== "momentum"
-      ? new LLMStrategy(momentum, llm, config.llm.decisionInterval)
-      : momentum;
+  const strategy: Strategy = llm
+    ? new LLMStrategy(momentum, llm, config.llm.decisionInterval)
+    : momentum;
 
   new MarketAnalystAgent(bus, 3, 10, llm).attach();
   new StrategistAgent(bus, strategy, llm).attach();

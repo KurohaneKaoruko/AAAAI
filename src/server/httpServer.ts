@@ -133,6 +133,7 @@ export function createServer(controller: EngineController, options: ServerOption
     ok(res, {
       profiles: llm.list(),
       overview: llm.overview(),
+      pools: llm.poolCounts(),
       strategy: llm.getStrategy(),
       strategies: Object.entries(STRATEGY_LABEL).map(([value, label]) => ({ value, label })),
     }),

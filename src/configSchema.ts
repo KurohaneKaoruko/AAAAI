@@ -9,6 +9,12 @@ import type { BalanceStrategy } from "./llm/llmManager.js";
 
 const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random", "latency"]);
 
+const DECISION_SOURCES = new Set<DecisionSource>(["rules", "chat", "systemone"]);
+
+function safeDecisionSource(value: string): DecisionSource {
+  return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
+}
+
 function safeStrategy(value: string): BalanceStrategy {
   return STRATEGIES.has(value as BalanceStrategy) ? (value as BalanceStrategy) : "round-robin";
 }
@@ -50,7 +56,12 @@ export interface LLMSection {
   strategy: BalanceStrategy;
 }
 
+/** 智能体决策来源：纯规则 / 对话模型 / System One 决策模型 */
+export type DecisionSource = "rules" | "chat" | "systemone";
+
 export interface StrategySection {
+  /** 决策来源（三选一），决定智能体由谁做仓位决策 */
+  decisionSource: DecisionSource;
   /** momentum | llm-momentum */
   name: string;
   fastWindow: number;
@@ -133,6 +144,9 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       strategy: safeStrategy(str(raw, ["llm", "strategy"], "round-robin")),
     },
     strategy: {
+      decisionSource: safeDecisionSource(
+        str(raw, ["strategy", "decision_source"], bool(raw, ["llm", "enabled"], false) ? "chat" : "rules"),
+      ),
       name: str(raw, ["strategy", "name"], "llm-momentum"),
       fastWindow: num(raw, ["strategy", "fast_window"], 5),
       slowWindow: num(raw, ["strategy", "slow_window"], 20),
@@ -187,6 +201,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       strategy: config.llm.strategy,
     },
     strategy: {
+      decision_source: config.strategy.decisionSource,
       name: config.strategy.name,
       fast_window: config.strategy.fastWindow,
       slow_window: config.strategy.slowWindow,

@@ -101,6 +101,9 @@ export class EngineController {
     private readonly llm: LlmManager,
   ) {
     this.llm.setStrategy(config.llm.strategy);
+    if (config.strategy.decisionSource !== "rules") {
+      this.llm.setActiveKind(config.strategy.decisionSource);
+    }
     this.state = this.freshState();
   }
 
@@ -435,6 +438,9 @@ export class EngineController {
     };
     this.state.config = redactConfig(this.config);
     this.llm.setStrategy(this.config.llm.strategy);
+    if (this.config.strategy.decisionSource !== "rules") {
+      this.llm.setActiveKind(this.config.strategy.decisionSource);
+    }
     this.emitState();
     return this.config;
   }

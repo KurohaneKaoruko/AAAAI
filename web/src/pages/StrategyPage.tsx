@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
 import { Button, Notice, NumberField, Panel, SelectField } from "../components/ui";
+import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
+import { api } from "../api";
+import type { PoolCounts } from "../types";
 import { pct } from "../lib/format";
 
 const AGENTS = [
@@ -17,6 +20,20 @@ export function StrategyPage({ store }: { store: AppStore }) {
   const config = store.state?.config;
   const [form, setForm] = useState(config?.strategy);
   const [saving, setSaving] = useState(false);
+  const [pools, setPools] = useState<PoolCounts | null>(null);
+
+  // 决策来源的实例数需要单独拉取
+  const loadPools = async () => {
+    try {
+      const d = await api.llmProfiles();
+      setPools(d.pools);
+    } catch {
+      /* 服务不可用时忽略 */
+    }
+  };
+  useEffect(() => {
+    void loadPools();
+  }, [config?.strategy.decisionSource]);
 
   useEffect(() => {
     if (config?.strategy) setForm(config.strategy);
@@ -33,8 +50,35 @@ export function StrategyPage({ store }: { store: AppStore }) {
 
   const llmOn = config?.llm?.enabled;
 
+  const setSource = (v: "rules" | "chat" | "systemone") => {
+    if (!config) return;
+    void store.patchConfig({
+      strategy: { ...config.strategy, decisionSource: v },
+      // 保持 llm.enabled 与决策来源一致（仅用于兼容旧字段）
+      llm: { ...config.llm, enabled: v !== "rules" },
+    });
+    void loadPools();
+  };
+
   return (
     <div className="page page-strategy">
+      <Panel title="智能体决策">
+        <DecisionSourceSwitch
+          value={config?.strategy.decisionSource ?? "rules"}
+          counts={pools}
+          busy={store.state?.status === "running"}
+          onChange={setSource}
+        />
+        <div className="hint-line">
+          当前：{config?.strategy.decisionSource === "rules"
+            ? "纯规则（双均线动量），不调用模型"
+            : config?.strategy.decisionSource === "chat"
+              ? "由对话模型池决策，失败自动回退双均线动量"
+              : "由 System One 决策模型池决策，失败自动回退双均线动量"}
+          。模型配置在「模型管理」页；想比较谁更赚钱，去「模型对照」页跑对照实验。
+        </div>
+      </Panel>
+
       <Panel
         title="策略设置"
         subtitle="下次运行时生效"
@@ -45,15 +89,6 @@ export function StrategyPage({ store }: { store: AppStore }) {
         }
       >
         <div className="grid-2">
-          <SelectField
-            label="策略"
-            value={form.name}
-            onChange={(v) => setForm({ ...form, name: v })}
-            options={[
-              { value: "momentum", label: "动量策略（纯规则，快线/慢线）" },
-              { value: "llm-momentum", label: "LLM 决策 + 动量兜底" },
-            ]}
-          />
           <NumberField
             label="目标仓位上限"
             hint="占总权益最大比例"
