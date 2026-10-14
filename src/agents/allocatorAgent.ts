@@ -221,6 +221,7 @@ export class AllocatorAgent extends Agent {
         trend: momentum > 0.001 ? "up" : momentum < -0.001 ? "down" : "flat",
         bars: bars.length,
         commentary: this.views.get(symbol)?.commentary,
+        ohlcv: bars.slice(-120),
       });
     }
     return out.sort((a, b) => a.symbol.localeCompare(b.symbol));

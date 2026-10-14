@@ -15,6 +15,20 @@ function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
 }
 
+/** 因子权重：只接受因子库里存在的名字。 */
+function parseFactorWeights(raw: Record<string, unknown>): Record<string, number> {
+  const known = new Set(["trend", "momentum", "breakout", "reversal", "volume"]);
+  const src = (raw.optimize as Record<string, unknown> | undefined)?.factor_weights;
+  const out: Record<string, number> = {};
+  if (src && typeof src === "object") {
+    for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+      const n = Number(v);
+      if (known.has(k) && Number.isFinite(n)) out[k] = n;
+    }
+  }
+  return out;
+}
+
 /** 新闻源列表：允许用户自己配 URL 模板，避免写死不可达的内置源。 */
 function parseNewsProviders(raw: Record<string, unknown>): NewsProviderConfig[] {
   const list = (raw.news as Record<string, unknown> | undefined)?.providers;
@@ -134,6 +148,24 @@ export interface StrategySection {
   hybridAnalysisTtlMs: number;
 }
 
+export interface OptimizeSection {
+  /** none = 按因子分直接给权重；score = 分数加权；risk_parity = 分层风险平价 */
+  method: "none" | "score" | "risk_parity";
+  /** 因子权重（名 -> 权重），空表示用默认 */
+  factorWeights: Record<string, number>;
+  /** 目标年化波动率（仅 risk_parity 生效，0 = 不做波动率目标） */
+  targetVol: number;
+  /** 风险平价最少保留几个标的 */
+  minPositions: number;
+}
+
+export interface CostSection {
+  /** 冲击成本系数：0 = 只用固定滑点 */
+  impactK: number;
+  /** 滑点上限（bps） */
+  maxSlippageBps: number;
+}
+
 export interface RiskSection {
   initialCash: number;
   /** 最小调仓金额：低于此值不下单，避免频繁微调被手续费吃掉 */
@@ -218,6 +250,8 @@ export interface AppConfig {
   risk: RiskSection;
   news: NewsSection;
   evolution: EvolutionSection;
+  optimize: OptimizeSection;
+  cost: CostSection;
   execution: ExecutionSection;
 }
 
@@ -291,6 +325,20 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       maxPerSymbol: Math.max(1, Math.round(num(raw, ["news", "max_per_symbol"], 6))),
       refreshMs: Math.max(30_000, num(raw, ["news", "refresh_ms"], 300_000)),
       includeInAnalysis: bool(raw, ["news", "include_in_analysis"], true),
+    },
+    optimize: {
+      method: (["none", "score", "risk_parity"] as const).includes(
+        str(raw, ["optimize", "method"], "score") as OptimizeSection["method"],
+      )
+        ? (str(raw, ["optimize", "method"], "score") as OptimizeSection["method"])
+        : "score",
+      factorWeights: parseFactorWeights(raw),
+      targetVol: Math.min(Math.max(num(raw, ["optimize", "target_vol"], 0), 0), 3),
+      minPositions: Math.max(0, Math.round(num(raw, ["optimize", "min_positions"], 1))),
+    },
+    cost: {
+      impactK: Math.min(Math.max(num(raw, ["cost", "impact_k"], 0), 0), 2),
+      maxSlippageBps: Math.max(1, num(raw, ["cost", "max_slippage_bps"], 200)),
     },
     evolution: {
       enabled: bool(raw, ["evolution", "enabled"], false),
@@ -373,6 +421,16 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       max_per_symbol: config.news.maxPerSymbol,
       refresh_ms: config.news.refreshMs,
       include_in_analysis: config.news.includeInAnalysis,
+    },
+    optimize: {
+      method: config.optimize.method,
+      factor_weights: config.optimize.factorWeights,
+      target_vol: config.optimize.targetVol,
+      min_positions: config.optimize.minPositions,
+    },
+    cost: {
+      impact_k: config.cost.impactK,
+      max_slippage_bps: config.cost.maxSlippageBps,
     },
     evolution: {
       enabled: config.evolution.enabled,

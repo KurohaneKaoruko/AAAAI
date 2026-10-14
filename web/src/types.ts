@@ -362,6 +362,8 @@ export interface AppConfig {
   };
   news: NewsSection;
   evolution: EvolutionSection;
+  optimize: OptimizeSection;
+  cost: CostSection;
   execution: { mode: "paper" | "live"; connectionId: string };
   auth: { enabled: boolean; username: string; sessionTtlHours: number };
 }
@@ -501,4 +503,16 @@ export interface DecisionRecord {
     maxAdverse: number;
     settledAt: string;
   };
+}
+
+export interface OptimizeSection {
+  method: "none" | "score" | "risk_parity";
+  factorWeights: Record<string, number>;
+  targetVol: number;
+  minPositions: number;
+}
+
+export interface CostSection {
+  impactK: number;
+  maxSlippageBps: number;
 }
