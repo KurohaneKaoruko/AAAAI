@@ -1,39 +1,52 @@
 # ============================================================
-# AAAAAI —— 多智能体自动资产投研框架，全局配置
-# 所有敏感信息（API Key 等）一律通过环境变量注入，见 .env.example
+# AAAAI —— 多智能体自动资产投研框架，全局配置
+# 所有密钥通过环境变量注入（见 .env.example），不要写进本文件
 # ============================================================
 
 app:
-  name: AAAAAI
-  mode: paper            # paper = 模拟盘 | live = 实盘（骨架未实现）
-  log_level: INFO
+  name: AAAAI
+  log_level: info            # debug | info | warn | error
+
+server:
+  host: 0.0.0.0
+  port: 8787                 # WebUI / API 端口
 
 market:
-  source: stub           # stub = 内置确定性假数据
+  source: stub               # stub = 内置确定性假数据 | binance = 币安真实行情
   symbols:
-    - AAAA               # 标的代码（示例）
-  bar_count: 200         # 每次回测拉取的 K 线数量
-  seed: 42               # 桩数据源随机种子（保证可复现）
+    - BTCUSDT
+  interval: 1m               # K 线间隔（binance 用）：1m/5m/15m/1h/4h/1d
+  bar_count: 200             # 回测/实时预热的 K 线根数
+  poll_ms: 15000             # live 模式轮询间隔（毫秒）
+  seed: 42                   # stub 数据源随机种子（保证可复现）
 
 llm:
+  enabled: false             # true = 启用 LLM 决策（需 OPENAI_API_KEY）
   provider: openai-compatible
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY   # 环境变量名
   model: gpt-4o-mini
-  api_key_env: OPENAI_API_KEY   # 环境变量名，不要直接写密钥
   temperature: 0.2
+  timeout_ms: 20000
+  decision_interval: 10      # 每隔多少根 K 线才真正请求一次 LLM（限流/控费）
 
 strategy:
-  name: momentum
+  name: llm-momentum         # llm-momentum = LLM 决策+动量基线兜底 | momentum = 纯动量
   fast_window: 5
   slow_window: 20
-  max_target_weight: 0.5       # 策略目标仓上限（占总权益）
+  max_target_weight: 0.5     # 策略目标仓上限（占总权益）
 
 risk:
-  initial_cash: 100000.0       # 初始资金
-  fee_rate: 0.0003             # 手续费率
-  slippage_bps: 2              # 滑点（基点）
-  max_order_value: 20000.0     # 单笔下单金额上限
-  max_position_weight: 0.6     # 单标的仓位上限
-  max_drawdown_pct: 0.15       # 组合回撤熔断线
+  initial_cash: 100000       # 初始资金
+  fee_rate: 0.0003           # 手续费率
+  slippage_bps: 2            # 模拟滑点（基点）
+  max_order_value: 20000     # 单笔下单金额上限
+  max_position_weight: 0.6   # 单标的仓位上限
+  max_drawdown_pct: 0.15     # 组合回撤熔断线（live 模式触发即停机）
 
 execution:
-  broker: paper
+  broker: paper              # paper = 模拟成交 | binance = 实盘下单
+  dry_run: true              # true = 只记录不真正下单；false = 真实下单（危险！）
+  base_url: https://testnet.binance.vision   # 默认测试网；主网 https://api.binance.com
+  api_key_env: BINANCE_API_KEY
+  api_secret_env: BINANCE_API_SECRET

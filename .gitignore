@@ -72,3 +72,24 @@ logs/
 *.sqlite3
 *.duckdb
 state.json
+
+# ---- Node / TypeScript ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.tsbuildinfo
+*.tsbuildinfo
+
+# ---- 构建产物 ----
+dist/
+build/
+web/dist/
+coverage/
+
+# ---- 环境 ----
+.env
+.env.local
+.env.*.local
