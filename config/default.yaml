@@ -1,0 +1,39 @@
+# ============================================================
+# AAAAAI —— 多智能体自动资产投研框架，全局配置
+# 所有敏感信息（API Key 等）一律通过环境变量注入，见 .env.example
+# ============================================================
+
+app:
+  name: AAAAAI
+  mode: paper            # paper = 模拟盘 | live = 实盘（骨架未实现）
+  log_level: INFO
+
+market:
+  source: stub           # stub = 内置确定性假数据
+  symbols:
+    - AAAA               # 标的代码（示例）
+  bar_count: 200         # 每次回测拉取的 K 线数量
+  seed: 42               # 桩数据源随机种子（保证可复现）
+
+llm:
+  provider: openai-compatible
+  model: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY   # 环境变量名，不要直接写密钥
+  temperature: 0.2
+
+strategy:
+  name: momentum
+  fast_window: 5
+  slow_window: 20
+  max_target_weight: 0.5       # 策略目标仓上限（占总权益）
+
+risk:
+  initial_cash: 100000.0       # 初始资金
+  fee_rate: 0.0003             # 手续费率
+  slippage_bps: 2              # 滑点（基点）
+  max_order_value: 20000.0     # 单笔下单金额上限
+  max_position_weight: 0.6     # 单标的仓位上限
+  max_drawdown_pct: 0.15       # 组合回撤熔断线
+
+execution:
+  broker: paper

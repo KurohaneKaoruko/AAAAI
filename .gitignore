@@ -1,0 +1,74 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- 环境变量与密钥（只跟踪 .env.example）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+*pem
+secret*.yaml
+
+# ---- 测试 / 缓存 ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+hypothesis/
+.tox/
+.nox/
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.code-workspace
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 项目运行时产物 ----
+data/          # 行情缓存与本地数据库
+logs/
+*.log
+*.db
+*.sqlite3
+*.duckdb
+state.json
