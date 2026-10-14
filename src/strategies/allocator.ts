@@ -16,12 +16,10 @@ import {
   type AssetSnapshot,
 } from "../llm/allocation.js";
 import type { LLMClient } from "../llm/llmClient.js";
-import type { DecisionSource } from "../configSchema.js";
-import type { JointBoard } from "../llm/jointBoard.js";
 
 const log = getLogger("allocator");
 
-export type AllocationSource = "rules" | "ai" | "mix" | "fallback";
+export type AllocationSource = "rules" | "ai" | "hybrid" | "fallback";
 
 export interface AllocationResult {
   /** symbol -> 目标权重（占总权益） */
@@ -37,10 +35,10 @@ export interface AllocationResult {
 
 /** 横截面动量基线：按动量排序取前 N 名，按正动量比例分配权重。 */
 export class CrossSectionalAllocator {
-  async allocate(
-    snapshots: AssetSnapshot[],
-    limits: AllocationLimits,
-  ): Promise<AllocationResult> {
+  constructor(private readonly limits: AllocationLimits) {}
+
+  async allocate(snapshots: AssetSnapshot[]): Promise<AllocationResult> {
+    const limits = this.limits;
     const scored = snapshots
       .filter((s) => s.momentum > 0)
       .sort((a, b) => b.momentum - a.momentum)
@@ -80,40 +78,17 @@ export class AIAllocator {
   }
 
   async allocate(snapshots: AssetSnapshot[]): Promise<AllocationResult> {
-    return this.run(snapshots, undefined);
-  }
-
-  /**
-   * 联合决策入口：把另一路模型的判断通过黑板带进 prompt，
-   * 并把自己的结论写回黑板，供对方下一段读取。
-   */
-  async allocateWithBoard(
-    snapshots: AssetSnapshot[],
-    board: JointBoard,
-    source: DecisionSource,
-  ): Promise<AllocationResult> {
-    return this.run(snapshots, { board, source });
-  }
-
-  private async run(
-    snapshots: AssetSnapshot[],
-    joint?: { board: JointBoard; source: DecisionSource },
-  ): Promise<AllocationResult> {
     if (!this.llm || !this.capable) {
-      const base = await this.baseline.allocate(snapshots, this.limits);
+      const base = await this.baseline.allocate(snapshots);
       return this.llm
         ? { ...base, source: "fallback", notes: ["模型不支持资产配置，使用动量基线"] }
         : base;
     }
     if (snapshots.length === 0) {
-      return { ...(await this.baseline.allocate([], this.limits)), weights: {}, cashWeight: 1 };
+      return { ...(await this.baseline.allocate([])), weights: {}, cashWeight: 1 };
     }
 
-    const prompt = buildAllocationPrompt(
-      snapshots,
-      this.limits,
-      joint ? { board: joint.board, source: joint.source } : undefined,
-    );
+    const prompt = buildAllocationPrompt(snapshots, this.limits);
     const symbols = snapshots.map((s) => s.symbol);
     try {
       const text = await this.llm.allocate!(prompt, symbols);
@@ -134,7 +109,7 @@ export class AIAllocator {
         notes: normalized.notes,
       };
     } catch (err) {
-      const base = await this.baseline.allocate(snapshots, this.limits);
+      const base = await this.baseline.allocate(snapshots);
       const why = (err as Error).message;
       log.warn("AI 资产配置失败（%s），回退动量基线", why);
       return { ...base, source: "fallback", notes: [`模型输出不可用：${why}`] };

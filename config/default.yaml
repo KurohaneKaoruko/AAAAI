@@ -46,16 +46,12 @@ strategy:
   #   rules      = 纯规则，双均线动量本地计算，不调用模型
   #   chat       = 对话模型池（OpenAI 兼容大模型）
   #   systemone  = System One 决策模型池（Jev / Laya / 阿里云百炼）
-  # 混合决策：decision_sources 列出参与决策的路，blend 给各路配比（0 = 不参与）
-  #   ["rules"]                    = 只用规则
-  #   ["chat"]                     = 只用对话模型
-  #   ["chat","systemone"]         = 对话模型 + System One 按配比融合（推荐）
-  #   ["rules","chat","systemone"] = 三路融合
-  decision_sources: [rules]
-  blend:
-    rules: 1
-    chat: 0
-    systemone: 0
+  # 决策来源（四选一）
+  #   rules      = 纯规则，双均线动量本地计算
+  #   chat       = 对话模型，大模型直接给每个标的的目标仓位
+  #   systemone  = System One 决策模型，逐标的定档位
+  #   hybrid     = 混合决策：大模型只做行情分析（不给仓位），
+  #                决策模型拿这份分析定仓位；两步职责分离
   decision_source: rules
   name: llm-momentum         # momentum = 纯动量 | llm-momentum = 模型决策+动量兜底
   fast_window: 5             # 快线窗口
@@ -65,7 +61,9 @@ strategy:
   self_allocating: false
   max_positions: 3           # 最多同时持有几个资产
   max_gross_exposure: 1.0    # 组合总仓位上限（各权重之和），其余留现金
-  allocation_interval: 5     # 每 N 轮行情做一次资产配置
+  allocation_interval: 5     # 每 N 轮行情做一次资产配置/决策
+  hybrid_influence: 0.6      # 混合决策：分析结论对决策模型的影响力（0=不参考，1=主要依据）
+  hybrid_analysis_ttl_ms: 60000  # 混合决策：分析结论有效期（期内不重复调用大模型）
 
 risk:
   initial_cash: 100000       # 初始资金

@@ -109,8 +109,8 @@ export class EngineController {
     private readonly llm: LlmManager,
   ) {
     this.llm.setStrategy(config.llm.strategy);
-    const primaryModel = config.strategy.sources.find((s) => s !== "rules");
-    if (primaryModel) this.llm.setActiveKind(primaryModel);
+    const modelKind = modelKindOf(config.strategy.decisionSource);
+    if (modelKind) this.llm.setActiveKind(modelKind);
     this.state = this.freshState();
   }
 
@@ -309,12 +309,8 @@ export class EngineController {
     this.pipeline = buildPipeline(this.config, {
       adapter,
       liveTrading,
-      llm: this.config.llm.enabled ? this.llm : null,
-      // 混合决策：每路一个受限池，避免 chat 与 System One 互相串味
-      lanes: {
-        chat: this.llm.clientForKind("chat"),
-        systemone: this.llm.clientForKind("systemone"),
-      },
+      llm: this.llm.clientForKind("chat"),
+      soClient: this.llm.clientForKind("systemone"),
     });
     if (this.config.execution.mode === "live" && !liveTrading) {
       log.warn("实盘模式不可用（适配器不支持交易或未配 Key），已自动降级为模拟成交");
@@ -511,8 +507,8 @@ export class EngineController {
     };
     this.state.config = redactConfig(this.config);
     this.llm.setStrategy(this.config.llm.strategy);
-    const primary = this.config.strategy.sources.find((s) => s !== "rules");
-    if (primary) this.llm.setActiveKind(primary);
+    const kind = modelKindOf(this.config.strategy.decisionSource);
+    if (kind) this.llm.setActiveKind(kind);
     this.emitState();
     return this.config;
   }
@@ -532,6 +528,13 @@ export class EngineController {
 }
 
 /** 事件 -> 一行摘要。 */
+/** 决策来源 -> 对应的模型池类型；纯规则/无模型时为 null。 */
+function modelKindOf(source: string): "chat" | "systemone" | null {
+  if (source === "chat" || source === "hybrid") return "chat";
+  if (source === "systemone") return "systemone";
+  return null;
+}
+
 function summarize(event: Event): string {
   const p = event.payload as Record<string, unknown> | undefined;
   switch (event.topic) {

@@ -5,7 +5,7 @@ import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularSymbol } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
-import { SOURCE_OPTIONS, SOURCE_ZH } from "../components/DecisionSourceSwitch";
+import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { money, pct, time } from "../lib/format";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -188,18 +188,18 @@ function BotCard({
         <span><em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b></span>
         <span>
           <em>模型</em>{" "}
-          <b>{bot.modelLabels.length > 0 ? bot.modelLabels.join(" / ") : "未选择"}</b>
+          <b>{bot.modelLabels.length > 0 ? bot.modelLabels.join(bot.decisionSource === "hybrid" ? " → " : " / ") : "未选择"}</b>
         </span>
         <span>
           <em>策略</em>{" "}
           <b className="mono">
-            {bot.strategy.selfAllocating
-              ? `AI 选资产·最多 ${bot.strategy.maxPositions} 个·总仓位 ${pct(bot.strategy.maxGrossExposure, 0)}`
-              : bot.sources.length > 1
-                ? `${bot.sources.map((s) => SOURCE_ZH[s]).join("+")} 混合`
-                : bot.sources[0] === "rules"
+            {bot.decisionSource === "hybrid"
+              ? `大模型分析→决策模型定仓位·影响力 ${pct(bot.strategy.hybridInfluence, 0)}`
+              : bot.strategy.selfAllocating
+                ? `AI 选资产·最多 ${bot.strategy.maxPositions} 个·总仓位 ${pct(bot.strategy.maxGrossExposure, 0)}`
+                : bot.decisionSource === "rules"
                   ? `双均线 ${bot.strategy.fastWindow}/${bot.strategy.slowWindow}`
-                  : `${SOURCE_ZH[bot.sources[0] ?? "rules"]}·每 ${bot.decisionInterval} 根`}
+                  : `${SOURCE_ZH[bot.decisionSource]}·每 ${bot.decisionInterval} 根`}
           </b>
         </span>
         <span><em>资金</em> <b className="mono">{money(bot.risk.initialCash, 0)}</b></span>
@@ -283,7 +283,7 @@ function AllocationOverview({ bots }: { bots: Bot[] }) {
                 <tr key={b.id}>
                   <td>
                     <span className="mono strong">{b.name}</span>
-                    <span className="dim small"> · {b.sources.length > 1 ? "混合" : b.modelLabels[0] ?? ""}</span>
+                    <span className="dim small"> · {SOURCE_ZH[b.decisionSource]}</span>
                   </td>
                   <td className="mono num">{money(a.equity, 0)}</td>
                   {symbols.map((sym) => {
@@ -385,14 +385,8 @@ function BotForm({
   const [connectionId, setConnectionId] = useState(editing?.connectionId ?? connections[0]?.id ?? "");
   const [symbols, setSymbols] = useState<string[]>(editing?.symbols ?? []);
   const [mode, setMode] = useState<"live" | "backtest">(editing?.mode ?? "live");
-  // 混合决策：可同时开多路，按配比融合
-  const [sources, setSources] = useState<DecisionSource[]>(
-    editing?.sources?.length ? editing.sources : ["rules"],
-  );
-  const [blend, setBlend] = useState<Record<DecisionSource, number>>(
-    editing?.blend ?? { rules: 1, chat: 0, systemone: 0 },
-  );
-  const [blendOpen, setBlendOpen] = useState(false);
+  const [decisionSource, setDecisionSource] = useState<DecisionSource>(editing?.decisionSource ?? "rules");
+  const [influence, setInfluence] = useState(editing?.strategy.hybridInfluence ?? 0.6);
   const [modelIds, setModelIds] = useState<string[]>(editing?.modelProfileIds ?? []);
   const [interval, setInterval] = useState(editing?.interval ?? "1m");
   const [barCount, setBarCount] = useState(editing?.barCount ?? 200);
@@ -417,9 +411,9 @@ function BotForm({
   }, [connectionId]);
 
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
-  const modelKinds = sources.filter((s) => s !== "rules");
-  const blendTotal = sources.reduce((acc, s) => acc + (blend[s] ?? 0), 0) || 1;
-  const shareOf = (s: DecisionSource) => Math.round(((blend[s] ?? 0) / blendTotal) * 100);
+  // 混合决策需要同时用对话模型（分析端）与决策模型（决策端），其余各用自己的那一类
+  const modelKinds: ("chat" | "systemone")[] =
+    decisionSource === "hybrid" ? ["chat", "systemone"] : decisionSource === "rules" ? [] : [decisionSource];
   const intervals =
     connections.find((c) => c.id === connectionId)?.adapter?.klineIntervals ??
     ["1m", "5m", "15m", "1h", "4h", "1d"];
@@ -434,9 +428,7 @@ function BotForm({
       mode,
       interval,
       barCount,
-      sources,
-      blend,
-      modelProfileIds: sources.length === 1 && sources[0] === "rules" ? [] : modelIds,
+      modelProfileIds: decisionSource === "rules" ? [] : modelIds,
       decisionInterval,
       strategy: {
         fastWindow: fast,
@@ -446,6 +438,7 @@ function BotForm({
         maxPositions,
         maxGrossExposure: grossCap,
         allocationInterval: allocInterval,
+        hybridInfluence: influence,
       },
       risk: { initialCash: cash, minTradeValue: minTrade, maxDrawdownPct: maxDD },
     };
@@ -485,39 +478,17 @@ function BotForm({
           ]}
           onChange={(v) => setMode(v as "live" | "backtest")}
         />
-        <div className="field">
-          <span className="field-label">
-            决策来源
-            <em className="field-hint">可多选 = 混合决策</em>
-          </span>
-          <div className="chip-row">
-            {SOURCE_OPTIONS.map((o) => {
-              const on = sources.includes(o.value);
-              const pool = o.value === "rules" ? null : profiles.filter((p) => p.kind === o.value && p.enabled && p.hasKey);
-              const missing = o.value !== "rules" && (pool?.length ?? 0) === 0;
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  className={`symbol-chip ${on ? "symbol-on" : ""}`}
-                  title={missing ? "该类模型未配置，勾选后会自动让位给其他路" : undefined}
-                  onClick={() => {
-                    if (on && sources.length === 1) return;
-                    const next = on ? sources.filter((s) => s !== o.value) : [...sources, o.value];
-                    const nextBlend = { ...blend };
-                    nextBlend[o.value] = on ? 0 : nextBlend[o.value] > 0 ? nextBlend[o.value] : 1;
-                    setSources(next);
-                    setBlend(nextBlend);
-                    setBlendOpen(next.length > 1);
-                  }}
-                >
-                  {o.label}
-                  {missing && <span className="dim small">（未配置）</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <SelectField
+          label="决策来源"
+          value={decisionSource}
+          options={[
+            { value: "rules", label: "纯规则（双均线，不调模型）" },
+            { value: "chat", label: "对话模型（直接给仓位）" },
+            { value: "systemone", label: "决策模型（System One 定档位）" },
+            { value: "hybrid", label: "混合决策（大模型分析 → 决策模型定仓位）" },
+          ]}
+          onChange={(v) => setDecisionSource(v as DecisionSource)}
+        />
       </div>
 
       <div className="symbol-picker">
@@ -565,35 +536,24 @@ function BotForm({
         </div>
       )}
 
-      {sources.length > 1 && (
+      {decisionSource === "hybrid" && (
         <div className="blend-rows">
-          <div className="blend-title">
-            <button type="button" className="link-btn" onClick={() => setBlendOpen((v) => !v)}>
-              {blendOpen ? "收起配比 ▲" : "调整融合配比 ▼"}
-            </button>
-            <span className="dim small">
-              {" "}
-              {sources.map((s) => `${SOURCE_ZH[s]} ${shareOf(s)}%`).join(" + ")}
-            </span>
+          <div className="blend-title">分析影响力（大模型结论对决策模型的权重）</div>
+          <div className="blend-row">
+            <span className="blend-name">影响力</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={Math.round(influence * 100)}
+              onChange={(e) => setInfluence(Number(e.target.value) / 100)}
+            />
+            <span className="blend-pct mono">{pct(influence, 0)}</span>
           </div>
-          {blendOpen &&
-            sources.map((s) => (
-              <div className="blend-row" key={s}>
-                <span className="blend-name">{SOURCE_ZH[s]}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={10}
-                  step={1}
-                  value={blend[s] ?? 0}
-                  onChange={(e) => setBlend({ ...blend, [s]: Number(e.target.value) })}
-                />
-                <span className="blend-pct mono">{shareOf(s)}%</span>
-                {s !== "rules" && profiles.filter((p) => p.kind === s && p.enabled && p.hasKey).length === 0 && (
-                  <span className="blend-warn">无可用实例 · 自动让位</span>
-                )}
-              </div>
-            ))}
+          <div className="blend-preview small dim">
+            0% = 决策模型独立决策；100% = 以大模型分析结论为主要依据。
+          </div>
         </div>
       )}
 

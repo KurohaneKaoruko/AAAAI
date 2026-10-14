@@ -78,18 +78,15 @@ test("资产配置：裁剪规则（越界/超数/超总额/候选池外）", ()
 });
 
 test("资产配置：规则基线只选动量为正的前 N 名", async () => {
-  const base = new CrossSectionalAllocator();
-  const r = await base.allocate(
-    [snap("A", 0.05), snap("B", 0.02), snap("C", -0.03)],
-    LIMITS,
-  );
+  const base = new CrossSectionalAllocator(LIMITS);
+  const r = await base.allocate([snap("A", 0.05), snap("B", 0.02), snap("C", -0.03)]);
   assert.equal(r.source, "rules");
   assert.ok((r.weights.A ?? 0) > 0, "动量最高的应入选");
   assert.ok((r.weights.C ?? 0) === 0, "负动量不应入选");
   assert.equal(Object.keys(r.weights).length, 2, "最多持有 maxPositions 个");
   assert.ok(Object.values(r.weights).every((w) => w <= LIMITS.maxPositionWeight + 1e-9));
 
-  const flat = await base.allocate([snap("A", 0), snap("B", -0.01)], LIMITS);
+  const flat = await base.allocate([snap("A", 0), snap("B", -0.01)]);
   assert.deepEqual(flat.weights, {}, "无正动量时空仓");
   assert.equal(flat.cashWeight, 1);
 });
@@ -109,11 +106,8 @@ test("资产配置：AI 选出来的标的直接决定持仓", async () => {
       });
     },
   };
-  const ai = new AIAllocator(new CrossSectionalAllocator(), llm, {
-    maxPositions: 2,
-    maxPositionWeight: 0.5,
-    grossCap: 0.9,
-  });
+  const limits = { maxPositions: 2, maxPositionWeight: 0.5, grossCap: 0.9 };
+  const ai = new AIAllocator(new CrossSectionalAllocator(limits), llm, limits);
   const r = await ai.allocate([snap("BTC", 0.01), snap("ETH", 0.02), snap("SOL", 0.03)]);
   assert.equal(r.source, "ai");
   assert.equal(r.reason, "只看好 BTC");
@@ -133,7 +127,7 @@ test("资产配置：模型不可用/输出非法时回退动量基线", async (
       return "我建议全仓买入";
     },
   };
-  const ai = new AIAllocator(new CrossSectionalAllocator(), broken, LIMITS);
+  const ai = new AIAllocator(new CrossSectionalAllocator(LIMITS), broken, LIMITS);
   const r = await ai.allocate([snap("A", 0.04), snap("B", -0.01)]);
   assert.equal(r.source, "fallback");
   assert.ok((r.weights.A ?? 0) > 0, "回退后仍应按动量持有 A");
@@ -146,13 +140,13 @@ test("资产配置：模型不可用/输出非法时回退动量基线", async (
       return "{}";
     },
   };
-  const r2 = await new AIAllocator(new CrossSectionalAllocator(), noAlloc, LIMITS).allocate([
+  const r2 = await new AIAllocator(new CrossSectionalAllocator(LIMITS), noAlloc, LIMITS).allocate([
     snap("A", 0.04),
   ]);
   assert.equal(r2.source, "fallback");
 
   // 完全没有模型 -> 纯规则
-  const r3 = await new AIAllocator(new CrossSectionalAllocator(), null, LIMITS).allocate([
+  const r3 = await new AIAllocator(new CrossSectionalAllocator(LIMITS), null, LIMITS).allocate([
     snap("A", 0.04),
   ]);
   assert.equal(r3.source, "rules");
@@ -242,4 +236,49 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
 
   const m = pipeline.portfolio.metrics();
   assert.ok(m.totalFills > 0, `应产生成交，实际 ${m.totalFills}`);
+});
+
+test("配置器：每 N 轮行情都会重新决策（回归：节流计数器只自增一次会永远卡住）", async () => {
+  let calls = 0;
+  const llm: LLMClient = {
+    name: "mock",
+    async complete() {
+      return "{}";
+    },
+    async allocate(_p, symbols) {
+      calls += 1;
+      return JSON.stringify({ allocations: { [symbols[0]!]: 0.4 }, confidence: 0.6, reason: "配置" });
+    },
+  };
+  const base = testConfig();
+  const config = {
+    ...base,
+    strategy: {
+      ...base.strategy,
+      decisionSource: "chat" as const,
+      selfAllocating: true,
+      maxPositions: 2,
+      maxGrossExposure: 0.8,
+      // 预热 20 根，每 5 轮决策一次
+      allocationInterval: 5,
+      slowWindow: 20,
+    },
+  };
+  const adapter = testAdapter();
+  const pipeline = buildPipeline(config, { adapter, liveTrading: false, llm });
+  const allocations: Allocation[] = [];
+  pipeline.bus.subscribe(Topic.ALLOCATION, (e) => allocations.push(e.payload as Allocation));
+
+  const groups = await Promise.all([
+    adapter.fetchKlines("BTC", "1m", 220),
+    adapter.fetchKlines("DEMO-ETH", "1m", 220),
+  ]);
+  await streamBars(pipeline.bus, pipeline.book, mergeBarsByTime(groups));
+
+  // 220 根 × 2 标的、预热 20 根、每 5 轮一次 -> 至少 20 次以上
+  assert.ok(
+    allocations.length >= 20,
+    `决策次数过少，说明节流失效：220 根 K 线只决策了 ${allocations.length} 次`,
+  );
+  assert.ok(calls >= 20, `模型调用次数应与决策次数一致，实际 ${calls}`);
 });

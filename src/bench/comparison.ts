@@ -99,26 +99,18 @@ export async function runComparison(
 
   // 2) 每个选手一套独立流水线（独立资金/持仓/风控）
   const contexts: RunnerCtx[] = options.runners.map((spec) => {
-    // 对照实验必须单变量：每位选手只跑自己那一路，其余路配比归零
+    // 对照实验必须单变量：每位选手只跑自己那一路，其余路不介入
     const soloSource: DecisionSource = spec.kind === "baseline" ? "rules" : spec.kind;
-    const soloConfig = {
-      ...config,
-      strategy: {
-        ...config.strategy,
-        decisionSource: soloSource,
-        sources: [soloSource],
-        blend: {
-          rules: spec.kind === "baseline" ? 1 : 0,
-          chat: spec.kind === "chat" ? 1 : 0,
-          systemone: spec.kind === "systemone" ? 1 : 0,
-        },
+    const pipeline = buildPipeline(
+      config,
+      {
+        adapter: options.adapter,
+        liveTrading: options.liveTrading,
+        llm: spec.kind === "chat" ? (spec.client ?? null) : null,
+        soClient: spec.kind === "systemone" ? (spec.client ?? null) : null,
       },
-    };
-    const pipeline = buildPipeline(soloConfig, {
-      adapter: options.adapter,
-      liveTrading: options.liveTrading,
-      llm: spec.kind === "baseline" ? null : (spec.client ?? null),
-    });
+      soloSource,
+    );
     return { spec, pipeline };
   });
 

@@ -114,12 +114,7 @@ export class BotManager {
       interval: input.interval ?? this.config.market.interval,
       barCount: input.barCount ?? this.config.market.barCount,
       pollMs: input.pollMs ?? this.config.market.pollMs,
-      decisionSource: input.sources?.[0] ?? input.decisionSource ?? "rules",
-      sources: normalizeSources(input.sources ?? (input.decisionSource ? [input.decisionSource] : ["rules"])),
-      blend: normalizeBlend(
-        input.blend,
-        input.sources ?? (input.decisionSource ? [input.decisionSource] : ["rules"]),
-      ),
+      decisionSource: input.decisionSource ?? "rules",
       modelProfileIds: input.modelProfileIds ?? [],
       decisionInterval: input.decisionInterval ?? this.config.llm.decisionInterval,
       strategy: {
@@ -130,6 +125,7 @@ export class BotManager {
         maxPositions: input.strategy?.maxPositions ?? this.config.strategy.maxPositions,
         maxGrossExposure: input.strategy?.maxGrossExposure ?? this.config.strategy.maxGrossExposure,
         allocationInterval: input.strategy?.allocationInterval ?? this.config.strategy.allocationInterval,
+        hybridInfluence: input.strategy?.hybridInfluence ?? this.config.strategy.hybridInfluence,
       },
       risk: {
         initialCash: input.risk?.initialCash ?? this.config.risk.initialCash,
@@ -163,11 +159,6 @@ export class BotManager {
     if (patch.barCount !== undefined) bot.barCount = Math.max(2, patch.barCount);
     if (patch.pollMs !== undefined) bot.pollMs = Math.max(1000, patch.pollMs);
     if (patch.decisionSource !== undefined) bot.decisionSource = patch.decisionSource;
-    if (patch.sources !== undefined) {
-      bot.sources = normalizeSources(patch.sources);
-      bot.decisionSource = bot.sources[0] ?? "rules";
-    }
-    if (patch.blend !== undefined) bot.blend = normalizeBlend(patch.blend, bot.sources);
     if (patch.modelProfileIds !== undefined) bot.modelProfileIds = patch.modelProfileIds;
     if (patch.decisionInterval !== undefined) bot.decisionInterval = Math.max(1, patch.decisionInterval);
     if (patch.strategy) bot.strategy = { ...bot.strategy, ...patch.strategy };
@@ -301,14 +292,13 @@ export class BotManager {
       llm: { ...this.config.llm, decisionInterval: bot.decisionInterval, enabled: bot.decisionSource !== "rules" },
     };
     localConfig.strategy.decisionSource = bot.decisionSource;
-    localConfig.strategy.sources = bot.sources;
-    localConfig.strategy.blend = bot.blend;
+    localConfig.strategy.hybridInfluence = bot.strategy.hybridInfluence;
 
     const pipeline = buildPipeline(localConfig, {
       adapter,
       liveTrading: false, // 机器人始终模拟成交，避免并行任务误下真单
-      lanes,
-      llm: lanes.chat ?? lanes.systemone,
+      llm: lanes.chat,
+      soClient: lanes.systemone,
     });
 
     // 行情必须打进 pipeline 自己的总线：
@@ -441,50 +431,26 @@ export class BotManager {
   }
 
   private toView(bot: BotConfig): BotView {
-    // 混合决策：按路分组列出模型，一眼看出「对话模型几路 + 决策模型几路 + 各自配比」
+    // 一眼看出「这个机器人由谁决策、用哪些模型实例」
     const labels: string[] = [];
-    const total = bot.sources.reduce((acc, s) => acc + bot.blend[s], 0) || 1;
-    for (const source of bot.sources) {
-      const share = Math.round((bot.blend[source] / total) * 100);
-      if (source === "rules") {
-        labels.push(`规则 ${share}%`);
-        continue;
-      }
+    const kinds: ModelKind[] = bot.decisionSource === "hybrid" ? ["chat", "systemone"] : bot.decisionSource === "rules" ? [] : [bot.decisionSource];
+    if (kinds.length === 0) {
+      labels.push("双均线动量（纯规则）");
+    }
+    for (const kind of kinds) {
       const scoped = this.llm
         .list()
-        .filter((p) => p.kind === source && p.hasKey && p.enabled)
+        .filter((p) => p.kind === kind && p.hasKey && p.enabled)
         .filter((p) => (bot.modelProfileIds.length > 0 ? bot.modelProfileIds.includes(p.id) : true));
-      const zh = source === "chat" ? "对话模型" : "决策模型";
+      const zh = kind === "chat" ? "对话模型" : "决策模型";
       labels.push(
         scoped.length > 0
-          ? `${zh} ${share}%（${scoped.map((p) => p.label).join("/")}）`
-          : `${zh} ${share}%（未配置，不参与）`,
+          ? `${zh}：${scoped.map((p) => p.label).join("/")}`
+          : `${zh}：未配置可用实例`,
       );
     }
     return { ...bot, state: this.state(bot.id), modelLabels: labels };
   }
-}
-
-/** 清洗决策路列表：去重、去非法、保底至少一路。 */
-function normalizeSources(list: DecisionSource[]): DecisionSource[] {
-  const valid = [...new Set(list.filter((s) => s === "rules" || s === "chat" || s === "systemone"))];
-  return valid.length > 0 ? valid : ["rules"];
-}
-
-/** 配比：只保留选中路的权重，全 0 时等权。 */
-function normalizeBlend(
-  blend: Partial<Record<DecisionSource, number>> | undefined,
-  sources: DecisionSource[],
-): Record<DecisionSource, number> {
-  const out: Record<DecisionSource, number> = { rules: 0, chat: 0, systemone: 0 };
-  for (const s of sources) {
-    const v = Number(blend?.[s] ?? 0);
-    out[s] = Number.isFinite(v) && v > 0 ? v : 0;
-  }
-  if (sources.every((s) => out[s] === 0)) {
-    for (const s of sources) out[s] = 1;
-  }
-  return out;
 }
 
 function round2(v: number): number {
