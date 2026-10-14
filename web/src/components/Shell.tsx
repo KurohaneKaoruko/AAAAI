@@ -1,12 +1,13 @@
-/** 侧边导航 + 顶栏 + 行情跑马灯 + 提示条。 */
+/** 侧边导航 + 顶栏 + 行情跑马灯 + 主题切换 + 提示条。 */
 
 import type { ReactNode } from "react";
 import type { AppStore } from "../state/useAppStore";
 import type { EngineState } from "../types";
+import type { Theme } from "../lib/theme";
 import { Badge } from "./ui";
 import { ASSET_LABEL, money, pct } from "../lib/format";
 
-export type PageId = "dashboard" | "markets" | "exchanges" | "strategy" | "risk" | "llm" | "system";
+export type PageId = "dashboard" | "markets" | "exchanges" | "strategy" | "llm" | "risk" | "system";
 
 const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "dashboard", label: "仪表盘", icon: "◧", group: "交易" },
@@ -69,7 +70,33 @@ export function Sidebar({
   );
 }
 
-export function TopBar({ store, actions }: { store: AppStore; actions: ReactNode }) {
+export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={onToggle}
+      title={isDark ? "切换到亮色主题" : "切换到暗色主题"}
+      aria-label="切换主题"
+    >
+      <span className="theme-icon">{isDark ? "☾" : "☀"}</span>
+      {isDark ? "暗色" : "亮色"}
+    </button>
+  );
+}
+
+export function TopBar({
+  store,
+  actions,
+  theme,
+  onToggleTheme,
+}: {
+  store: AppStore;
+  actions: ReactNode;
+  theme: Theme;
+  onToggleTheme: () => void;
+}) {
   const state = store.state;
   const tickers = state?.tickers ?? [];
   return (
@@ -94,7 +121,10 @@ export function TopBar({ store, actions }: { store: AppStore; actions: ReactNode
           {store.connected ? "实时通道 OK" : "通道断开"}
         </span>
       </div>
-      <div className="topbar-actions">{actions}</div>
+      <div className="topbar-actions">
+        {actions}
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
       {tickers.length > 0 && (
         <div className="ticker-strip">
           {tickers.slice(0, 12).map((t) => (

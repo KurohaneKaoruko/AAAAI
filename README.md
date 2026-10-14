@@ -26,13 +26,20 @@ AAAAAI 探索「LLM Agent × 量化投资」的自动化投研流程。一条事
 | 交易所 | 品类 | 行情 | 下单 | 密钥 |
 | --- | --- | --- | --- | --- |
 | 模拟交易所 | 全品类 | 离线生成，可复现 | 模拟成交 | 不需要 |
-| Binance 币安 | 加密货币 | 公共接口 | HMAC 签名下单 | 需要 |
+| Binance 币安 | 加密货币 | 公共接口 | HMAC-SHA256 签名下单 | 需要 |
+| Gate.io | 加密货币 | 公共接口 | HMAC-SHA512 签名下单 | 需要 |
 | OKX | 加密货币 | 公共接口 | OK-ACCESS 签名下单 | 需要 |
 | 东方财富 | A 股 / 港股 / ETF | 实时 + K 线 | 仅行情（可模拟盘交易） | 不需要 |
 | Stooq | 美股 | 日线 | 仅行情（可模拟盘交易） | 不需要 |
 
 - 股票没有免费实盘接口，因此 A 股 / 美股连接默认 **真实行情 + 模拟成交**，策略照样能跑真实价格；
 - 加密货币连接配好 Key 后可切「真实下单」，默认走测试网。
+
+### 黑白双主题
+
+- 顶栏一键切换暗色 / 亮色，选择持久化到浏览器本地；
+- 首次访问跟随系统 `prefers-color-scheme`，之后以你的手动选择为准；
+- 两套主题均为「纯黑 / 纯白」基调，全部颜色由 CSS 变量驱动，图表、表格、徽章、提示条全部适配。
 
 ### WebUI 面板（7 个独立页面）
 
@@ -82,6 +89,7 @@ npm run typecheck # 服务端 + WebUI 全量类型检查
 
 1. 进入 **交易所连接** 页 → 新建连接 → 选择 `Binance 币安`（或东财 / Stooq）→ 保存；
 2. 进入 **自选标的** 页 → 选择该连接 → 搜索 `BTC` / `600519` / `AAPL` → 加入自选；
+   （Gate.io 的 `BTC_USDT` 与其它家的 `BTCUSDT` 写法不同，搜索结果已统一成无下划线形式）
 3. 回仪表盘 → 运行引擎选择该连接与标的 → 开始回测。
 
 ### 实盘交易（高危）
@@ -119,7 +127,7 @@ AAAAI/
 │   │   ├── types.ts        #   ExchangeAdapter 统一接口
 │   │   ├── registry.ts     #   适配器注册与工厂
 │   │   ├── connectionManager.ts # 连接 CRUD + 密钥保管
-│   │   ├── simulated.ts / binance.ts / okx.ts / eastmoney.ts / stooq.ts
+│   │   ├── simulated.ts / binance.ts / gate.ts / okx.ts / eastmoney.ts / stooq.ts
 │   ├── agents/             # 智能体：analyst / strategist / riskGuard / orchestrator
 │   ├── strategies/         # 策略：momentum / llmStrategy
 │   ├── data/streaming.ts   # 价格簿、K 线归并、实时轮询
@@ -132,7 +140,7 @@ AAAAI/
 │   ├── watchlist.ts        # 自选管理
 │   └── index.ts            # 入口
 ├── web/                    # WebUI（React + Vite）
-│   └── src/{pages,components,state,lib}
+│   └── src/{pages,components,state,lib}   # lib/theme.ts = 黑白主题切换
 ├── test/                   # node:test
 └── docs/architecture.md    # 架构与扩展指南
 ```

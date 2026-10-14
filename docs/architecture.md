@@ -38,7 +38,19 @@ interface ExchangeAdapter {
 }
 ```
 
+现有实现：模拟、Binance、Gate.io、OKX（加密货币），东方财富（A 股/港股）、Stooq（美股）。
 新增交易所只需实现该接口并在 `registry.ts` 注册，UI 的目录、连接表单、周期下拉会自动出现。
+
+**签名差异对照**（下单均走 HTTPS + 私有接口）：
+
+| 交易所 | 算法 | 关键请求头 |
+| --- | --- | --- |
+| Binance | HMAC-SHA256(query) hex | `X-MBX-APIKEY` |
+| Gate.io | HMAC-SHA512(body) hex | `KEY` / `Timestamp` / `SIGN` |
+| OKX | HMAC-SHA256(ts+method+path+body) base64 | `OK-ACCESS-KEY` / `SIGN` / `TIMESTAMP` / `PASSPHRASE` |
+
+**交易对写法差异**：Gate.io 用 `BTC_USDT`（下划线），Binance / OKX 用 `BTCUSDT`。
+适配器在入口统一为「无下划线」展示，Gate 内部由 `toGatePair()` / `fromGatePair()` 转换。
 
 **连接与密钥分离**：
 
@@ -75,6 +87,12 @@ Agent 之间不允许直接引用对方实例（装配层除外），一律经 E
 
 **多标的**：K 线先按 `timestamp` 全局排序再广播，因此组合层在同一时刻只看到一个标的一根 K 线，跨标的调仓顺序确定。
 
+## 主题系统
+
+- 所有颜色收敛为 CSS 变量，暗色与亮色各定义一套，仅切换 `:root` 上的变量；
+- `web/src/lib/theme.ts` 的 `useTheme()` 负责：读 localStorage → 首次跟随 `prefers-color-scheme` → 写 `document.documentElement[data-theme]`；
+- 主题状态不在 React 状态树之外单点维护，切换即时生效且与页面状态无关。
+
 ## WebUI 结构
 
 ```
@@ -103,6 +121,7 @@ web/src/
 - **同步事件总线**：回测/实盘同构、可复现；分钟级、少量标的足够。高频场景可在 Broker 边界换异步实现，内核不动。
 - **交易所内聚**：交易与行情都收敛到适配器，Agent 层完全不感知具体交易所。
 - **零重型运行时依赖**：服务端仅 `express` / `js-yaml` / `dotenv`；图表为手写 SVG，无 UI 框架债。
+- **零 CSS 框架**：样式为单一 CSS 文件 + 变量，亮暗两套主题不重复维护布局代码。
 - **日志环形缓冲**：`core/logger` 保留最近 1000 条，`/api/logs` 供系统页查看，避免额外日志文件依赖。
 
 ## 如何扩展

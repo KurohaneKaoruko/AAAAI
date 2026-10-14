@@ -60,10 +60,10 @@ test("SimulatedAdapter: 模拟成交含手续费", async () => {
   assert.equal(bad.status, "rejected");
 });
 
-test("适配器元信息完整：5 家交易所", () => {
+test("适配器元信息完整：6 家交易所", () => {
   const metas = listAdapterMetas();
   const ids = metas.map((m) => m.id);
-  assert.deepEqual(ids.sort(), ["binance", "eastmoney", "okx", "simulated", "stooq"]);
+  assert.deepEqual(ids.sort(), ["binance", "eastmoney", "gate", "okx", "simulated", "stooq"]);
   for (const m of metas) {
     assert.ok(m.name.length > 0, `${m.id} 缺少名称`);
     assert.ok(m.description.length > 0, `${m.id} 缺少描述`);
@@ -75,6 +75,7 @@ test("适配器元信息完整：5 家交易所", () => {
   assert.equal(metas.find((m) => m.id === "stooq")!.supportsTrading, false);
   assert.equal(metas.find((m) => m.id === "binance")!.supportsTrading, true);
   assert.equal(metas.find((m) => m.id === "okx")!.supportsTrading, true);
+  assert.equal(metas.find((m) => m.id === "gate")!.supportsTrading, true);
 });
 
 test("createAdapter 按连接创建对应实例", () => {

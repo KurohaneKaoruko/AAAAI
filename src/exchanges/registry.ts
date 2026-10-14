@@ -1,6 +1,7 @@
 /** 适配器注册表：UI 目录与实例工厂。 */
 
 import { BinanceAdapter } from "./binance.js";
+import { GateAdapter } from "./gate.js";
 import { EastmoneyAdapter } from "./eastmoney.js";
 import { OkxAdapter } from "./okx.js";
 import { SimulatedAdapter } from "./simulated.js";
@@ -19,6 +20,7 @@ export function listAdapterMetas(): AdapterMeta[] {
   return [
     new SimulatedAdapter().meta,
     new BinanceAdapter().meta,
+    new GateAdapter().meta,
     new OkxAdapter().meta,
     new EastmoneyAdapter().meta,
     new StooqAdapter().meta,
@@ -36,6 +38,8 @@ export function createAdapter(connection: Connection, cred: { apiKey: string; ap
       return new SimulatedAdapter();
     case "binance":
       return new BinanceAdapter();
+    case "gate":
+      return new GateAdapter();
     case "okx":
       return new OkxAdapter();
     case "eastmoney":
