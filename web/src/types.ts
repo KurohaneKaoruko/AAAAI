@@ -116,6 +116,7 @@ export interface LlmStats {
 export interface LlmProfile {
   id: string;
   label: string;
+  kind: "chat" | "systemone";
   provider: string;
   baseUrl: string;
   model: string;
@@ -124,6 +125,9 @@ export interface LlmProfile {
   weight: number;
   enabled: boolean;
   createdAt: string;
+  levels: string[];
+  levelWeights: number[];
+  instructions: string;
   hasKey: boolean;
   healthy: boolean;
   stats: LlmStats;
@@ -140,6 +144,46 @@ export interface LlmOverview {
 export interface AuthStatus {
   authRequired: boolean;
   authenticated: boolean;
+}
+
+export type RunnerKind = "baseline" | "chat" | "systemone";
+
+export interface RunnerResult {
+  id: string;
+  label: string;
+  kind: RunnerKind;
+  model?: string;
+  ok: boolean;
+  error?: string;
+  initialCash: number;
+  finalEquity: number;
+  totalReturn: number;
+  maxDrawdownPct: number;
+  trades: number;
+  winRate: number;
+  profitFactor: number;
+  realizedPnl: number;
+  fillCount: number;
+  equityCurve: EquityPoint[];
+  positions: Position[];
+  llmCalls: number;
+}
+
+export interface ComparisonResult {
+  symbols: string[];
+  bars: number;
+  initialCash: number;
+  finishedAt: string;
+  durationMs: number;
+  winners: string[];
+  results: RunnerResult[];
+}
+
+export interface SystemOnePreset {
+  id: string;
+  baseUrl: string;
+  model: string;
+  label: string;
 }
 
 export interface AppConfig {
@@ -191,6 +235,9 @@ export interface EngineState {
   broker: { name: string; paper: boolean } | null;
   strategy: string | null;
   realizedPnl: number;
+  /** 最近一次多模型对照结果 */
+  comparison: ComparisonResult | null;
+  comparing: boolean;
   config: AppConfig;
 }
 

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { LLMClient } from "./llmClient.js";
 import { OpenAICompatClient } from "./openaiClient.js";
+import { SystemOneClient, buildStateFromPrompt } from "./systemOne.js";
 import { getLogger } from "../core/logger.js";
 import { SecretStore } from "../store/secrets.js";
 
@@ -32,11 +33,15 @@ export const STRATEGY_LABEL: Record<BalanceStrategy, string> = {
   latency: "最低延迟优先（Latency）",
 };
 
-/** 一个 LLM 端点配置（不含密钥）。 */
+/** 模型类型：对话模型（chat）或 System One 纯决策模型（systemone）。 */
+export type ModelKind = "chat" | "systemone";
+
+/** 一个模型端点配置（不含密钥）。 */
 export interface LlmProfile {
   id: string;
   label: string;
-  /** openai-compatible / anthropic / 本地等，仅作标记与展示 */
+  kind: ModelKind;
+  /** openai-compatible / jev / Laya / 自定义，仅作标记与展示 */
   provider: string;
   baseUrl: string;
   model: string;
@@ -46,7 +51,26 @@ export interface LlmProfile {
   weight: number;
   enabled: boolean;
   createdAt: string;
+  /** System One：档位标签（从低到高） */
+  levels: string[];
+  /** System One：每个档位对应的目标仓位权重（与 levels 等长，0~1） */
+  levelWeights: number[];
+  /** System One：提问内容 */
+  instructions: string;
 }
+
+/** System One 预设：不同厂商的默认地址/模型。 */
+export const SYSTEM_ONE_PRESETS: Record<string, { baseUrl: string; model: string; label: string }> = {
+  jev: { baseUrl: "https://jev-api.com/v1", model: "jev-latest", label: "Jev (TypeSafe)" },
+  Laya: { baseUrl: "http://127.0.0.1:8080/v1", model: "Laya-latest", label: "Laya（自托管）" },
+  alibaba: { baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen-systemone", label: "阿里云百炼" },
+  custom: { baseUrl: "", model: "systemone", label: "自定义 System One" },
+};
+
+export const DEFAULT_LEVELS = ["flat", "weak", "moderate", "strong"];
+export const DEFAULT_LEVEL_WEIGHTS = [0, 0.25, 0.5, 0.9];
+export const DEFAULT_INSTRUCTIONS =
+  "根据给定的K线序列与市场解读，评估未来若干根K线该标的的上涨强度。信息不足或趋势不明时选最低档。";
 
 /** 运行期统计（不持久化）。 */
 export interface LlmStats {
@@ -70,6 +94,7 @@ export interface LlmProfileView extends LlmProfile {
 
 export interface LlmProfileInput {
   label: string;
+  kind?: ModelKind;
   provider?: string;
   baseUrl: string;
   model: string;
@@ -78,6 +103,9 @@ export interface LlmProfileInput {
   timeoutMs?: number;
   weight?: number;
   enabled?: boolean;
+  levels?: string[];
+  levelWeights?: number[];
+  instructions?: string;
 }
 
 export interface LlmManagerOptions {
@@ -95,7 +123,7 @@ export class LlmManager implements LLMClient {
 
   private profiles: LlmProfile[] = [];
   private stats = new Map<string, LlmStats>();
-  private clients = new Map<string, OpenAICompatClient>();
+  private clients = new Map<string, OpenAICompatClient | SystemOneClient>();
   private rrIndex = 0;
   private readonly secrets: SecretStore;
   private readonly key: (id: string) => string;
@@ -147,6 +175,7 @@ export class LlmManager implements LLMClient {
     const profile: LlmProfile = {
       id: randomUUID().slice(0, 8),
       label: input.label.trim() || input.model,
+      kind: input.kind ?? "chat",
       provider: input.provider ?? "openai-compatible",
       baseUrl: input.baseUrl.replace(/\/$/, ""),
       model: input.model,
@@ -155,6 +184,9 @@ export class LlmManager implements LLMClient {
       weight: clampWeight(input.weight ?? 1),
       enabled: input.enabled ?? true,
       createdAt: new Date().toISOString(),
+      levels: input.levels?.length ? input.levels : [...DEFAULT_LEVELS],
+      levelWeights: normalizeWeights(input.levelWeights ?? input.levels?.length ? DEFAULT_LEVEL_WEIGHTS : undefined),
+      instructions: input.instructions?.trim() || DEFAULT_INSTRUCTIONS,
     };
     this.profiles.push(profile);
     this.secrets.set(this.key(profile.id), { apiKey: input.apiKey ?? "", apiSecret: "" });
@@ -166,6 +198,7 @@ export class LlmManager implements LLMClient {
     const profile = this.get(id);
     if (!profile) throw new Error(`LLM 配置不存在: ${id}`);
     if (patch.label !== undefined) profile.label = patch.label.trim() || profile.label;
+    if (patch.kind !== undefined) profile.kind = patch.kind;
     if (patch.provider !== undefined) profile.provider = patch.provider;
     if (patch.baseUrl !== undefined) profile.baseUrl = patch.baseUrl.replace(/\/$/, "");
     if (patch.model !== undefined) profile.model = patch.model;
@@ -173,6 +206,9 @@ export class LlmManager implements LLMClient {
     if (patch.timeoutMs !== undefined) profile.timeoutMs = patch.timeoutMs;
     if (patch.weight !== undefined) profile.weight = clampWeight(patch.weight);
     if (patch.enabled !== undefined) profile.enabled = patch.enabled;
+    if (patch.levels && patch.levels.length > 0) profile.levels = [...patch.levels];
+    if (patch.levelWeights) profile.levelWeights = normalizeWeights(patch.levelWeights);
+    if (patch.instructions) profile.instructions = patch.instructions;
     if (patch.apiKey) this.secrets.patch(this.key(id), { apiKey: patch.apiKey });
     this.clients.delete(id);
     this.persist();
@@ -206,10 +242,11 @@ export class LlmManager implements LLMClient {
 
   // ---------------- 负载均衡 ----------------
 
-  /** 可用实例：已启用、有 Key、未在冷却中。 */
-  available(): LlmProfile[] {
+  /** 可用实例：已启用、有 Key、未在冷却中。可按模型类型过滤。 */
+  available(kind?: ModelKind): LlmProfile[] {
     const now = Date.now();
     return this.profiles.filter((p) => {
+      if (kind && p.kind !== kind) return false;
       if (!p.enabled) return false;
       if (!this.secrets.hasKey(this.key(p.id))) return false;
       const s = this.stats.get(p.id);
@@ -217,9 +254,9 @@ export class LlmManager implements LLMClient {
     });
   }
 
-  /** 按当前策略挑选一个实例；无可用实例时回退到全部已启用实例。 */
-  pick(): LlmProfile | null {
-    const pool = this.available();
+  /** 按当前策略挑选一个实例；可按模型类型过滤。 */
+  pick(kind?: ModelKind): LlmProfile | null {
+    const pool = this.available(kind);
     if (pool.length === 0) return null;
     if (pool.length === 1) return pool[0]!;
 
@@ -263,10 +300,24 @@ export class LlmManager implements LLMClient {
     return s && s.avgLatencyMs > 0 ? s.avgLatencyMs : 0;
   }
 
-  private client(profile: LlmProfile): OpenAICompatClient {
+  private client(profile: LlmProfile): OpenAICompatClient | SystemOneClient {
     const cached = this.clients.get(profile.id);
     if (cached) return cached;
     const secret = this.secrets.get(this.key(profile.id));
+    if (profile.kind === "systemone") {
+      const so = new SystemOneClient({
+        baseUrl: profile.baseUrl,
+        apiKey: secret.apiKey,
+        model: profile.model,
+        timeoutMs: profile.timeoutMs,
+        levels: profile.levels,
+        levelWeights: profile.levelWeights,
+        instructions: profile.instructions,
+        buildState: buildStateFromPrompt,
+      });
+      this.clients.set(profile.id, so);
+      return so;
+    }
     const client = new OpenAICompatClient({
       baseUrl: profile.baseUrl,
       apiKey: secret.apiKey,
@@ -282,14 +333,18 @@ export class LlmManager implements LLMClient {
    * 发送一次请求。失败时自动故障转移到下一个可用实例（最多一次）。
    * 全部实例不可用或均失败则抛出最后一个错误，由上层回退规则策略。
    */
-  async complete(prompt: string): Promise<string> {
-    const first = this.pick();
+  async complete(prompt: string, kind?: ModelKind): Promise<string> {
+    const first = this.pick(kind);
     if (!first) {
-      throw new Error("没有可用的 LLM 实例（请在「LLM 大模型」页添加并配置密钥）");
+      throw new Error(
+        kind === "systemone"
+          ? "没有可用的 System One 决策模型（请在「LLM 大模型」页添加并配置密钥）"
+          : "没有可用的对话模型（请在「LLM 大模型」页添加并配置密钥）",
+      );
     }
     let lastError: Error = new Error("未知错误");
     const tried = new Set<string>();
-    for (const profile of [first, ...this.available().filter((p) => p.id !== first.id)]) {
+    for (const profile of [first, ...this.available(kind).filter((p) => p.id !== first.id)]) {
       if (tried.has(profile.id)) continue;
       tried.add(profile.id);
       try {
@@ -330,6 +385,17 @@ export class LlmManager implements LLMClient {
       }
       throw err;
     }
+  }
+
+  /**
+   * 取指定实例的直连客户端（不经过负载均衡）。
+   * 多模型对照实验里，每个选手独立操盘、各自记账，互不干扰。
+   */
+  clientFor(profileId: string): { client: LLMClient; profile: LlmProfile } | null {
+    const profile = this.get(profileId);
+    if (!profile) return null;
+    if (!this.secrets.hasKey(this.key(profileId))) return null;
+    return { client: this.client(profile), profile };
   }
 
   /** 指定实例直接调用（用于「测试连接」按钮），不参与负载均衡。 */
@@ -412,4 +478,10 @@ function emptyStats(): LlmStats {
 function clampWeight(w: number): number {
   if (!Number.isFinite(w)) return 1;
   return Math.min(Math.max(Math.round(w), 1), 100);
+}
+
+/** 档位权重：长度对齐 levels，缺失补 0，并夹到 0~1。 */
+function normalizeWeights(weights?: number[]): number[] {
+  const base = weights ?? DEFAULT_LEVEL_WEIGHTS;
+  return base.map((w) => (Number.isFinite(w) ? Math.min(Math.max(w, 0), 1) : 0));
 }

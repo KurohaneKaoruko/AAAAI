@@ -246,10 +246,12 @@ test("无可用实例时抛出可读错误", async () => {
   const dir = tmpDir();
   try {
     const m = new LlmManager(dir);
-    await assert.rejects(() => m.complete("hi"), /没有可用的 LLM 实例/);
+    await assert.rejects(() => m.complete("hi"), /没有可用的对话模型/);
+    // 指定类型时错误信息应点名该类型
+    await assert.rejects(() => m.complete("hi", "systemone"), /没有可用的 System One 决策模型/);
     // 只有一个没有 Key 的实例同样不可用
     m.create({ label: "无密钥", baseUrl: "https://a.test/v1", model: "m", apiKey: "" });
-    await assert.rejects(() => m.complete("hi"), /没有可用的 LLM 实例/);
+    await assert.rejects(() => m.complete("hi"), /没有可用的对话模型/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

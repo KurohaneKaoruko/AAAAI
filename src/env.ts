@@ -21,7 +21,11 @@ export function envKey(name: string): string {
   return `${ENV_PREFIX}_${name}`;
 }
 
-/** 读取 AAAAI 自有配置项（带前缀）。 */
+/**
+ * 读取 AAAAI 自有配置项（带前缀）。
+ * 注意：未设置时返回空字符串（不是 undefined），因此调用方请用 `||` 或显式判空，
+ * 不要用 `??`，否则会拿到空串而不是默认值。
+ */
 export function readEnv(name: string, fallback = ""): string {
   return process.env[envKey(name)] ?? fallback;
 }
