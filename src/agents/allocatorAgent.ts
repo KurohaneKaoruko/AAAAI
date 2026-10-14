@@ -46,6 +46,15 @@ export interface AllocatorOptions {
   portfolio: PortfolioManager;
   /** 给了它就走逐标的决策（不走资产配置器） */
   perSymbolDecide?: (snapshots: AssetSnapshot[]) => Promise<PerSymbolDecision>;
+  /** 决策留痕（自我进化用） */
+  journal?: (entry: {
+    source: string;
+    weights: Record<string, number>;
+    cashWeight: number;
+    confidence: number;
+    reason: string;
+    entryBarIndex: number;
+  }) => void;
 }
 
 export class AllocatorAgent extends Agent {
@@ -60,6 +69,8 @@ export class AllocatorAgent extends Agent {
   /** 已完成的有效轮次（预热未结束不计），用于按 interval 节流 */
   private rounds = 0;
   private busy = false;
+  /** 已处理的 K 线总数，供结算判断 horizon 是否到期 */
+  private barsSeen = 0;
 
   constructor(
     bus: EventBus,
@@ -86,6 +97,7 @@ export class AllocatorAgent extends Agent {
     list.push(bar);
     if (list.length > BUFFER) list.shift();
     this.bars.set(bar.symbol, list);
+    this.barsSeen += 1;
 
     // 每个时间戳只决策一次：
     // 多个标的共享同一时间戳时，等这一批都到齐再决策；实盘轮询缺标的时，
@@ -128,6 +140,14 @@ export class AllocatorAgent extends Agent {
         notes: result.notes,
       };
       this.bus.publish(Topic.ALLOCATION, allocation);
+      this.opts.journal?.({
+        source: result.source,
+        weights: result.weights,
+        cashWeight: result.cashWeight,
+        confidence: result.confidence,
+        reason: result.reason,
+        entryBarIndex: this.barsSeen,
+      });
       this.publishSignals(allocation, snapshots);
       log.info(
         "[%s] %s · %s",

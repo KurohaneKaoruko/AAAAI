@@ -23,6 +23,9 @@ import {
 } from "../llm/hybrid.js";
 import { normalizeAllocation, type AllocationLimits, type AssetSnapshot } from "../llm/allocation.js";
 import { parseDecision, type LLMClient } from "../llm/llmClient.js";
+import { renderNewsForPrompt, type NewsDigest } from "../news/types.js";
+import { runToolAgent } from "../llm/agentLoop.js";
+import type { ToolBox, ToolContext } from "../llm/tools.js";
 import type { AllocationResult } from "./allocator.js";
 import { CrossSectionalAllocator } from "./allocator.js";
 
@@ -35,16 +38,64 @@ export interface HybridOptions {
   analysisTtlMs: number;
   /** 分析调用超时（毫秒） */
   timeoutMs: number;
+  /** 新闻获取器：给标的返回新闻摘要；没有新闻源时省略 */
+  news?: (symbols: string[]) => Promise<NewsDigest[]>;
+  /** 工具箱：大模型可以自己查新闻/走势/当前配置 */
+  tools?: ToolBox;
+  toolContext?: ToolContext;
+  /** 单次决策允许的工具调用轮数（0 = 不用工具） */
+  agentMaxSteps?: number;
 }
 
 /** 行情分析器：带 TTL 缓存与动量兜底。 */
 export class HybridAnalyst {
   private cached: { at: number; key: string; analysis: MarketAnalysis } | null = null;
+  /** 最近一次分析用到的工具（写进日志与理由，便于审计模型查了什么） */
+  lastAudit = "";
 
   constructor(
     private readonly chat: LLMClient | null,
     private readonly opts: HybridOptions,
   ) {}
+
+  /**
+   * 向大模型要「分析」。
+   * 配了工具箱就让模型自己查（新闻、走势、当前配置…），否则退回一次性 prompt。
+   */
+  private async ask(snapshots: AssetSnapshot[], news: NewsDigest[]): Promise<string> {
+    const base = buildAnalysisPrompt(snapshots, news);
+    const steps = this.opts.agentMaxSteps ?? 0;
+    if (!this.opts.tools || !this.opts.toolContext || steps <= 0) {
+      return withTimeout(this.chat!.complete(base), this.opts.timeoutMs);
+    }
+    const run = await runToolAgent({
+      client: this.chat!,
+      tools: this.opts.tools,
+      context: this.opts.toolContext,
+      instruction:
+        "你是一名量化研究员，需要先自己查清事实，再给出技术面分析。你只能做查询，不能下单，也不能修改任何参数。" +
+        "缺什么就用什么工具去查（例如不确定近况就 search_news，想确认走势就 get_history，想知道现在仓位就 get_allocation）。",
+      task: base,
+      outputHint:
+        "请输出 JSON（不要输出其他文字）：" +
+        '{"summary":"不超过60字的整体判断","views":[{"symbol":"标的","view":"一句话技术面判断","strength":"strong|moderate|weak","confidence":0.0-1.0}],"ranking":["从强到弱的标的顺序"]}',
+      maxSteps: steps,
+      timeoutMs: this.opts.timeoutMs,
+    });
+    this.lastAudit = run.audit;
+    return run.text;
+  }
+
+  /** 新闻是可选输入：拿不到就当没有，绝不因新闻失败影响分析。 */
+  private async loadNews(snapshots: AssetSnapshot[]): Promise<NewsDigest[]> {
+    if (!this.opts.news) return [];
+    try {
+      return await this.opts.news(snapshots.map((s) => s.symbol));
+    } catch (err) {
+      log.warn("取新闻失败，本次分析不带新闻: %s", (err as Error).message);
+      return [];
+    }
+  }
 
   /** 分析候选池。模型不可用时返回动量兜底分析（source=rules）。 */
   async analyze(snapshots: AssetSnapshot[], force = false): Promise<MarketAnalysis> {
@@ -62,10 +113,11 @@ export class HybridAnalyst {
     }
 
     try {
-      const text = await withTimeout(this.chat.complete(buildAnalysisPrompt(snapshots)), this.opts.timeoutMs);
+      const news = await this.loadNews(snapshots);
+      const text = await this.ask(snapshots, news);
       const analysis = parseAnalysis(text, snapshots.map((s) => s.symbol));
       this.cached = { at: now, key, analysis };
-      log.info("大模型分析：%s（排序 %s）", analysis.summary, analysis.ranking.join(">"));
+      log.info("大模型分析：%s（排序 %s%s）", analysis.summary, analysis.ranking.join(">"), this.lastAudit ? `｜工具：${this.lastAudit}` : "");
       return analysis;
     } catch (err) {
       const analysis = fallbackAnalysis(snapshots);
@@ -111,7 +163,8 @@ export async function decideWithSystemOne(
 
   // 没有真实分析（或影响力为 0）时，决策模型独立决策
   const influence = analysis.source === "ai" ? clamp01(opts.influence) : 0;
-  const state = renderAnalysisForState(analysis, symbols, influence);
+  const news = await loadNewsQuietly(opts, symbols);
+  const state = renderAnalysisForState(analysis, symbols, influence) + renderNewsForPrompt(news);
 
   if (!client.allocate) {
     // 决策端不具备多标的提问能力：退化成按强弱换算（等同决策模型不可用）
@@ -253,6 +306,16 @@ export class HybridAllocator {
       source: analysis.source === "ai" ? "hybrid" : "rules",
       notes: [note, ...normalized.notes],
     };
+  }
+}
+
+/** 取新闻摘要（失败静默）。 */
+async function loadNewsQuietly(opts: HybridOptions, symbols: string[]): Promise<NewsDigest[]> {
+  if (!opts.news) return [];
+  try {
+    return await opts.news(symbols);
+  } catch {
+    return [];
   }
 }
 

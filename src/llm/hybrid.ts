@@ -9,6 +9,7 @@
 
 import type { DecisionSource } from "../configSchema.js";
 import type { AssetSnapshot } from "./allocation.js";
+import { renderNewsForPrompt, type NewsDigest } from "../news/types.js";
 
 /** 单个标的的分析结论（不含仓位）。 */
 export interface AssetView {
@@ -30,7 +31,7 @@ export interface MarketAnalysis {
 }
 
 /** 构造行情分析 Prompt：只给已发生的行情，明确要求不要给仓位。 */
-export function buildAnalysisPrompt(snapshots: AssetSnapshot[]): string {
+export function buildAnalysisPrompt(snapshots: AssetSnapshot[], news: NewsDigest[] = []): string {
   const rows = snapshots
     .map((s) =>
       [
@@ -46,6 +47,7 @@ export function buildAnalysisPrompt(snapshots: AssetSnapshot[]): string {
   return [
     "你是行情分析师。下面是候选资产的技术面数据（由已发生的 K 线计算，没有未来信息）：",
     rows,
+    renderNewsForPrompt(news),
     "",
     "请只做「分析」，不要给任何仓位或买卖数量。输出一个 JSON 对象（不要输出其他文字）：",
     '{"summary":"不超过60字的整体判断","views":[{"symbol":"标的","view":"一句话技术面判断","strength":"strong|moderate|weak","confidence":0.0-1.0}],"ranking":["从强到弱的标的顺序"]}',

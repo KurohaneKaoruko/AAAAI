@@ -328,6 +328,9 @@ export interface AppConfig {
     timeoutMs: number;
     decisionInterval: number;
     strategy: BalanceStrategy;
+  /** 大模型工具能力 */
+  agentEnabled: boolean;
+  agentMaxSteps: number;
   };
   strategy: {
     decisionSource: DecisionSource;
@@ -353,6 +356,12 @@ export interface AppConfig {
     maxDrawdownPct: number;
     minTradeValue: number;
   };
+  llmTooling?: {
+    agentEnabled: boolean;
+    agentMaxSteps: number;
+  };
+  news: NewsSection;
+  evolution: EvolutionSection;
   execution: { mode: "paper" | "live"; connectionId: string };
   auth: { enabled: boolean; username: string; sessionTtlHours: number };
 }
@@ -386,3 +395,110 @@ export interface EngineState {
 export type Broadcast =
   | { type: "state"; data: EngineState }
   | { type: "event"; data: EngineEventLine };
+
+export interface NewsProviderConfig {
+  id: string;
+  label: string;
+  url: string;
+  assetClass: string;
+}
+
+export interface NewsSection {
+  enabled: boolean;
+  providers: NewsProviderConfig[];
+  maxAgeHours: number;
+  maxPerSymbol: number;
+  refreshMs: number;
+  includeInAnalysis: boolean;
+}
+
+export interface EvolutionSection {
+  enabled: boolean;
+  minSamples: number;
+  cooldownMs: number;
+  evaluateMs: number;
+  maxChangeRatio: number;
+  horizonBars: number;
+  persist: boolean;
+  tunable: string[];
+}
+
+export interface NewsItem {
+  id: string;
+  symbol: string;
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  sentiment: number;
+  sentimentLabel: "positive" | "neutral" | "negative";
+  fetchedAt: string;
+}
+
+export interface NewsStatus {
+  enabled: boolean;
+  providers: number;
+  items: number;
+  lastFetchAt: string | null;
+  errors: { provider: string; message: string }[];
+}
+
+export interface EvolutionStats {
+  total: number;
+  settled: number;
+  pending: number;
+  winRate: number;
+  avgReturn: number;
+  avgAlpha: number;
+  beatRate: number;
+  bestSymbol: string | null;
+  bestSymbolAlpha: number;
+  lastEvaluatedAt: string | null;
+  cooldownUntil: string | null;
+  samplesNeeded: number;
+}
+
+export interface EvolutionChange {
+  at: string;
+  param: string;
+  before: unknown;
+  after: unknown;
+  reason: string;
+  evidence: { settled: number; avgAlpha: number; beatRate: number };
+  reverted: boolean;
+}
+
+export interface EvolutionView {
+  enabled: boolean;
+  stats: EvolutionStats;
+  changelog: EvolutionChange[];
+  recentDecisions: (DecisionRecord & { symbols: string[] })[];
+  limits: {
+    minSamples: number;
+    cooldownMs: number;
+    maxChangeRatio: number;
+    horizonBars: number;
+    tunable: string[];
+  };
+}
+
+export interface DecisionRecord {
+  id: number;
+  at: string;
+  owner: string;
+  source: string;
+  weights: Record<string, number>;
+  cashWeight: number;
+  confidence: number;
+  reason: string;
+  refPrices: Record<string, number>;
+  entryBarIndex?: number;
+  outcome?: {
+    horizonBars: number;
+    returnPct: number;
+    alpha: number;
+    maxAdverse: number;
+    settledAt: string;
+  };
+}

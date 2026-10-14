@@ -16,6 +16,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { LLMClient } from "./llmClient.js";
+import { parseChatReply, type ChatReply } from "./chatReply.js";
+import type { ChatMessage } from "./agentLoop.js";
 import { OpenAICompatClient } from "./openaiClient.js";
 import { SystemOneClient, buildStateFromPrompt } from "./systemOne.js";
 import { getLogger } from "../core/logger.js";
@@ -330,6 +332,11 @@ export class LlmManager implements LLMClient {
     return picked;
   }
 
+  /** 指定实例的多轮对话 + 工具调用（供机器人限定实例时使用）。 */
+  async chatWith(profile: LlmProfile, messages: ChatMessage[], tools?: unknown[]): Promise<ChatReply> {
+    return this.callWithTools(profile, messages, tools ?? []);
+  }
+
   /** 指定实例直接调用（仍计入统计与熔断）。 */
   async completeWith(profile: LlmProfile, prompt: string): Promise<string> {
     return this.callOne(profile, prompt);
@@ -479,7 +486,51 @@ export class LlmManager implements LLMClient {
       name,
       complete: (prompt: string) => this.complete(prompt, kind),
       allocate: (prompt: string, symbols: string[]) => this.allocate(prompt, symbols, kind),
+      // 透传原生 function calling，否则工具循环会退回文本协议（能力浪费）
+      chat: async (messages, tools) => {
+        const profile = this.pick(kind);
+        if (!profile) throw new Error("没有可用的模型实例");
+        if (!supportsChat(this.client(profile))) throw new Error("该实例不支持 function calling");
+        const reply = await this.callWithTools(profile, messages, tools as unknown[]);
+        return parseChatReply(reply);
+      },
     };
+  }
+
+  /** 走工具的调用也要计入统计与熔断。 */
+  private async callWithTools(
+    profile: LlmProfile,
+    messages: ChatMessage[],
+    tools: unknown[],
+  ): Promise<{ content: string; toolCalls?: { name: string; args: unknown }[] }> {
+    const started = Date.now();
+    const stat = this.statsOf(profile.id);
+    stat.calls += 1;
+    stat.lastUsedAt = new Date().toISOString();
+    const client = this.client(profile);
+    if (!supportsChat(client)) throw new Error("该实例不支持多轮对话");
+    try {
+      const reply = await client.chat(messages, tools as { name: string; description: string; parameters: Record<string, unknown> }[]);
+      const latency = Date.now() - started;
+      stat.success += 1;
+      stat.consecutiveFailures = 0;
+      stat.cooldownUntil = 0;
+      stat.lastLatencyMs = latency;
+      stat.avgLatencyMs = Math.round(stat.avgLatencyMs * 0.7 + latency * 0.3);
+      stat.lastError = "";
+      return reply;
+    } catch (err) {
+      const latency = Date.now() - started;
+      stat.failures += 1;
+      stat.consecutiveFailures += 1;
+      stat.lastLatencyMs = latency;
+      stat.lastError = (err as Error).message;
+      if (stat.consecutiveFailures >= this.breaker) {
+        stat.cooldownUntil = Date.now() + this.cooldown;
+        log.warn("%s 连续失败 %d 次，熔断 %dms", profile.label, stat.consecutiveFailures, this.cooldown);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -588,4 +639,9 @@ function clampWeight(w: number): number {
 function normalizeWeights(weights?: number[]): number[] {
   const base = weights ?? DEFAULT_LEVEL_WEIGHTS;
   return base.map((w) => (Number.isFinite(w) ? Math.min(Math.max(w, 0), 1) : 0));
+}
+
+/** SystemOneClient 没有 chat 接口，这里做一次安全的能力判断。 */
+function supportsChat(client: OpenAICompatClient | SystemOneClient): client is OpenAICompatClient {
+  return typeof (client as { chat?: unknown }).chat === "function";
 }

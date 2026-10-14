@@ -12,6 +12,14 @@ export interface LLMClient {
    * 未实现时上层自动回退到横截面动量基线，不会中断运行。
    */
   allocate?(prompt: string, symbols: string[]): Promise<string>;
+  /**
+   * 多轮对话 + 原生工具调用（function calling）。
+   * 不支持的端点可以不实现，工具循环会自动退回文本协议。
+   */
+  chat?(
+    messages: { role: "system" | "user" | "assistant" | "tool"; content: string; name?: string }[],
+    tools?: unknown[],
+  ): Promise<{ content: string; toolCalls?: { name: string; args: unknown }[] }>;
 }
 
 /** 交易决策的 LLM 输出结构。 */
@@ -26,6 +34,8 @@ export function buildDecisionPrompt(args: {
   symbol: string;
   bars: { timestamp: string; open: number; high: number; low: number; close: number }[];
   view?: { trend: string; momentum: number };
+  /** 相关新闻摘要（外部来源，已标注不可信） */
+  news?: string;
 }): string {
   const recent = args.bars.slice(-20);
   const lines = recent
@@ -40,6 +50,7 @@ export function buildDecisionPrompt(args: {
   return [
     `你是一名严谨的量化交易员，正在为 ${args.symbol} 做仓位决策。`,
     view,
+    args.news ?? "",
     "最近 K 线（由旧到新）:",
     lines,
     "",

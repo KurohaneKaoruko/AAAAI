@@ -274,6 +274,8 @@ export class BotManager {
       // 资产配置：System One 需要标的列表才能逐标的提问
       allocate: async (prompt: string, symbols: string[]) =>
         this.llm.allocateWith(pick(), prompt, symbols),
+      // 原生 function calling（工具能力），同样限定在该机器人选定的实例内
+      chat: async (messages, tools) => this.llm.chatWith(pick(), messages, tools),
     };
     return limited;
   }

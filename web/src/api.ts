@@ -6,6 +6,9 @@ import type {
   AuthStatus,
   Bot,
   BotInput,
+  EvolutionView,
+  NewsItem,
+  NewsStatus,
   ComparisonResult,
   LlmOverview,
   LlmProfile,
@@ -102,6 +105,24 @@ export const api = {
       levelWeights: number[];
       instructions: string;
     }>("/api/llm/presets"),
+
+  // 新闻情报
+  news: () => request<{ items: NewsItem[]; status: NewsStatus }>("/api/news"),
+  refreshNews: (symbols?: string[]) =>
+    request<{ items: NewsItem[]; errors: { provider: string; message: string }[] }>("/api/news/refresh", {
+      method: "POST",
+      body: JSON.stringify({ symbols }),
+    }),
+
+  // 自我进化
+  evolution: () => request<EvolutionView>("/api/evolution"),
+  evaluateEvolution: (force = false) =>
+    request<{ applied: unknown[]; view: EvolutionView }>("/api/evolution/evaluate", {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    }),
+  rollbackEvolution: () =>
+    request<{ reverted: unknown; view: EvolutionView }>("/api/evolution/rollback", { method: "POST" }),
 
   // 交易机器人
   bots: () => request<{ bots: Bot[] }>("/api/bots"),

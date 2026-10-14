@@ -11,6 +11,9 @@ import { ConnectionManager } from "./exchanges/connectionManager.js";
 import { LlmManager } from "./llm/llmManager.js";
 import { AuthService, loadAuthConfig } from "./auth/auth.js";
 import { BotManager } from "./bots/botManager.js";
+import { NewsService } from "./news/newsService.js";
+import { EvolutionEngine } from "./evolution/engine.js";
+import { toDigest } from "./news/types.js";
 import { WatchlistManager } from "./watchlist.js";
 import { loadYamlFile } from "./config.js";
 import { buildConfig } from "./configSchema.js";
@@ -35,14 +38,25 @@ async function main(): Promise<void> {
   }
   const llm = new LlmManager(dataDir, config.llm.strategy);
   seedLegacyLlmProfile(llm, config);
-  const controller = new EngineController(config, connections, watchlist, llm);
+  const news = new NewsService(dataDir, config.news);
   const bots = new BotManager(dataDir, config, connections, llm);
+  const evolution = new EvolutionEngine(dataDir, config, (next) => {
+    // 自我进化的结论作用在运行配置上（默认不写回配置文件，页面可一键 persist）
+    controller.applyConfig({ strategy: next.strategy, risk: next.risk });
+    bots.useConfig(next);
+    news.useConfig(next.news);
+    llm.setStrategy(next.llm.strategy);
+    log.info("自我进化已更新运行配置（下次运行生效）");
+  });
+  const controller = new EngineController(config, connections, watchlist, llm, news, evolution);
 
   const app = createServer(controller, {
     connections,
     watchlist,
     llm,
     bots,
+    news,
+    evolution,
     auth,
     configPath,
     webDist: join(root, "web", "dist"),

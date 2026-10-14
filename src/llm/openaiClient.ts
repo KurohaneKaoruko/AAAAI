@@ -53,4 +53,56 @@ export class OpenAICompatClient implements LLMClient {
   allocate(prompt: string, _symbols: string[]): Promise<string> {
     return this.complete(prompt);
   }
+
+  /**
+   * 多轮 + 原生 function calling。
+   * tools 传入 ToolBox.list() 的 JSON Schema 描述；tool 角色的结果按 OpenAI 规范回传。
+   */
+  async chat(
+    messages: { role: "system" | "user" | "assistant" | "tool"; content: string; name?: string }[],
+    tools: { name: string; description: string; parameters: Record<string, unknown> }[] = [],
+  ): Promise<{ content: string; toolCalls?: { name: string; args: unknown }[] }> {
+    const toolSpecs = tools.map((t) => ({
+      type: "function",
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+    const payload = messages.map((m) =>
+      m.role === "tool"
+        ? { role: "tool", tool_call_id: `call_${m.name ?? "tool"}`, content: m.content }
+        : { role: m.role, content: m.content },
+    );
+
+    const res = await fetch(`${this.opts.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
+      body: JSON.stringify({
+        model: this.opts.model,
+        temperature: this.opts.temperature,
+        messages: payload,
+        ...(toolSpecs.length > 0 ? { tools: toolSpecs, tool_choice: "auto" } : {}),
+      }),
+      signal: AbortSignal.timeout(this.opts.timeoutMs),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`LLM 请求失败: HTTP ${res.status} ${text.slice(0, 200)}`);
+    }
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string; tool_calls?: { id: string; function?: { name?: string; arguments?: string } }[] } }[];
+    };
+    const message = data.choices?.[0]?.message;
+    const calls = (message?.tool_calls ?? [])
+      .map((c) => ({ name: c.function?.name ?? "", args: safeArgs(c.function?.arguments) }))
+      .filter((c) => c.name.length > 0);
+    return { content: message?.content ?? "", ...(calls.length > 0 ? { toolCalls: calls } : {}) };
+  }
+}
+
+function safeArgs(raw: string | undefined): unknown {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }

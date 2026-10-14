@@ -21,11 +21,15 @@ import { LivePoller, mergeBarsByTime } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
-import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
+import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
+import { defaultToolBox, type ToolBox, type ToolContext } from "../llm/tools.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { LlmManager } from "../llm/llmManager.js";
+import type { NewsService } from "../news/newsService.js";
+import { toDigest, type NewsDigest } from "../news/types.js";
+import type { EvolutionEngine } from "../evolution/engine.js";
 import { runComparison, buildRunners, type ComparisonResult, type RunnerKind } from "../bench/comparison.js";
 
 const log = getLogger("engine");
@@ -99,6 +103,12 @@ export class EngineController {
   private tickerTimer: NodeJS.Timeout | null = null;
   private stopRequested = false;
   private eventLines: EngineEventLine[] = [];
+  /** 收盘价序列（自我进化结算用） */
+  private priceSeries = new Map<string, number[]>();
+  /** 带时间戳的 K 线（给大模型的 get_history 用） */
+  private historyLog = new Map<string, { timestamp: string; close: number }[]>();
+  private barsAdvanced = 0;
+  private lastEvolveAt = 0;
   private flushTimer: NodeJS.Timeout | null = null;
   private startedAtMs = 0;
 
@@ -107,12 +117,143 @@ export class EngineController {
     private readonly connections: ConnectionManager,
     private readonly watchlist: WatchlistManager,
     private readonly llm: LlmManager,
+    private readonly news?: NewsService,
+    private readonly evolution?: EvolutionEngine,
   ) {
     this.llm.setStrategy(config.llm.strategy);
     const modelKind = modelKindOf(config.strategy.decisionSource);
     if (modelKind) this.llm.setActiveKind(modelKind);
     this.state = this.freshState();
   }
+
+  // ---------------- 新闻 / 进化 ----------------
+
+  /** 记录收盘价序列 + 推进计数，到期时让进化引擎结算决策。 */
+  private trackBar(bar: Bar): void {
+    const series = this.priceSeries.get(bar.symbol) ?? [];
+    series.push(bar.close);
+    if (series.length > 600) series.shift();
+    this.priceSeries.set(bar.symbol, series);
+
+    const log = this.historyLog.get(bar.symbol) ?? [];
+    log.push({ timestamp: bar.timestamp.toISOString(), close: bar.close });
+    if (log.length > 400) log.shift();
+    this.historyLog.set(bar.symbol, log);
+    this.barsAdvanced += 1;
+    this.maybeEvolve();
+  }
+
+  /** 结算 + 评估（带 evaluateMs 节流，避免每根 K 线都算一遍）。 */
+  private maybeEvolve(): void {
+    const evo = this.evolution;
+    if (!evo || !this.config.evolution.enabled) return;
+    const now = Date.now();
+    if (now - this.lastEvolveAt < Math.min(60_000, this.config.evolution.evaluateMs)) return;
+    this.lastEvolveAt = now;
+    // 基准：同窗口内等权持有全部候选的收益（超额才有意义）
+    const symbols = [...this.priceSeries.keys()];
+    let equalWeight = 0;
+    if (symbols.length > 0) {
+      const horizon = this.config.evolution.horizonBars;
+      let sum = 0;
+      let n = 0;
+      for (const symbol of symbols) {
+        const series = this.priceSeries.get(symbol)!;
+        const from = series[Math.max(0, this.barsAdvanced - horizon)];
+        const to = series[series.length - 1];
+        if (!from || !to) continue;
+        sum += (to - from) / from;
+        n += 1;
+      }
+      if (n > 0) equalWeight = sum / n / n; // 等权组合收益
+    }
+    evo.settle(this.priceSeries, { advanceBars: this.barsAdvanced, equalWeight });
+    evo.evaluate();
+  }
+
+
+  /** 新闻摘要获取器：未启用或没配源时返回空，决策链路照常。 */
+  private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
+    const svc = this.news;
+    if (!svc || !this.config.news.enabled) return async () => [];
+    return async (symbols: string[]) => {
+      const items = await svc.forSymbols(symbols).catch(() => []);
+      return toDigest(items, Math.max(1, Math.floor(this.config.news.maxPerSymbol / 2)));
+    };
+  }
+
+  /**
+   * 给大模型的只读工具箱：行情、K 线、账户配置、候选池、新闻。
+   * K 线直接用适配器现取（模型想看多长看多长），其余取流水线内的实时状态。
+   */
+  private tools(): { box: ToolBox; context: ToolContext } | undefined {
+    if (!this.config.llm.agentEnabled) return undefined;
+    const book = () => this.pipeline?.book;
+    const portfolio = () => this.pipeline?.portfolio;
+    const context: ToolContext = {
+      candidates: () => this.state.symbols,
+      price: (symbol) => book()?.last(symbol),
+      history: (symbol, limit) => (this.historyLog.get(symbol) ?? []).slice(-limit),
+      allocation: () => {
+        const p = portfolio();
+        if (!p) return { equity: 0, cash: 0, cashWeight: 1, holdings: [] };
+        const equity = p.equity();
+        return {
+          equity: Number(equity.toFixed(2)),
+          cash: Number(p.cash.toFixed(2)),
+          cashWeight: Number((equity > 0 ? p.cash / equity : 1).toFixed(4)),
+          holdings: p.positionsSnapshot().map((pos) => {
+            const price = book()?.last(pos.symbol) ?? pos.avgCost;
+            const value = pos.quantity * price;
+            return {
+              symbol: pos.symbol,
+              weight: equity > 0 ? Number((value / equity).toFixed(4)) : 0,
+              marketValue: Number(value.toFixed(2)),
+              unrealizedPnl: Number(((price - pos.avgCost) * pos.quantity).toFixed(2)),
+            };
+          }),
+        };
+      },
+      performance: () => {
+        const m = portfolio()?.metrics();
+        if (!m) return { totalReturn: 0, maxDrawdownPct: 0, totalFills: 0, openPositions: 0 };
+        const initial = this.config.risk.initialCash;
+        return {
+          totalReturn: initial > 0 ? Number(((m.finalEquity - initial) / initial).toFixed(6)) : 0,
+          maxDrawdownPct: m.maxDrawdownPct,
+          totalFills: m.totalFills,
+          openPositions: m.openPositions,
+        };
+      },
+      news: async (symbol, limit) => {
+        const svc = this.news;
+        if (!svc || !this.config.news.enabled) return [];
+        return svc.forSymbols([symbol]).then((items) => items.slice(0, limit)).catch(() => []);
+      },
+    };
+    return { box: defaultToolBox(), context };
+  }
+
+  /** 决策留痕接口。 */
+  private journal(): PipelineJournal | undefined {
+    const evo = this.evolution;
+    if (!evo || !this.config.evolution.enabled) return undefined;
+    return {
+      record: (entry) => {
+        evo.record({
+          owner: "engine",
+          source: entry.source,
+          weights: entry.weights,
+          cashWeight: entry.cashWeight,
+          confidence: entry.confidence,
+          reason: entry.reason.slice(0, 300),
+          refPrices: entry.refPrices,
+          entryBarIndex: entry.entryBarIndex,
+        });
+      },
+    };
+  }
+
 
   // ---------------- 订阅 / 状态 ----------------
 
@@ -200,6 +341,8 @@ export class EngineController {
     };
 
     const relay = (event: Event): void => {
+      // 自我进化的结算需要知道行情推进到哪了（不依赖前端事件流）
+      if (event.topic === Topic.BAR) this.trackBar(event.payload as Bar);
       const noise = batch && NOISY_TOPICS.has(event.topic);
       if (noise) {
         this.state.progress = {
@@ -306,11 +449,21 @@ export class EngineController {
       Boolean(adapter.meta.supportsTrading) &&
       adapter.meta.requiresKeys;
 
+    this.priceSeries.clear();
+    this.historyLog.clear();
+    this.barsAdvanced = 0;
+
     this.pipeline = buildPipeline(this.config, {
       adapter,
       liveTrading,
       llm: this.llm.clientForKind("chat"),
       soClient: this.llm.clientForKind("systemone"),
+      // 新闻摘要：只进 prompt，不直接触发交易
+      news: this.newsFetcher(),
+      // 决策留痕：自我进化据此学习
+      journal: this.journal(),
+      // 大模型工具能力：让它自己查新闻/走势/当前配置
+      tools: this.tools(),
     });
     if (this.config.execution.mode === "live" && !liveTrading) {
       log.warn("实盘模式不可用（适配器不支持交易或未配 Key），已自动降级为模拟成交");
@@ -504,8 +657,13 @@ export class EngineController {
       llm: { ...this.config.llm, ...(patch.llm ?? {}) },
       execution: { ...this.config.execution, ...(patch.execution ?? {}) },
       market: { ...this.config.market, ...(patch.market ?? {}) },
+      news: { ...this.config.news, ...(patch.news ?? {}) },
+      evolution: { ...this.config.evolution, ...(patch.evolution ?? {}) },
     };
     this.state.config = redactConfig(this.config);
+    // 配置小节各自持有引用，改完必须通知，否则服务仍在用旧配置
+    this.news?.useConfig(this.config.news);
+    this.evolution?.useConfig(this.config);
     this.llm.setStrategy(this.config.llm.strategy);
     const kind = modelKindOf(this.config.strategy.decisionSource);
     if (kind) this.llm.setActiveKind(kind);

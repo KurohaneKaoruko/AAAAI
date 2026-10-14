@@ -22,6 +22,8 @@ import { listAdapterMetas as _unused } from "../exchanges/registry.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { AuthService } from "../auth/auth.js";
 import type { BotManager } from "../bots/botManager.js";
+import type { NewsService } from "../news/newsService.js";
+import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
@@ -34,6 +36,8 @@ export interface ServerOptions {
   watchlist: WatchlistManager;
   llm: LlmManager;
   bots: BotManager;
+  news: NewsService;
+  evolution: EvolutionEngine;
   auth: AuthService;
   /** 配置文件路径，「保存到文件」时写回此处 */
   configPath?: string;
@@ -42,7 +46,7 @@ export interface ServerOptions {
 
 export function createServer(controller: EngineController, options: ServerOptions): Express {
   const app = express();
-  const { connections, watchlist, llm, bots, auth, configPath } = options;
+  const { connections, watchlist, llm, bots, news, evolution, auth, configPath } = options;
   app.use(express.json({ limit: "1mb" }));
 
   // 开发期跨域（Vite 5173 -> 本服务 8787）
@@ -220,6 +224,34 @@ export function createServer(controller: EngineController, options: ServerOption
       })
       .then(() => ok(res, { state: controller.snapshot() }))
       .catch((err) => fail(res, err, 409));
+  });
+
+  // ---------------- 新闻情报 ----------------
+
+  app.get("/api/news", (_req, res) => ok(res, { items: news.list(80), status: news.status() }));
+
+  app.post("/api/news/refresh", async (req, res) => {
+    const symbols = Array.isArray(req.body?.symbols) ? (req.body.symbols as string[]) : [];
+    try {
+      ok(res, await news.refresh(symbols));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---------------- 自我进化 ----------------
+
+  app.get("/api/evolution", (_req, res) => ok(res, evolution.view()));
+
+  /** 手动评估一次（force=true 跳过样本数与冷却限制） */
+  app.post("/api/evolution/evaluate", (req, res) => {
+    const force = req.body?.force === true;
+    ok(res, { applied: evolution.evaluate(force), view: evolution.view() });
+  });
+
+  app.post("/api/evolution/rollback", (_req, res) => {
+    const entry = evolution.rollback();
+    ok(res, { reverted: entry, view: evolution.view() });
   });
 
   // ---------------- 交易机器人（多实例并行） ----------------
