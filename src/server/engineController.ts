@@ -25,6 +25,7 @@ import { buildPipeline, type Pipeline } from "../agents/orchestrator.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
+import type { LlmManager } from "../llm/llmManager.js";
 
 const log = getLogger("engine");
 
@@ -92,7 +93,9 @@ export class EngineController {
     private config: AppConfig,
     private readonly connections: ConnectionManager,
     private readonly watchlist: WatchlistManager,
+    private readonly llm: LlmManager,
   ) {
+    this.llm.setStrategy(config.llm.strategy);
     this.state = this.freshState();
   }
 
@@ -240,7 +243,11 @@ export class EngineController {
       Boolean(adapter.meta.supportsTrading) &&
       adapter.meta.requiresKeys;
 
-    this.pipeline = buildPipeline(this.config, { adapter, liveTrading });
+    this.pipeline = buildPipeline(this.config, {
+      adapter,
+      liveTrading,
+      llm: this.config.llm.enabled ? this.llm : null,
+    });
     if (this.config.execution.mode === "live" && !liveTrading) {
       log.warn("实盘模式不可用（适配器不支持交易或未配 Key），已自动降级为模拟成交");
     }
@@ -344,6 +351,11 @@ export class EngineController {
     this.emitState();
   }
 
+  /** LLM 管理器（面板路由使用）。 */
+  llmManager(): LlmManager {
+    return this.llm;
+  }
+
   /** 运行中更新参数（下次流水线生效）。 */
   applyConfig(patch: Partial<AppConfig>): AppConfig {
     this.config = {
@@ -356,6 +368,7 @@ export class EngineController {
       market: { ...this.config.market, ...(patch.market ?? {}) },
     };
     this.state.config = redactConfig(this.config);
+    this.llm.setStrategy(this.config.llm.strategy);
     this.emitState();
     return this.config;
   }

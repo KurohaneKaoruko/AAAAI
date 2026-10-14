@@ -1,0 +1,46 @@
+# AAAAI 一键部署
+#   docker compose up -d --build      启动
+#   docker compose logs -f            查看日志
+#   docker compose down               停止
+#
+# 可选环境变量（全部留空即不启用）：
+#   AAAAI_AUTH_USERNAME / AAAAI_AUTH_PASSWORD   面板登录鉴权
+#   AAAAI_AUTH_TOKEN                           API Token（脚本调用）
+#   OPENAI_API_KEY                             LLM 密钥（也可在面板里填）
+#   AAAAI_PORT                                 映射端口（默认 8787）
+
+services:
+  aaaai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aaaai:latest
+    container_name: aaaai
+    restart: unless-stopped
+    ports:
+      - "${AAAAI_PORT:-8787}:8787"
+    volumes:
+      # 连接 / 密钥 / 自选 持久化
+      - aaaai-data:/app/data
+      # 配置文件（面板「写入配置文件」需要可写）
+      - ./config:/app/config
+    environment:
+      AAAAI_CONFIG: /app/config/default.yaml
+      AAAAI_DATA_DIR: /app/data
+      TZ: ${TZ:-Asia/Shanghai}
+      # ---- 鉴权（可选）----
+      AAAAI_AUTH_USERNAME: ${AAAAI_AUTH_USERNAME:-}
+      AAAAI_AUTH_PASSWORD: ${AAAAI_AUTH_PASSWORD:-}
+      AAAAI_AUTH_TOKEN: ${AAAAI_AUTH_TOKEN:-}
+      # ---- LLM（可选，也可运行时在面板配置）----
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  aaaai-data:
+    driver: local

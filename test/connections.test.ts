@@ -7,6 +7,7 @@ import { ConnectionManager } from "../src/exchanges/connectionManager.js";
 import { WatchlistManager } from "../src/watchlist.js";
 import { SimulatedAdapter } from "../src/exchanges/simulated.js";
 import { EngineController } from "../src/server/engineController.js";
+import { LlmManager } from "../src/llm/llmManager.js";
 import { testConfig } from "./helpers.js";
 
 function tmpDataDir(): string {
@@ -92,7 +93,7 @@ test("EngineController: 无连接时给出明确错误", async () => {
   try {
     const cm = new ConnectionManager(dir);
     const wm = new WatchlistManager(dir);
-    const controller = new EngineController(testConfig(), cm, wm);
+    const controller = new EngineController(testConfig(), cm, wm, new LlmManager(dir));
     await assert.rejects(() => controller.start({ mode: "backtest" }), /尚未配置任何交易所连接/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -108,7 +109,7 @@ test("EngineController: 无标的时给出明确错误", async () => {
     // 自选与配置都为空 -> 必须给出可读错误
     const empty = testConfig();
     empty.market.symbols = [];
-    const controller = new EngineController(empty, cm, wm);
+    const controller = new EngineController(empty, cm, wm, new LlmManager(dir));
     await assert.rejects(() => controller.start({ mode: "backtest" }), /没有可运行的标的/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -122,7 +123,7 @@ test("EngineController: 回测完成后状态完整", async () => {
     const conn = cm.create({ adapterId: "simulated", label: "模拟" });
     const wm = new WatchlistManager(dir);
     wm.add({ symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
-    const controller = new EngineController(testConfig(), cm, wm);
+    const controller = new EngineController(testConfig(), cm, wm, new LlmManager(dir));
 
     await controller.start({ mode: "backtest", bars: 60 });
 
@@ -145,7 +146,7 @@ test("EngineController: 配置热更新（部分字段合并）", () => {
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const controller = new EngineController(testConfig(), cm, new WatchlistManager(dir));
+    const controller = new EngineController(testConfig(), cm, new WatchlistManager(dir), new LlmManager(dir));
     const before = controller.getConfig();
     controller.applyConfig({ risk: { ...before.risk, initialCash: 55555 } });
     const after = controller.getConfig();

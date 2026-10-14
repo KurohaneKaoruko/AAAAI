@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { SymbolInfo } from "../types";
 import { AssetBadge } from "../components/Shell";
+import { Select } from "../components/Select";
 import { Button, Empty, Notice, Panel, TextField } from "../components/ui";
 import { money, pct, qty } from "../lib/format";
 
@@ -80,13 +81,11 @@ export function MarketsPage({ store }: { store: AppStore }) {
         subtitle={adapter ? `数据源：${adapter.name}` : ""}
       >
         <div className="search-row">
-          <select value={connectionId} onChange={(e) => setConnectionId(e.target.value)}>
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={connectionId}
+            options={connections.map((c) => ({ value: c.id, label: c.label }))}
+            onChange={setConnectionId}
+          />
           <input
             value={query}
             placeholder={

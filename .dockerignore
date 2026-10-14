@@ -1,0 +1,29 @@
+# 构建产物与依赖（由镜像内 npm ci 重新安装）
+node_modules
+dist
+web/dist
+coverage
+
+# 运行时数据（含密钥，绝不入镜像）
+data
+*.db
+*.sqlite3
+*.duckdb
+
+# 密钥与环境
+.env
+.env.*
+!.env.example
+
+# 版本控制与文档
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

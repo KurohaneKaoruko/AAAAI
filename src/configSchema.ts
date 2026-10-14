@@ -4,6 +4,14 @@
  */
 
 import { bool, dig, fromEnv, num, str } from "./config.js";
+import { readEnv } from "./env.js";
+import type { BalanceStrategy } from "./llm/llmManager.js";
+
+const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random", "latency"]);
+
+function safeStrategy(value: string): BalanceStrategy {
+  return STRATEGIES.has(value as BalanceStrategy) ? (value as BalanceStrategy) : "round-robin";
+}
 
 export interface AppSection {
   name: string;
@@ -38,6 +46,8 @@ export interface LLMSection {
   timeoutMs: number;
   /** 每隔多少根 K 线才真正请求一次 LLM（避免限流与费用爆炸） */
   decisionInterval: number;
+  /** 多实例负载均衡策略 */
+  strategy: BalanceStrategy;
 }
 
 export interface StrategySection {
@@ -67,8 +77,17 @@ export interface ExecutionSection {
   apiSecret: string;
 }
 
+export interface AuthSection {
+  /** 是否启用鉴权（用户名+口令 或 API Token 任一存在即启用） */
+  enabled: boolean;
+  username: string;
+  /** 会话有效期（小时） */
+  sessionTtlHours: number;
+}
+
 export interface AppConfig {
   app: AppSection;
+  auth: AuthSection;
   server: ServerSection;
   market: MarketSection;
   llm: LLMSection;
@@ -85,6 +104,11 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
     app: {
       name: str(raw, ["app", "name"], "AAAAI"),
       logLevel: str(raw, ["app", "log_level"], "info"),
+    },
+    auth: {
+      enabled: bool(raw, ["auth", "enabled"], false) || Boolean(readEnv("AUTH_USERNAME")),
+      username: str(raw, ["auth", "username"], readEnv("AUTH_USERNAME")),
+      sessionTtlHours: num(raw, ["auth", "session_ttl_hours"], 12),
     },
     server: {
       port: num(raw, ["server", "port"], 8787),
@@ -106,6 +130,7 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       temperature: num(raw, ["llm", "temperature"], 0.2),
       timeoutMs: num(raw, ["llm", "timeout_ms"], 20000),
       decisionInterval: Math.max(1, num(raw, ["llm", "decision_interval"], 10)),
+      strategy: safeStrategy(str(raw, ["llm", "strategy"], "round-robin")),
     },
     strategy: {
       name: str(raw, ["strategy", "name"], "llm-momentum"),
@@ -138,6 +163,11 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
 export function serializeConfig(config: AppConfig): Record<string, unknown> {
   return {
     app: { name: config.app.name, log_level: config.app.logLevel },
+    auth: {
+      enabled: config.auth.enabled,
+      username: config.auth.username,
+      session_ttl_hours: config.auth.sessionTtlHours,
+    },
     server: { host: config.server.host, port: config.server.port },
     market: {
       symbols: config.market.symbols,
@@ -154,6 +184,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       temperature: config.llm.temperature,
       timeout_ms: config.llm.timeoutMs,
       decision_interval: config.llm.decisionInterval,
+      strategy: config.llm.strategy,
     },
     strategy: {
       name: config.strategy.name,
