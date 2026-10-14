@@ -11,6 +11,11 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+/** 菜单最小可读宽度：窄屏下也不至于把文字压成一列 */
+const MIN_MENU_WIDTH = 200;
+/** 菜单与视口边缘的最小间距 */
+const MENU_MARGIN = 8;
+
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
@@ -81,21 +86,36 @@ export function Select<T extends string>({
       const el = triggerRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      // 触发器不可见（宽度为 0）时直接关闭，避免渲染出塌缩的菜单
+      if (r.width === 0 || r.height === 0) {
+        setOpen(false);
+        return;
+      }
       const margin = 8;
+      const maxMenuWidth = Math.max(window.innerWidth - margin * 2, MIN_MENU_WIDTH);
+      // 菜单宽度下限：至少能放下最短的选项文本，绝不塌成一列字
+      const width = Math.min(Math.max(r.width, MIN_MENU_WIDTH), maxMenuWidth);
+      // 水平方向收进视口
+      const left = Math.min(Math.max(r.left, margin), Math.max(margin, window.innerWidth - width - margin));
       const estimatedHeight = Math.min(options.length * 38 + 12, 300);
       const below = window.innerHeight - r.bottom - margin;
       const dropUp = below < estimatedHeight && r.top > below;
       setPos({
         top: dropUp ? r.top - Math.min(estimatedHeight, r.top - margin) : r.bottom + 6,
-        left: r.left,
-        width: r.width,
+        left,
+        width,
         dropUp,
       });
     };
     place();
     const ro = new ResizeObserver(place);
     if (triggerRef.current) ro.observe(triggerRef.current);
-    return () => ro.disconnect();
+    window.addEventListener("resize", place);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", place);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, options.length]);
 
   const commit = (index: number) => {
@@ -171,8 +191,9 @@ export function Select<T extends string>({
           style={{
             top: pos.top,
             left: pos.left,
-            minWidth: pos.width,
-            maxHeight: pos.dropUp ? undefined : Math.max(160, window.innerHeight - pos.top - 12),
+            width: pos.width,
+            maxWidth: `calc(100vw - ${MENU_MARGIN * 2}px)`,
+            maxHeight: pos.dropUp ? undefined : Math.max(160, window.innerHeight - pos.top - MENU_MARGIN),
           }}
         >
           {options.map((o, i) => (
