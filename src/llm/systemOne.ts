@@ -102,6 +102,58 @@ export class SystemOneClient {
       levels,
     };
   }
+
+  /**
+   * 资产配置：一个请求里对每个标的各问一道 score 题，
+   * 用各标的档位概率的期望权重拼成组合配置。
+   * System One 没有 chat 接口，这是它表达「买哪些、各占多少」的方式。
+   */
+  async allocate(prompt: string, symbols: string[]): Promise<string> {
+    if (symbols.length === 0) {
+      return JSON.stringify({ allocations: {}, cash_weight: 1, confidence: 0, reason: "无候选资产" });
+    }
+    const body = {
+      model: this.opts.model,
+      state: this.opts.buildState(prompt),
+      questions: Object.fromEntries(
+        symbols.map((symbol, i) => [`position_${i}`, this.buildQuestion()]),
+      ),
+    };
+    const res = await fetch(this.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.opts.timeoutMs),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`System One HTTP ${res.status} ${text.slice(0, 200)}`);
+    }
+    const data = (await res.json()) as Record<string, unknown>;
+    const answers = (data.answers ?? data) as Record<string, unknown>;
+    const allocations: Record<string, number> = {};
+    let confSum = 0;
+    let picked = 0;
+    symbols.forEach((symbol, i) => {
+      const answer = answers[`position_${i}`];
+      if (!answer || typeof answer !== "object") return;
+      const { targetWeight, confidence, level } = parseScoreAnswer(
+        answer as Record<string, unknown>,
+        this.opts.levelWeights,
+      );
+      allocations[symbol] = Number(targetWeight.toFixed(4));
+      confSum += confidence;
+      picked += 1;
+      log.debug("System One 配置 %s -> %s (%s)", symbol, level, targetWeight.toFixed(3));
+    });
+    if (picked === 0) throw new Error("System One 响应中找不到任何标的的答案");
+    return JSON.stringify({
+      allocations,
+      cash_weight: 0,
+      confidence: Number((confSum / picked).toFixed(4)),
+      reason: `systemone:${this.opts.model}/${symbols.length}标的`,
+    });
+  }
 }
 
 /** 兼容多种响应外壳，取出第一个问题的答案对象。 */

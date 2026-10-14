@@ -3,6 +3,8 @@ import test from "node:test";
 import { EventBus, Topic } from "../src/core/eventBus.js";
 import { PortfolioManager } from "../src/portfolio/portfolioManager.js";
 import { RiskRules } from "../src/risk/rules.js";
+import { runComparison } from "../src/bench/comparison.js";
+import { testAdapter, testConfig } from "./helpers.js";
 import type { Fill, OrderIntent, Side, Bar } from "../src/core/types.js";
 
 function intent(symbol: string, side: Side, quantity: number, price: number): OrderIntent {
@@ -74,7 +76,7 @@ test("PortfolioManager: 权益下跌产生回撤", () => {
 });
 
 test("RiskRules: 权重超限/回撤熔断", () => {
-  const rules = new RiskRules({ maxPositionWeight: 0.6, maxOrderValue: 20_000, maxDrawdownPct: 0.15 });
+  const rules = new RiskRules({ maxPositionWeight: 0.6, maxOrderValue: 20_000, maxDrawdownPct: 0.15, minTradeValue: 0 });
   const signal = { symbol: "X", timestamp: new Date(), targetWeight: 0.9, confidence: 1, reason: "t" };
   assert.equal(rules.check({ ...signal, targetWeight: 0.3 }, 100_000, 0).allowed, true);
   const blocked = rules.check(signal, 100_000, 0);
@@ -90,8 +92,34 @@ test("RiskRules: 权重超限/回撤熔断", () => {
 });
 
 test("RiskRules: 单笔金额截断", () => {
-  const rules = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 5000, maxDrawdownPct: 1 });
+  const rules = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 5000, maxDrawdownPct: 1, minTradeValue: 0 });
   assert.equal(rules.clampDeltaValue(999_999), 5000);
   assert.equal(rules.clampDeltaValue(-999_999), -5000);
   assert.equal(rules.clampDeltaValue(123), 123);
+});
+
+
+test("RiskRules: 最小调仓额过滤噪声单", () => {
+  const strict = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 100000, maxDrawdownPct: 1, minTradeValue: 1000 });
+  assert.equal(strict.worthTrading(5000), true, "超过阈值应下单");
+  assert.equal(strict.worthTrading(999.99), false, "低于阈值应忽略");
+  assert.equal(strict.worthTrading(-3000), true, "卖出方向同样适用");
+  assert.equal(strict.worthTrading(-200), false);
+
+  const off = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 100000, maxDrawdownPct: 1, minTradeValue: 0 });
+  assert.equal(off.worthTrading(1), true, "阈值为 0 表示不限制");
+  assert.equal(off.worthTrading(0.01), true);
+});
+
+test("最小调仓额：能显著减少成交笔数", async () => {
+  const base = testConfig();
+  const run = (minTradeValue: number) =>
+    runComparison({ ...base, risk: { ...base.risk, minTradeValue } }, {
+      adapter: testAdapter(), symbols: ["600519"], bars: 200, interval: "1m",
+      liveTrading: false, runners: [{ id: "b", label: "b", kind: "baseline", client: null }],
+    });
+  const before = (await run(0)).results[0]!;
+  const after = (await run(5000)).results[0]!;
+  assert.ok(before.fillCount > 0, "基线本身应产生成交，否则该用例无意义");
+  assert.ok(after.fillCount < before.fillCount, `设阈值后成交应减少: ${before.fillCount} -> ${after.fillCount}`);
 });

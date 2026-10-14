@@ -37,6 +37,20 @@ export class BinanceAdapter implements ExchangeAdapter {
       { key: "apiKey", label: "API Key", secret: false, placeholder: "粘贴 Binance API Key" },
       { key: "apiSecret", label: "API Secret", secret: true, placeholder: "粘贴 API Secret" },
     ],
+    defaultSymbols: [
+      { symbol: "BTCUSDT", name: "比特币", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "ETHUSDT", name: "以太坊", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "SOLUSDT", name: "Solana", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "BNBUSDT", name: "BNB", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "XRPUSDT", name: "XRP", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "DOGEUSDT", name: "Dogecoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "ADAUSDT", name: "Cardano", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "AVAXUSDT", name: "Avalanche", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "LINKUSDT", name: "Chainlink", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "MATICUSDT", name: "Polygon", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "DOTUSDT", name: "Polkadot", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "LTCUSDT", name: "Litecoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+    ],
     notes: ["下单走 HMAC-SHA256 签名", "测试网 baseUrl 为 testnet.binance.vision", "市价买入使用 quoteOrderQty（金额）"],
   };
 

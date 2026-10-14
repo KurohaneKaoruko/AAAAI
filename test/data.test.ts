@@ -163,3 +163,36 @@ test("无网络环境下连接测试应失败而非崩溃", async () => {
   stooq.init(noCred);
   assert.ok((await stooq.testConnection()).message.length > 0);
 });
+test("常用标的清单：每个交易所都提供且字段合法", async () => {
+  const { listAdapterMetas } = await import("../src/exchanges/registry.js");
+  for (const meta of listAdapterMetas()) {
+    const list = meta.defaultSymbols ?? [];
+    assert.ok(list.length >= 4, `${meta.id} 常用标的过少: ${list.length}`);
+    for (const s of list) {
+      assert.ok(s.symbol && s.symbol.length > 0, `${meta.id} 存在空代码`);
+      assert.ok(s.name && s.name.length > 0, `${s.symbol} 缺少名称`);
+      assert.ok(["crypto", "stock"].includes(s.assetClass), `${s.symbol} 品类非法`);
+      assert.ok(s.currency.length > 0, `${s.symbol} 缺少计价货币`);
+      assert.ok(s.lotSize >= 1, `${s.symbol} 最小单位非法`);
+      assert.ok(s.qtyPrecision >= 0 && s.pricePrecision >= 0);
+    }
+    // 代码不应重复
+    const codes = list.map((s) => s.symbol);
+    assert.equal(new Set(codes).size, codes.length, `${meta.id} 清单存在重复代码`);
+  }
+});
+
+test("常用标的：股票源覆盖 A股与美股两类代码", async () => {
+  const { listAdapterMetas } = await import("../src/exchanges/registry.js");
+  const byId = new Map(listAdapterMetas().map((m) => [m.id, m]));
+  // A 股：6 位数字代码
+  const em = byId.get("eastmoney")!.defaultSymbols!;
+  assert.ok(em.some((s) => /^\d{6}$/.test(s.symbol) && s.currency === "CNY"), "东财清单应含 A 股 6 位代码");
+  // 美股：字母代码
+  const stooq = byId.get("stooq")!.defaultSymbols!;
+  assert.ok(stooq.some((s) => /^[A-Z.]+$/.test(s.symbol) && s.currency === "USD"), "Stooq 清单应含美股字母代码");
+  // 加密：配对代码
+  assert.ok(byId.get("binance")!.defaultSymbols!.some((s) => s.symbol.endsWith("USDT")));
+  assert.ok(byId.get("okx")!.defaultSymbols!.some((s) => s.symbol.includes("-")));
+  assert.ok(byId.get("gate")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
+});

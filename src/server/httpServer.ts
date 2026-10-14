@@ -21,6 +21,8 @@ import { fromEnv } from "../config.js";
 import { listAdapterMetas as _unused } from "../exchanges/registry.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { AuthService } from "../auth/auth.js";
+import type { BotManager } from "../bots/botManager.js";
+import type { BotInput } from "../bots/types.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
@@ -31,6 +33,7 @@ export interface ServerOptions {
   connections: ConnectionManager;
   watchlist: WatchlistManager;
   llm: LlmManager;
+  bots: BotManager;
   auth: AuthService;
   /** 配置文件路径，「保存到文件」时写回此处 */
   configPath?: string;
@@ -39,7 +42,7 @@ export interface ServerOptions {
 
 export function createServer(controller: EngineController, options: ServerOptions): Express {
   const app = express();
-  const { connections, watchlist, llm, auth, configPath } = options;
+  const { connections, watchlist, llm, bots, auth, configPath } = options;
   app.use(express.json({ limit: "1mb" }));
 
   // 开发期跨域（Vite 5173 -> 本服务 8787）
@@ -219,6 +222,61 @@ export function createServer(controller: EngineController, options: ServerOption
       .catch((err) => fail(res, err, 409));
   });
 
+  // ---------------- 交易机器人（多实例并行） ----------------
+
+  app.get("/api/bots", (_req, res) => ok(res, { bots: bots.list() }));
+
+  app.post("/api/bots", (req, res) => {
+    try {
+      ok(res, { bot: bots.create((req.body ?? {}) as BotInput) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.put("/api/bots/:id", (req, res) => {
+    try {
+      ok(res, { bot: bots.update(req.params.id, (req.body ?? {}) as Partial<BotInput>) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.delete("/api/bots/:id", (req, res) => {
+    try {
+      bots.remove(req.params.id);
+      ok(res, { removed: req.params.id });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.post("/api/bots/:id/start", (req, res) => {
+    void bots
+      .start(req.params.id)
+      .then((state) => ok(res, { state, bot: bots.list().find((b) => b.id === req.params.id) }))
+      .catch((err) => fail(res, err, 409));
+  });
+
+  app.post("/api/bots/:id/stop", (req, res) => {
+    bots.stop(req.params.id);
+    ok(res, { state: bots.state(req.params.id) });
+  });
+
+  /** 一次启动全部（并行） */
+  app.post("/api/bots/start-all", (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? (req.body.ids as string[]) : undefined;
+    void bots
+      .startMany(ids ?? bots.list().filter((b) => b.enabled).map((b) => b.id))
+      .then((states) => ok(res, { states, bots: bots.list() }))
+      .catch((err) => fail(res, err, 409));
+  });
+
+  app.post("/api/bots/stop-all", (_req, res) => {
+    bots.stopAll();
+    ok(res, { bots: bots.list() });
+  });
+
   /** 多模型并行模拟盘对照实验 */
   app.post("/api/bench/compare", (req, res) => {
     const body = (req.body ?? {}) as {
@@ -291,6 +349,59 @@ export function createServer(controller: EngineController, options: ServerOption
   });
 
   // ---------------- 标的搜索与自选 ----------------
+
+  /**
+   * 常用标的一键选取：无需输入关键词。
+   * 先取适配器内置清单，再尽力补上实时价格（外网不可达时只返回清单，不报错）。
+   */
+  app.get("/api/markets/popular", (req: Request, res: Response) => {
+    const connectionId = String(req.query.connectionId ?? "");
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 12), 1), 60);
+    let adapter;
+    try {
+      adapter = connections.adapter(connectionId);
+    } catch (err) {
+      fail(res, err);
+      return;
+    }
+
+    const list = (adapter.meta.defaultSymbols ?? []).slice(0, limit);
+    const inWatchlist = new Set(
+      watchlist
+        .list()
+        .filter((w) => w.connectionId === connectionId)
+        .map((w) => w.symbol),
+    );
+
+    void adapter
+      .fetchTickers(list.map((x) => x.symbol))
+      .then((tickers) => {
+        const priceMap = new Map(tickers.map((t) => [t.symbol, t]));
+        ok(res, {
+          connectionId,
+          source: adapter.meta.name,
+          live: tickers.length > 0,
+          symbols: list.map((item) => {
+            const t = priceMap.get(item.symbol);
+            return {
+              ...item,
+              inWatchlist: inWatchlist.has(item.symbol),
+              price: t?.price ?? null,
+              changePct: t?.changePct ?? null,
+            };
+          }),
+        });
+      })
+      // 取不到实时价格不影响选取：清单照常返回
+      .catch(() =>
+        ok(res, {
+          connectionId,
+          source: adapter.meta.name,
+          live: false,
+          symbols: list.map((item) => ({ ...item, inWatchlist: inWatchlist.has(item.symbol), price: null, changePct: null })),
+        }),
+      );
+  });
 
   app.get("/api/markets/search", (req: Request, res: Response) => {
     const q = String(req.query.q ?? "").trim();

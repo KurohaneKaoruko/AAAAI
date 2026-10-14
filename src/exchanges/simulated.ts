@@ -60,6 +60,12 @@ export class SimulatedAdapter implements ExchangeAdapter {
     supportsTestnet: false,
     klineIntervals: ["1m", "5m", "15m", "1h", "4h", "1d"],
     keyFields: [],
+    defaultSymbols: [
+      { symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "DEMO-ETH", name: "模拟以太坊", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "600519", name: "模拟茅台", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "AAPL", name: "模拟苹果", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+    ],
     notes: ["无需密钥", "价格由代码哈希决定，同一代码轨迹固定"],
   };
 

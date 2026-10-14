@@ -78,6 +78,14 @@ export function RiskPage({ store }: { store: AppStore }) {
             onChange={(v) => set("maxPositionWeight", v)}
           />
           <NumberField
+            label="最小调仓额"
+            hint={form.minTradeValue > 0 ? `${form.minTradeValue} 起` : "不限制"}
+            value={form.minTradeValue}
+            step={500}
+            min={0}
+            onChange={(v) => set("minTradeValue", v)}
+          />
+          <NumberField
             label="组合回撤熔断"
             hint={pct(form.maxDrawdownPct, 0)}
             value={form.maxDrawdownPct}
@@ -91,6 +99,10 @@ export function RiskPage({ store }: { store: AppStore }) {
         <div className="explain-box">
           <strong>风险闸门说明</strong>
           <ul className="notes">
+            <li>
+              单次调仓金额低于 <b>{form.minTradeValue > 0 ? form.minTradeValue : 0}</b> 时视为噪声调整，直接忽略
+              （0 表示不限制；调小它会让成交更频繁，但也更容易被手续费吃掉）。
+            </li>
             <li>
               信号目标仓位超过 <b>{pct(form.maxPositionWeight, 0)}</b> 时直接拦截，不会发出订单；
             </li>

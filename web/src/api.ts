@@ -4,9 +4,12 @@ import type {
   AdapterMeta,
   PoolCounts,
   AuthStatus,
+  Bot,
+  BotInput,
   ComparisonResult,
   LlmOverview,
   LlmProfile,
+  PopularSymbol,
   RunnerKind,
   SystemOnePreset,
   AppConfig,
@@ -100,6 +103,18 @@ export const api = {
       instructions: string;
     }>("/api/llm/presets"),
 
+  // 交易机器人
+  bots: () => request<{ bots: Bot[] }>("/api/bots"),
+  createBot: (body: BotInput) => request<{ bot: Bot }>("/api/bots", { method: "POST", body: JSON.stringify(body) }),
+  updateBot: (id: string, body: Partial<BotInput>) =>
+    request<{ bot: Bot }>(`/api/bots/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteBot: (id: string) => request<{ removed: string }>(`/api/bots/${id}`, { method: "DELETE" }),
+  startBot: (id: string) => request<{ state: unknown; bot: Bot }>(`/api/bots/${id}/start`, { method: "POST" }),
+  stopBot: (id: string) => request<{ state: unknown }>(`/api/bots/${id}/stop`, { method: "POST" }),
+  startAllBots: (ids?: string[]) =>
+    request<{ bots: Bot[] }>("/api/bots/start-all", { method: "POST", body: JSON.stringify({ ids }) }),
+  stopAllBots: () => request<{ bots: Bot[] }>("/api/bots/stop-all", { method: "POST" }),
+
   // 多模型并行模拟盘对照
   runComparison: (body: {
     symbols?: string[];
@@ -137,6 +152,14 @@ export const api = {
   testConnection: (id: string) => request<{ ok: boolean; message: string }>(`/api/connections/${id}/test`, { method: "POST" }),
 
   // 标的
+  popular: (connectionId: string, limit = 12) =>
+    request<{
+      connectionId: string;
+      source: string;
+      live: boolean;
+      symbols: PopularSymbol[];
+    }>(`/api/markets/popular?connectionId=${encodeURIComponent(connectionId)}&limit=${limit}`),
+
   search: (connectionId: string, q: string) =>
     request<{ symbols: SymbolInfo[] }>(`/api/markets/search?connectionId=${encodeURIComponent(connectionId)}&q=${encodeURIComponent(q)}`),
   watchlist: () => request<{ items: WatchItem[] }>("/api/watchlist"),

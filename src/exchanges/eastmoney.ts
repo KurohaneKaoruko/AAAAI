@@ -53,6 +53,20 @@ export class EastmoneyAdapter implements ExchangeAdapter {
     supportsTestnet: false,
     klineIntervals: ["5m", "15m", "30m", "60m", "1d"],
     keyFields: [],
+    defaultSymbols: [
+      { symbol: "600519", name: "贵州茅台", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "000001", name: "平安银行", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "601318", name: "中国平安", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "300750", name: "宁德时代", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "600036", name: "招商银行", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "000858", name: "五粮液", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "601899", name: "紫金矿业", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "002594", name: "比亚迪", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "600900", name: "长江电力", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "000333", name: "美的集团", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "601012", name: "隆基绿能", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "002415", name: "海康威视", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
+    ],
     notes: ["标的代码如 600519 / 000001 / 00700", "交易时段 9:30-15:00 之外价格为收盘价"],
   };
 

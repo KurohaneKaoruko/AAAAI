@@ -10,6 +10,7 @@ import { EngineController } from "./server/engineController.js";
 import { ConnectionManager } from "./exchanges/connectionManager.js";
 import { LlmManager } from "./llm/llmManager.js";
 import { AuthService, loadAuthConfig } from "./auth/auth.js";
+import { BotManager } from "./bots/botManager.js";
 import { WatchlistManager } from "./watchlist.js";
 import { loadYamlFile } from "./config.js";
 import { buildConfig } from "./configSchema.js";
@@ -35,11 +36,13 @@ async function main(): Promise<void> {
   const llm = new LlmManager(dataDir, config.llm.strategy);
   seedLegacyLlmProfile(llm, config);
   const controller = new EngineController(config, connections, watchlist, llm);
+  const bots = new BotManager(dataDir, config, connections, llm);
 
   const app = createServer(controller, {
     connections,
     watchlist,
     llm,
+    bots,
     auth,
     configPath,
     webDist: join(root, "web", "dist"),

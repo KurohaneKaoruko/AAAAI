@@ -2,7 +2,7 @@
  * 引擎控制器：管理一次「回测」或「实时」运行。
  *
  * 职责：
- * - 依据「连接 + 自选标的」拉取多标的历史/实时 K 线
+ * - 依据「连接 + 候选池」拉取多标的历史/实时 K 线
  * - 广播状态与事件（SSE 给 WebUI）
  * - 组合指标、持仓、成交流水与行情快照
  * - 回撤熔断自动停机
@@ -17,11 +17,11 @@ import type {
   Position,
   TradeRecord,
 } from "../core/types.js";
-import { LivePoller, mergeBarsByTime, streamBars } from "../data/streaming.js";
+import { LivePoller, mergeBarsByTime } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
-import { buildPipeline, type Pipeline } from "../agents/orchestrator.js";
+import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
@@ -54,7 +54,7 @@ export interface EngineState {
   metrics: PortfolioMetrics | null;
   positions: Position[];
   trades: TradeRecord[];
-  /** 实时行情快照（自选标的） */
+  /** 实时行情快照（候选池） */
   tickers: Ticker[];
   /** 本次运行各标的的标记价（持仓浮盈按此计算） */
   prices: Record<string, number>;
@@ -63,6 +63,8 @@ export interface EngineState {
   broker: { name: string; paper: boolean } | null;
   strategy: string | null;
   realizedPnl: number;
+  /** 回测进度与耗时 */
+  progress: { bars: number; total: number; durationMs: number; filtered: number } | null;
   /** 最近一次多模型对照结果 */
   comparison: ComparisonResult | null;
   /** 对照实验进行中 */
@@ -84,6 +86,10 @@ export interface StartOptions {
 }
 
 const MAX_EVENT_LINES = 400;
+/** 回测模式视为噪声、不逐条推送的主题 */
+const NOISY_TOPICS = new Set<string>([Topic.BAR, Topic.MARKET_VIEW]);
+/** 回测事件批量推送间隔（毫秒） */
+const EVENT_FLUSH_MS = 120;
 
 export class EngineController {
   private state: EngineState;
@@ -93,6 +99,8 @@ export class EngineController {
   private tickerTimer: NodeJS.Timeout | null = null;
   private stopRequested = false;
   private eventLines: EngineEventLine[] = [];
+  private flushTimer: NodeJS.Timeout | null = null;
+  private startedAtMs = 0;
 
   constructor(
     private config: AppConfig,
@@ -101,9 +109,8 @@ export class EngineController {
     private readonly llm: LlmManager,
   ) {
     this.llm.setStrategy(config.llm.strategy);
-    if (config.strategy.decisionSource !== "rules") {
-      this.llm.setActiveKind(config.strategy.decisionSource);
-    }
+    const primaryModel = config.strategy.sources.find((s) => s !== "rules");
+    if (primaryModel) this.llm.setActiveKind(primaryModel);
     this.state = this.freshState();
   }
 
@@ -152,6 +159,7 @@ export class EngineController {
       broker: null,
       strategy: null,
       realizedPnl: 0,
+      progress: null,
       comparison: null,
       comparing: false,
       config: {},
@@ -164,25 +172,69 @@ export class EngineController {
 
   // ---------------- 事件转译 ----------------
 
+  /**
+   * 事件转发。
+   *
+   * 回测往往在几十毫秒内跑完数百根 K 线，若逐条推送会瞬间灌进几百条事件
+   * （且事件上限会把前面的挤掉）。因此回测模式下：
+   *   1) K 线与市场解读属于高频噪声，不推送，只计数；
+   *   2) 剩余事件先入缓冲，按节流批量推送。
+   * 实时模式保持逐条推送（本来速度就慢）。
+   */
   private attachEventRelay(bus: EventBus): void {
+    const batch = this.state.mode === "backtest";
+    const pending: EngineEventLine[] = [];
+
+    const push = (line: EngineEventLine): void => {
+      this.eventLines.push(line);
+      if (this.eventLines.length > MAX_EVENT_LINES) this.eventLines.shift();
+      this.state.events = [...this.eventLines].reverse();
+      if (batch) pending.push(line);
+      else this.broadcast({ type: "event", data: line });
+    };
+
+    const flush = (): void => {
+      if (pending.length === 0) return;
+      for (const line of pending) this.broadcast({ type: "event", data: line });
+      pending.length = 0;
+    };
+
     const relay = (event: Event): void => {
-      const line: EngineEventLine = {
+      const noise = batch && NOISY_TOPICS.has(event.topic);
+      if (noise) {
+        this.state.progress = {
+          ...(this.state.progress ?? { bars: 0, total: 0, durationMs: 0, filtered: 0 }),
+          filtered: (this.state.progress?.filtered ?? 0) + 1,
+        };
+        return;
+      }
+      push({
         seq: event.seq,
         topic: event.topic,
         timestamp: new Date(event.timestamp).toISOString(),
         summary: summarize(event),
-      };
-      this.eventLines.push(line);
-      if (this.eventLines.length > MAX_EVENT_LINES) this.eventLines.shift();
-      this.state.events = [...this.eventLines].reverse();
-      this.broadcast({ type: "event", data: line });
+      });
     };
+
     for (const topic of Object.values(Topic)) bus.subscribe(topic, relay);
+
+    if (batch) {
+      this.flushTimer = setInterval(flush, EVENT_FLUSH_MS);
+      // 回测结束（同步返回后）统一冲刷一次
+      queueMicrotask(flush);
+    }
+  }
+
+  private flushEvents(): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
   }
 
   // ---------------- 行情快照 ----------------
 
-  /** 拉取自选标的行情（页面顶栏 ticker）。 */
+  /** 拉取候选池行情（页面顶栏 ticker）。 */
   async refreshTickers(): Promise<Ticker[]> {
     const items = this.watchlist.list();
     if (items.length === 0) return this.state.tickers;
@@ -233,7 +285,7 @@ export class EngineController {
       .filter((w) => w.connectionId === connectionId)
       .map((w) => w.symbol);
     if (fromWatchlist.length > 0) return fromWatchlist;
-    throw new Error("没有可运行的标的：请在「自选标的」页添加，或在运行面板手动输入");
+    throw new Error("没有可运行的标的：请在「策略 → 候选池」添加，或在运行面板手动输入");
   }
 
   async start(options: StartOptions): Promise<void> {
@@ -242,6 +294,7 @@ export class EngineController {
     }
     this.stopRequested = false;
     this.eventLines = [];
+    this.flushEvents();
 
     const connection = this.resolveConnection(options.connectionId);
     const symbols = this.resolveSymbols(connection.id, options.symbols);
@@ -257,6 +310,11 @@ export class EngineController {
       adapter,
       liveTrading,
       llm: this.config.llm.enabled ? this.llm : null,
+      // 混合决策：每路一个受限池，避免 chat 与 System One 互相串味
+      lanes: {
+        chat: this.llm.clientForKind("chat"),
+        systemone: this.llm.clientForKind("systemone"),
+      },
     });
     if (this.config.execution.mode === "live" && !liveTrading) {
       log.warn("实盘模式不可用（适配器不支持交易或未配 Key），已自动降级为模拟成交");
@@ -306,13 +364,27 @@ export class EngineController {
     limit: number,
   ): Promise<void> {
     log.info("回测开始 %s 共 %d 根 K 线", symbols.join(","), limit);
+    this.startedAtMs = Date.now();
     const groups = await Promise.all(symbols.map((s) => adapter.fetchKlines(s, interval, limit)));
     const bars = mergeBarsByTime(groups);
     const pipeline = this.pipeline!;
-    for (const bar of bars) {
+    for (const [i, bar] of bars.entries()) {
       if (this.stopRequested) break;
-      await streamBars(pipeline.bus, pipeline.book, [bar]);
+      await feed(pipeline, [bar]);
+      this.state.progress = {
+        bars: i + 1,
+        total: bars.length,
+        durationMs: Date.now() - this.startedAtMs,
+        filtered: this.state.progress?.filtered ?? 0,
+      };
     }
+    this.flushEvents();
+    this.state.progress = {
+      bars: this.state.progress?.bars ?? bars.length,
+      total: bars.length,
+      durationMs: Date.now() - this.startedAtMs,
+      filtered: this.state.progress?.filtered ?? 0,
+    };
     this.refreshFromPipeline();
     this.emitState();
   }
@@ -323,7 +395,7 @@ export class EngineController {
     const warmup = await Promise.all(
       symbols.map((s) => adapter.fetchKlines(s, interval, this.config.market.barCount)),
     );
-    await streamBars(pipeline.bus, pipeline.book, mergeBarsByTime(warmup));
+    await feed(pipeline, mergeBarsByTime(warmup));
     this.refreshFromPipeline();
     this.emitState();
 
@@ -336,7 +408,7 @@ export class EngineController {
     this.poller = poller;
     poller.start(async (bars: Bar[]) => {
       if (this.stopRequested) return;
-      await streamBars(pipeline.bus, pipeline.book, bars);
+      await feed(pipeline, bars);
       this.refreshFromPipeline();
       this.emitState();
       if (pipeline.portfolio.drawdownPct >= this.config.risk.maxDrawdownPct) {
@@ -408,6 +480,7 @@ export class EngineController {
   }
 
   stop(): void {
+    this.flushEvents();
     this.poller?.stop();
     this.poller = null;
     if (this.tickerTimer) clearInterval(this.tickerTimer);
@@ -438,9 +511,8 @@ export class EngineController {
     };
     this.state.config = redactConfig(this.config);
     this.llm.setStrategy(this.config.llm.strategy);
-    if (this.config.strategy.decisionSource !== "rules") {
-      this.llm.setActiveKind(this.config.strategy.decisionSource);
-    }
+    const primary = this.config.strategy.sources.find((s) => s !== "rules");
+    if (primary) this.llm.setActiveKind(primary);
     this.emitState();
     return this.config;
   }
@@ -470,6 +542,22 @@ function summarize(event: Event): string {
     case Topic.MARKET_VIEW: {
       const v = p as unknown as { symbol: string; trend: string; momentum: number };
       return `${v.symbol} ${v.trend} mom=${v.momentum.toFixed(4)}`;
+    }
+    case Topic.ALLOCATION: {
+      const a = p as unknown as {
+        weights: Record<string, number>;
+        cashWeight: number;
+        reason: string;
+        source: string;
+        notes: string[];
+      };
+      const held = Object.entries(a.weights ?? {})
+        .sort((x, y) => y[1] - x[1])
+        .map(([s, w]) => `${s} ${(w * 100).toFixed(0)}%`)
+        .join(" / ");
+      return `[${a.source}] ${held || "空仓"} · 现金 ${((a.cashWeight ?? 0) * 100).toFixed(0)}% · ${a.reason}${
+        a.notes?.length ? `（${a.notes.join("；")}）` : ""
+      }`;
     }
     case Topic.SIGNAL: {
       const s = p as unknown as { symbol: string; targetWeight: number; reason: string };

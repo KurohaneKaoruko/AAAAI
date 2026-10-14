@@ -191,15 +191,22 @@ test("多模型对照：同一份行情、同一资金、各自独立记账", as
   for (const r of result.results) {
     assert.equal(r.equityCurve.length, 80, `${r.label} 权益点数应一致`);
   }
+  // 结果顺序 = 选手声明顺序（前端按此渲染卡片）
+  assert.deepEqual(result.results.map((r) => r.id), runners.map((r) => r.id));
   // 仓位越高的选手成交更多（同一行情下更积极）
   const byId = new Map(result.results.map((r) => [r.id, r]));
   assert.ok(byId.get("model-a")!.fillCount >= byId.get("model-b")!.fillCount, "高目标仓位模型成交应不少于低仓位模型");
   // 权益都是正的（组合层面）
   for (const r of result.results) assert.ok(r.finalEquity > 0);
   // 排行按收益率降序
-  const rets = result.results.map((r) => r.totalReturn);
-  assert.deepEqual(rets, [...rets].sort((a, b) => b - a));
-  assert.equal(result.winners[0], [...result.results].sort((a, b) => b.totalReturn - a.totalReturn)[0]!.id);
+  const expectedWinners = [...result.results].sort((a, b) => b.totalReturn - a.totalReturn).map((r) => r.id);
+  assert.deepEqual(result.winners, expectedWinners);
+  // 模型选手必须真的用上了模型（否则「对照」就是在比同一份规则）
+  assert.notEqual(
+    byId.get("model-a")!.totalReturn,
+    byId.get("baseline")!.totalReturn,
+    "chat 选手应按自己的模型决策，结果不应与纯规则基线一致",
+  );
 });
 
 test("多模型对照：无选手时返回空结果", async () => {
@@ -282,14 +289,22 @@ test("模型池：poolCounts 按类型统计可用实例", () => {
   }
 });
 
-test("决策来源为 rules 时不调用模型（纯规则流水线）", async () => {
+test("对照实验：每个选手只跑自己那一路，基线绝不调用模型", async () => {
   const config = testConfig();
-  config.strategy.decisionSource = "rules";
-  let called = 0;
-  const spy: LLMClient = {
-    name: "spy",
+  config.strategy.decisionSource = "rules"; // 全局是纯规则，但对照实验要单变量
+  let chatCalls = 0;
+  let soCalls = 0;
+  const chatSpy: LLMClient = {
+    name: "chat",
     async complete() {
-      called += 1;
+      chatCalls += 1;
+      return JSON.stringify({ target_weight: 0.5, confidence: 1, reason: "[llm]" });
+    },
+  };
+  const soSpy: LLMClient = {
+    name: "so",
+    async complete() {
+      soCalls += 1;
       return JSON.stringify({ target_weight: 0.5, confidence: 1, reason: "[llm]" });
     },
   };
@@ -300,10 +315,33 @@ test("决策来源为 rules 时不调用模型（纯规则流水线）", async (
     interval: "1m",
     liveTrading: false,
     runners: [
-      { id: "r", label: "规则", kind: "chat", client: spy },
       { id: "b", label: "基线", kind: "baseline", client: null },
+      { id: "c", label: "对话", kind: "chat", client: chatSpy },
+      { id: "s", label: "决策", kind: "systemone", client: soSpy },
     ],
   });
-  assert.equal(called, 0, "决策来源为纯规则时不应调用模型");
-  assert.equal(result.results.length, 2);
+  assert.equal(result.results.length, 3);
+  assert.ok(chatCalls > 0, "chat 选手应调用对话模型");
+  assert.ok(soCalls > 0, "systemone 选手应调用决策模型");
+  // 基线选手的收益 = 纯动量；与模型选手结果不同，说明各自只跑自己那一路
+  const [baseline, chat] = result.results;
+  assert.notEqual(baseline!.totalReturn, chat!.totalReturn);
+});
+
+test("对照引擎：各选手独立记账且价格簿正确（回归）", async () => {
+  // 曾经踩过的坑：给每个选手另建 PriceBook，而风控 Agent 持有的是流水线内部那本，
+  // 导致价格对不上、全部信号被以「无行情」拒掉，对照结果恒为 0 成交。
+  const result = await runComparison(testConfig(), {
+    adapter: testAdapter(),
+    symbols: ["600519"],
+    bars: 200,
+    interval: "1m",
+    liveTrading: false,
+    runners: [{ id: "b", label: "基线", kind: "baseline", client: null }],
+  });
+  assert.ok(
+    result.results[0]!.fillCount > 0,
+    `基线在 600519 上应产生成交，实际 ${result.results[0]!.fillCount}`,
+  );
+  assert.equal(result.results[0]!.equityCurve.length, 200);
 });

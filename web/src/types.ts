@@ -39,6 +39,13 @@ export interface SymbolInfo {
   qtyPrecision: number;
 }
 
+/** 常用标的可选项（内置清单 + 尽力补上的实时价） */
+export interface PopularSymbol extends SymbolInfo {
+  inWatchlist: boolean;
+  price: number | null;
+  changePct: number | null;
+}
+
 export interface Ticker {
   symbol: string;
   price: number;
@@ -155,6 +162,125 @@ export interface AuthStatus {
 
 export type RunnerKind = "baseline" | "chat" | "systemone";
 
+export type BotMode = "backtest" | "live";
+export type BotStatus = "idle" | "running" | "stopped" | "error";
+
+export interface BotHolding {
+  symbol: string;
+  quantity: number;
+  avgCost: number;
+  price: number;
+  marketValue: number;
+  weight: number;
+  unrealizedPnl: number;
+}
+
+/** 某个账号此刻的资产配置快照。 */
+export interface BotAllocation {
+  timestamp: string;
+  equity: number;
+  cash: number;
+  cashWeight: number;
+  holdings: BotHolding[];
+  heldCount: number;
+}
+
+export interface BotMetrics {
+  finalEquity: number;
+  cash: number;
+  openPositions: number;
+  totalFills: number;
+  maxDrawdownPct: number;
+  realizedPnl: number;
+  equityPoints: number;
+  totalReturn: number;
+}
+
+export interface Bot {
+  id: string;
+  name: string;
+  enabled: boolean;
+  connectionId: string;
+  symbols: string[];
+  mode: BotMode;
+  interval: string;
+  barCount: number;
+  pollMs: number;
+  /** 主决策路（sources 的第一路） */
+  decisionSource: DecisionSource;
+  /** 参与决策的路（混合决策可多路） */
+  sources: DecisionSource[];
+  /** 各路配比，0 = 不参与 */
+  blend: Record<DecisionSource, number>;
+  modelProfileIds: string[];
+  decisionInterval: number;
+  strategy: {
+    fastWindow: number;
+    slowWindow: number;
+    maxTargetWeight: number;
+    sources: DecisionSource[];
+    blend: Record<DecisionSource, number>;
+    selfAllocating: boolean;
+    maxPositions: number;
+    maxGrossExposure: number;
+    allocationInterval: number;
+  };
+  risk: {
+    initialCash: number;
+    maxPositionWeight: number;
+    maxOrderValue: number;
+    maxDrawdownPct: number;
+    minTradeValue: number;
+  };
+  createdAt: string;
+  modelLabels: string[];
+  state: {
+    id: string;
+    status: BotStatus;
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+    metrics: BotMetrics | null;
+    /** 当前资产配置（各标的权重 + 现金） */
+    allocation: BotAllocation | null;
+    bars: number;
+    durationMs: number;
+    events: { topic: string; timestamp: string; summary: string }[];
+  };
+}
+
+export interface BotInput {
+  name: string;
+  connectionId: string;
+  symbols: string[];
+  mode?: BotMode;
+  interval?: string;
+  barCount?: number;
+  pollMs?: number;
+  decisionSource?: DecisionSource;
+  sources?: DecisionSource[];
+  blend?: Partial<Record<DecisionSource, number>>;
+  modelProfileIds?: string[];
+  decisionInterval?: number;
+  strategy?: {
+    fastWindow?: number;
+    slowWindow?: number;
+    maxTargetWeight?: number;
+    selfAllocating?: boolean;
+    maxPositions?: number;
+    maxGrossExposure?: number;
+    allocationInterval?: number;
+  };
+  risk?: {
+    initialCash?: number;
+    maxPositionWeight?: number;
+    maxOrderValue?: number;
+    maxDrawdownPct?: number;
+    minTradeValue?: number;
+  };
+  enabled?: boolean;
+}
+
 export interface RunnerResult {
   id: string;
   label: string;
@@ -215,6 +341,15 @@ export interface AppConfig {
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
+    /** 参与决策的路（混合决策可多路） */
+    sources: DecisionSource[];
+    /** 各路配比，0 = 不参与 */
+    blend: Record<DecisionSource, number>;
+    /** AI 在候选池里自行选资产并配权重 */
+    selfAllocating: boolean;
+    maxPositions: number;
+    maxGrossExposure: number;
+    allocationInterval: number;
   };
   risk: {
     initialCash: number;
@@ -223,6 +358,7 @@ export interface AppConfig {
     maxOrderValue: number;
     maxPositionWeight: number;
     maxDrawdownPct: number;
+    minTradeValue: number;
   };
   execution: { mode: "paper" | "live"; connectionId: string };
   auth: { enabled: boolean; username: string; sessionTtlHours: number };

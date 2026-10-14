@@ -136,7 +136,7 @@ export function SystemPage({ store }: { store: AppStore }) {
                 <code>data/secrets.json</code> API 密钥（0600，已 gitignore）
               </li>
               <li>
-                <code>data/watchlist.json</code> 自选标的
+                <code>data/watchlist.json</code> 候选池（watchlist.json）
               </li>
               <li>
                 <code>config/default.yaml</code> 主配置（保存时写回）

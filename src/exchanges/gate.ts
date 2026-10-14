@@ -68,6 +68,17 @@ export class GateAdapter implements ExchangeAdapter {
       { key: "apiKey", label: "API Key", secret: false, placeholder: "粘贴 Gate.io API Key" },
       { key: "apiSecret", label: "API Secret", secret: true, placeholder: "粘贴 Gate.io API Secret" },
     ],
+    defaultSymbols: [
+      { symbol: "BTC_USDT", name: "比特币", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "ETH_USDT", name: "以太坊", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "SOL_USDT", name: "Solana", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "BNB_USDT", name: "BNB", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "XRP_USDT", name: "XRP", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "DOGE_USDT", name: "Dogecoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "TON_USDT", name: "Toncoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "TRX_USDT", name: "TRON", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "AR_USDT", name: "Arweave", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+    ],
     notes: [
       "签名：HMAC-SHA512(请求体) 的十六进制值，请求头需带 KEY / Timestamp / SIGN",
       "现货无官方测试网，建议先用 paper 模式验证策略",

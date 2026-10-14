@@ -37,6 +37,16 @@ export class OkxAdapter implements ExchangeAdapter {
       { key: "apiKey", label: "API Key", secret: false, placeholder: "粘贴 OKX API Key" },
       { key: "apiSecret", label: "Secret（或 Secret:Passphrase）", secret: true, placeholder: "Secret:Passphrase" },
     ],
+    defaultSymbols: [
+      { symbol: "BTC-USDT", name: "比特币", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "ETH-USDT", name: "以太坊", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "SOL-USDT", name: "Solana", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "BTC-USDC", name: "比特币/USDC", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "ETH-USDC", name: "以太坊/USDC", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "XRP-USDT", name: "XRP", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "DOGE-USDT", name: "Dogecoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+      { symbol: "TON-USDT", name: "Toncoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
+    ],
     notes: ["签名: base64(HMAC-SHA256(ts+method+path+body))", "x-simulated-trading=1 走模拟盘"],
   };
 

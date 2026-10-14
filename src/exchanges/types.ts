@@ -93,6 +93,8 @@ export interface AdapterMeta {
   keyFields: KeyField[];
   /** 是否需要额外配置（如 OKX 的 passphrase 复用 secret 字段） */
   notes?: string[];
+  /** 常用标的清单：供「一键选取」用，无需输入关键词 */
+  defaultSymbols?: SymbolInfo[];
 }
 
 export interface KeyField {

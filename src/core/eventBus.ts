@@ -8,18 +8,20 @@
  *   流水线内统一使用 publishAsync 保证顺序确定。
  */
 
-import type { Signal } from "./types.js";
+import type { Allocation, Signal } from "./types.js";
 
 export const Topic = {
   BAR: "market.bar",
   MARKET_VIEW: "agent.market_view",
   SIGNAL: "strategy.signal",
+  ALLOCATION: "strategy.allocation",
   ORDER_INTENT: "exec.order_intent",
   ORDER_REJECTED: "exec.order_rejected",
   FILL: "exec.fill",
   ENGINE: "engine.status",
 } as const;
 
+export type { Allocation as AllocationEvent };
 export type TopicName = (typeof Topic)[keyof typeof Topic];
 
 export type Handler<T = unknown> = (event: Event<T>) => void | Promise<void>;

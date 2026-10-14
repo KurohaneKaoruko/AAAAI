@@ -1,9 +1,20 @@
 /** LLM 客户端抽象：策略与分析的"大脑"接入点。 */
 
+import type { DecisionSource } from "../configSchema.js";
+import type { JointBoard } from "./jointBoard.js";
+
 export interface LLMClient {
   readonly name: string;
   /** 发送 prompt，返回模型文本输出。 */
   complete(prompt: string): Promise<string>;
+  /**
+   * 资产配置能力：一次决定「买哪些、各占多少」。
+   *
+   * 对话模型默认等价于 complete（prompt 里已要求输出 allocations JSON）；
+   * System One 这类纯决策模型没有 chat 接口，需要按协议另行实现。
+   * 未实现时上层自动回退到横截面动量基线，不会中断运行。
+   */
+  allocate?(prompt: string, symbols: string[]): Promise<string>;
 }
 
 /** 交易决策的 LLM 输出结构。 */
@@ -18,6 +29,10 @@ export function buildDecisionPrompt(args: {
   symbol: string;
   bars: { timestamp: string; open: number; high: number; low: number; close: number }[];
   view?: { trend: string; momentum: number };
+  /** 联合决策板：把另一路模型的判断带进来，实现「一起决策」 */
+  board?: JointBoard;
+  /** 当前这一路（用于在黑板里排除自己） */
+  source?: DecisionSource;
 }): string {
   const recent = args.bars.slice(-20);
   const lines = recent
@@ -29,9 +44,11 @@ export function buildDecisionPrompt(args: {
   const view = args.view
     ? `当前市场解读: 趋势=${args.view.trend}, 动量=${args.view.momentum.toFixed(4)}`
     : "当前市场解读: 无";
+  const others = args.board && args.source ? args.board.renderOthers(args.source) : "";
   return [
     `你是一名严谨的量化交易员，正在为 ${args.symbol} 做仓位决策。`,
     view,
+    others,
     "最近 K 线（由旧到新）:",
     lines,
     "",

@@ -305,6 +305,47 @@ export class LlmManager implements LLMClient {
 
   // ---------------- 调用 ----------------
 
+  /**
+   * 在指定的实例范围内按当前策略挑选（供「每个机器人单独指定模型」使用）。
+   * 只考虑已启用、有 Key、未熔断的实例。
+   */
+  pickAmong(profileIds: string[]): LlmProfile | null {
+    if (profileIds.length === 0) return null;
+    const now = Date.now();
+    const pool = this.profiles.filter((p) => {
+      if (!profileIds.includes(p.id) || !p.enabled) return false;
+      if (!this.secrets.hasKey(this.key(p.id))) return false;
+      const s = this.stats.get(p.id);
+      return !(s && s.cooldownUntil > now);
+    });
+    if (pool.length === 0) return null;
+    if (pool.length === 1) return pool[0]!;
+    if (this.strategy === "random") return pool[Math.floor(Math.random() * pool.length)]!;
+    if (this.strategy === "latency") {
+      return [...pool].sort((a, b) => this.latencyOf(a.id) - this.latencyOf(b.id))[0]!;
+    }
+    if (this.strategy === "weighted") return this.pickWeighted(pool);
+    const picked = pool[this.rrIndex % pool.length]!;
+    this.rrIndex = (this.rrIndex + 1) % pool.length;
+    return picked;
+  }
+
+  /** 指定实例直接调用（仍计入统计与熔断）。 */
+  async completeWith(profile: LlmProfile, prompt: string): Promise<string> {
+    return this.callOne(profile, prompt);
+  }
+
+  /**
+   * 指定实例执行资产配置：走该实例的 allocate 能力（System One 会按标的逐个提问）。
+   * 实例没有该能力时抛错，由上层把这一路剔除、配比让给其余路。
+   */
+  async allocateWith(profile: LlmProfile, prompt: string, symbols: string[]): Promise<string> {
+    if (!this.client(profile).allocate) {
+      throw new Error(`${profile.label} 不支持资产配置`);
+    }
+    return this.callOne(profile, prompt, symbols);
+  }
+
   private latencyOf(id: string): number {
     const s = this.stats.get(id);
     return s && s.avgLatencyMs > 0 ? s.avgLatencyMs : 0;
@@ -368,13 +409,40 @@ export class LlmManager implements LLMClient {
     throw lastError;
   }
 
-  private async callOne(profile: LlmProfile, prompt: string): Promise<string> {
+  /**
+   * 资产配置：与 complete 同样的调度策略（负载均衡 + 故障转移 + 熔断），
+   * 只是走客户端的 allocate 能力。没有该能力的实例会被跳过。
+   */
+  async allocate(prompt: string, symbols: string[], kind?: ModelKind): Promise<string> {
+    const pool = kind ?? this.activeKind;
+    const capable = this.available(pool).filter((p) => this.client(p).allocate);
+    if (capable.length === 0) {
+      throw new Error("当前模型都不支持资产配置（System One 需实现多标的提问）");
+    }
+    const first = this.pickAmong(capable.map((p) => p.id))!;
+    let lastError: Error = new Error("未知错误");
+    for (const profile of [first, ...capable.filter((p) => p.id !== first.id)]) {
+      try {
+        return await this.callOne(profile, prompt, symbols);
+      } catch (err) {
+        lastError = err as Error;
+        log.warn("%s 资产配置失败: %s", profile.label, lastError.message);
+      }
+    }
+    throw lastError;
+  }
+
+  private async callOne(profile: LlmProfile, prompt: string, symbols?: string[]): Promise<string> {
     const started = Date.now();
     const stat = this.statsOf(profile.id);
     stat.calls += 1;
     stat.lastUsedAt = new Date().toISOString();
     try {
-      const text = await this.client(profile).complete(prompt);
+      const client = this.client(profile);
+      const text =
+        symbols && client.allocate
+          ? await client.allocate(prompt, symbols)
+          : await client.complete(prompt);
       const latency = Date.now() - started;
       stat.success += 1;
       stat.consecutiveFailures = 0;
@@ -396,6 +464,22 @@ export class LlmManager implements LLMClient {
       }
       throw err;
     }
+  }
+
+  /**
+   * 取「只含某一类模型」的受限客户端。
+   *
+   * 混合决策时每一路各拿一个：规则路不需要，chat 路只会打到对话模型池，
+   * systemone 路只会打到 System One 池，避免互相串味。
+   */
+  clientForKind(kind: ModelKind): LLMClient | null {
+    if (this.available(kind).length === 0) return null;
+    const name = `llm:${kind}`;
+    return {
+      name,
+      complete: (prompt: string) => this.complete(prompt, kind),
+      allocate: (prompt: string, symbols: string[]) => this.allocate(prompt, symbols, kind),
+    };
   }
 
   /**
