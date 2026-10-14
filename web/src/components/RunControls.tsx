@@ -114,11 +114,11 @@ export function RunControls({ store, compact = false }: { store: AppStore; compa
       <div className="symbol-picker">
         <div className="symbol-picker-head">
           运行标的
-          {watchSymbols.length === 0 && <span className="dim"> · 请先到「自选标的」添加</span>}
+          {watchSymbols.length === 0 && <span className="dim"> · 请先到「策略 → 候选池」添加</span>}
         </div>
         {watchSymbols.length === 0 ? (
           <div className="dim small">
-            暂无标的。可直接切到「自选标的」页搜索并添加，或填写下方手动标的。
+            暂无标的。可到「策略 → 候选池」搜索并添加后回到这里。
           </div>
         ) : (
           <div className="chip-row">

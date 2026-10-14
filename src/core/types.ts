@@ -35,6 +35,26 @@ export interface Signal {
   reason: string;
 }
 
+/**
+ * 资产配置结果：AI/规则给出的「这一轮买哪些、各占多少、留多少现金」。
+ *
+ * 与单标的 Signal 的关系：配置器先产出 Allocation（组合级），
+ * 再按标的拆成若干 Signal 交给风控逐个处理，因此风控链路保持不变。
+ */
+export interface Allocation {
+  timestamp: Date;
+  /** symbol -> 目标权重（占总权益，0~1）；未出现的标的视为 0（应清仓） */
+  weights: Record<string, number>;
+  /** 现金比例 = 1 - Σ权重 */
+  cashWeight: number;
+  confidence: number;
+  reason: string;
+  /** rules | ai | fallback */
+  source: string;
+  /** 裁剪/回退说明 */
+  notes: string[];
+}
+
 /** 风控 Agent 放行后产生的下单意图。 */
 export interface OrderIntent {
   symbol: string;

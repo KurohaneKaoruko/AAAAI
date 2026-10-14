@@ -36,6 +36,18 @@ export class StooqAdapter implements ExchangeAdapter {
     supportsTestnet: false,
     klineIntervals: ["1d"],
     keyFields: [],
+    defaultSymbols: [
+      { symbol: "AAPL", name: "苹果", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "MSFT", name: "微软", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "NVDA", name: "英伟达", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "TSLA", name: "特斯拉", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "AMZN", name: "亚马逊", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "GOOGL", name: "谷歌", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "META", name: "Meta", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "SPY", name: "标普500 ETF", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "QQQ", name: "纳指100 ETF", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+      { symbol: "BRK.B", name: "伯克希尔", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+    ],
     notes: ["代码如 AAPL / MSFT / TSLA（自动补 .us 后缀）", "仅日线，日内策略请使用加密货币或模拟交易所"],
   };
 

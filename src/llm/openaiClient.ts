@@ -48,4 +48,9 @@ export class OpenAICompatClient implements LLMClient {
     log.debug("LLM 响应 %d 字节", content.length);
     return content;
   }
+
+  /** 资产配置：对话模型用同一条 chat 接口即可，由上层解析 allocations JSON。 */
+  allocate(prompt: string, _symbols: string[]): Promise<string> {
+    return this.complete(prompt);
+  }
 }

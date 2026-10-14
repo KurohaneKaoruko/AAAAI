@@ -5,7 +5,7 @@ import { useAppStore } from "./state/useAppStore";
 import { useTheme } from "./lib/theme";
 import type { PageId } from "./components/Shell";
 import { DashboardPage } from "./pages/DashboardPage";
-import { MarketsPage } from "./pages/MarketsPage";
+import { BotsPage } from "./pages/BotsPage";
 import { ExchangesPage } from "./pages/ExchangesPage";
 import { StrategyPage } from "./pages/StrategyPage";
 import { RiskPage } from "./pages/RiskPage";
@@ -39,8 +39,8 @@ export function App() {
     switch (page) {
       case "dashboard":
         return <DashboardPage store={store} />;
-      case "markets":
-        return <MarketsPage store={store} />;
+      case "bots":
+        return <BotsPage store={store} />;
       case "exchanges":
         return <ExchangesPage store={store} />;
       case "strategy":

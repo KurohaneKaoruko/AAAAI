@@ -46,11 +46,26 @@ strategy:
   #   rules      = 纯规则，双均线动量本地计算，不调用模型
   #   chat       = 对话模型池（OpenAI 兼容大模型）
   #   systemone  = System One 决策模型池（Jev / Laya / 阿里云百炼）
+  # 混合决策：decision_sources 列出参与决策的路，blend 给各路配比（0 = 不参与）
+  #   ["rules"]                    = 只用规则
+  #   ["chat"]                     = 只用对话模型
+  #   ["chat","systemone"]         = 对话模型 + System One 按配比融合（推荐）
+  #   ["rules","chat","systemone"] = 三路融合
+  decision_sources: [rules]
+  blend:
+    rules: 1
+    chat: 0
+    systemone: 0
   decision_source: rules
   name: llm-momentum         # momentum = 纯动量 | llm-momentum = 模型决策+动量兜底
   fast_window: 5             # 快线窗口
   slow_window: 20            # 慢线窗口（须大于快线）
-  max_target_weight: 0.5     # 策略目标仓上限（占总权益）
+  max_target_weight: 0.5     # 逐标的模式下单个标的的目标仓上限（占总权益）
+  # 资产配置：让 AI/规则在「候选池」里自己选标的、配权重（关闭 = 人指定标的，模型只定仓位）
+  self_allocating: false
+  max_positions: 3           # 最多同时持有几个资产
+  max_gross_exposure: 1.0    # 组合总仓位上限（各权重之和），其余留现金
+  allocation_interval: 5     # 每 N 轮行情做一次资产配置
 
 risk:
   initial_cash: 100000       # 初始资金
@@ -58,6 +73,7 @@ risk:
   slippage_bps: 2            # 模拟滑点（基点）
   max_order_value: 20000     # 单笔下单金额上限
   max_position_weight: 0.6   # 单标的仓位上限
+  min_trade_value: 0         # 最小调仓额：低于此金额不下单（0 = 不限制，用于过滤噪声微调）
   max_drawdown_pct: 0.15     # 组合回撤熔断线（实时模式触发即停机）
 
 execution:

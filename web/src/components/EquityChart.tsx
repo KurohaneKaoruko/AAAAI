@@ -29,7 +29,7 @@ export function EquityChart({ curve, initialCash }: { curve: EquityPoint[]; init
   if (!geom) {
     return (
       <div className="chart-empty">
-        暂无权益数据 —— 在「自选标的」页添加标的后运行一次回测
+        暂无权益数据 —— 在「策略 → 候选池」添加标的后运行一次回测
       </div>
     );
   }

@@ -15,6 +15,79 @@ function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
 }
 
+/**
+ * 读取混合决策配置：
+ * - decision_sources：参与决策的来源列表；缺省用 decision_source 单选；
+ * - blend：各来源配比；缺省给选中项等权。
+ * 返回对象会展开进 strategy 小节。
+ */
+function sourcesOf(
+  raw: Record<string, unknown>,
+  fallback: DecisionSource,
+): { sources: DecisionSource[]; blend: Record<DecisionSource, number> } {
+  const list = Array.isArray(raw.strategy ? (raw.strategy as Record<string, unknown>).decision_sources : undefined)
+    ? ((raw.strategy as Record<string, unknown>).decision_sources as unknown[])
+        .map((v) => String(v))
+        .filter((v): v is DecisionSource => DECISION_SOURCES.has(v as DecisionSource))
+    : [];
+  const sources = list.length > 0 ? [...new Set(list)] : [fallback];
+
+  const rawBlend = (raw.strategy as Record<string, unknown> | undefined)?.blend;
+  const blend: Record<DecisionSource, number> = { rules: 0, chat: 0, systemone: 0 };
+  if (rawBlend && typeof rawBlend === "object") {
+    for (const key of Object.keys(blend) as DecisionSource[]) {
+      const v = Number((rawBlend as Record<string, unknown>)[key]);
+      if (Number.isFinite(v) && v >= 0) blend[key] = v;
+    }
+  }
+  const anyPositive = sources.some((s) => blend[s] > 0);
+  if (!anyPositive) {
+    for (const s of sources) blend[s] = 1;
+  }
+  return { sources, blend };
+}
+
+/**
+ * 归一化决策路：sources / blend / decisionSource 三者可能不同步
+ * （例如只改了 decisionSource），这里以「sources 为主、decisionSource 兜底」对齐。
+ * 返回的配比保证：至少一路 > 0，且 sources 之外的路权重为 0。
+ */
+export function resolveDecisionLanes(strategy: {
+  decisionSource: DecisionSource;
+  sources: DecisionSource[];
+  blend: Record<DecisionSource, number>;
+}): { sources: DecisionSource[]; blend: Record<DecisionSource, number> } {
+  // decisionSource 不在 sources 里 -> 旧式单路配置（只改过 decision_source），
+  // 此时以 decisionSource 为准，避免出现「选了 chat 但配比为 0」的诡异状态。
+  if (!strategy.sources.includes(strategy.decisionSource)) {
+    return {
+      sources: [strategy.decisionSource],
+      blend: { rules: 0, chat: 0, systemone: 0, [strategy.decisionSource]: 1 },
+    };
+  }
+
+  const sources: DecisionSource[] = [];
+  for (const s of [...strategy.sources, strategy.decisionSource]) {
+    if (DECISION_SOURCES.has(s) && !sources.includes(s)) sources.push(s);
+  }
+  if (sources.length === 0) sources.push("rules");
+
+  const blend: Record<DecisionSource, number> = { rules: 0, chat: 0, systemone: 0 };
+  for (const s of sources) {
+    const v = Number(strategy.blend?.[s] ?? 0);
+    if (Number.isFinite(v) && v > 0) blend[s] = v;
+  }
+  if (sources.every((s) => blend[s] === 0)) {
+    for (const s of sources) blend[s] = 1;
+  }
+  return { sources, blend };
+}
+
+/** 限制到 0~1。 */
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
+}
+
 function safeStrategy(value: string): BalanceStrategy {
   return STRATEGIES.has(value as BalanceStrategy) ? (value as BalanceStrategy) : "round-robin";
 }
@@ -67,10 +140,24 @@ export interface StrategySection {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  /** 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策） */
+  selfAllocating: boolean;
+  /** 最多同时持有几个资产 */
+  maxPositions: number;
+  /** 组合总仓位上限（所有权重之和），其余留现金 */
+  maxGrossExposure: number;
+  /** 每 N 轮行情做一次资产配置 */
+  allocationInterval: number;
+  /** 参与决策的来源（可多路 = 混合决策），至少一路 */
+  sources: DecisionSource[];
+  /** 各来源配比（>=0，0 = 不参与）；sources 里没有的路忽略 */
+  blend: Record<DecisionSource, number>;
 }
 
 export interface RiskSection {
   initialCash: number;
+  /** 最小调仓金额：低于此值不下单，避免频繁微调被手续费吃掉 */
+  minTradeValue: number;
   feeRate: number;
   slippageBps: number;
   maxOrderValue: number;
@@ -151,9 +238,19 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       fastWindow: num(raw, ["strategy", "fast_window"], 5),
       slowWindow: num(raw, ["strategy", "slow_window"], 20),
       maxTargetWeight: num(raw, ["strategy", "max_target_weight"], 0.5),
+      // 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策）
+      selfAllocating: bool(raw, ["strategy", "self_allocating"], false),
+      maxPositions: Math.max(1, Math.round(num(raw, ["strategy", "max_positions"], 3))),
+      maxGrossExposure: clamp01(num(raw, ["strategy", "max_gross_exposure"], 1)),
+      allocationInterval: Math.max(1, Math.round(num(raw, ["strategy", "allocation_interval"], 5))),
+      ...sourcesOf(
+        raw,
+        safeDecisionSource(str(raw, ["strategy", "decision_source"], bool(raw, ["llm", "enabled"], false) ? "chat" : "rules")),
+      ),
     },
     risk: {
       initialCash: num(raw, ["risk", "initial_cash"], 100000),
+      minTradeValue: Math.max(0, num(raw, ["risk", "min_trade_value"], 0)),
       feeRate: num(raw, ["risk", "fee_rate"], 0.0003),
       slippageBps: num(raw, ["risk", "slippage_bps"], 2),
       maxOrderValue: num(raw, ["risk", "max_order_value"], 20000),
@@ -206,9 +303,16 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       fast_window: config.strategy.fastWindow,
       slow_window: config.strategy.slowWindow,
       max_target_weight: config.strategy.maxTargetWeight,
+      self_allocating: config.strategy.selfAllocating,
+      max_positions: config.strategy.maxPositions,
+      max_gross_exposure: config.strategy.maxGrossExposure,
+      allocation_interval: config.strategy.allocationInterval,
+      decision_sources: config.strategy.sources,
+      blend: config.strategy.blend,
     },
     risk: {
       initial_cash: config.risk.initialCash,
+      min_trade_value: config.risk.minTradeValue,
       fee_rate: config.risk.feeRate,
       slippage_bps: config.risk.slippageBps,
       max_order_value: config.risk.maxOrderValue,

@@ -15,10 +15,10 @@
  * - systemone System One 纯决策模型（Jev / Laya 等）
  */
 
-import { mergeBarsByTime, streamBars, PriceBook } from "../data/streaming.js";
+import { mergeBarsByTime } from "../data/streaming.js";
 import type { EquityPoint, Position, TradeRecord } from "../core/types.js";
-import type { AppConfig } from "../configSchema.js";
-import { buildPipeline, type Pipeline } from "../agents/orchestrator.js";
+import type { AppConfig, DecisionSource } from "../configSchema.js";
+import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import { getLogger } from "../core/logger.js";
@@ -77,11 +77,10 @@ export interface ComparisonOptions {
   runners: RunnerSpec[];
 }
 
-/** 单个选手的流水线 + 行情缓存 + 记账句柄。 */
+/** 单个选手的流水线 + 记账句柄（行情缓存用流水线内部那本，见下）。 */
 interface RunnerCtx {
   spec: RunnerSpec;
   pipeline: Pipeline;
-  book: PriceBook;
 }
 
 export async function runComparison(
@@ -100,19 +99,35 @@ export async function runComparison(
 
   // 2) 每个选手一套独立流水线（独立资金/持仓/风控）
   const contexts: RunnerCtx[] = options.runners.map((spec) => {
-    const book = new PriceBook();
-    const pipeline = buildPipeline(config, {
+    // 对照实验必须单变量：每位选手只跑自己那一路，其余路配比归零
+    const soloSource: DecisionSource = spec.kind === "baseline" ? "rules" : spec.kind;
+    const soloConfig = {
+      ...config,
+      strategy: {
+        ...config.strategy,
+        decisionSource: soloSource,
+        sources: [soloSource],
+        blend: {
+          rules: spec.kind === "baseline" ? 1 : 0,
+          chat: spec.kind === "chat" ? 1 : 0,
+          systemone: spec.kind === "systemone" ? 1 : 0,
+        },
+      },
+    };
+    const pipeline = buildPipeline(soloConfig, {
       adapter: options.adapter,
       liveTrading: options.liveTrading,
       llm: spec.kind === "baseline" ? null : (spec.client ?? null),
     });
-    return { spec, pipeline, book };
+    return { spec, pipeline };
   });
 
   // 3) 同一根 K 线依次喂给所有选手
   for (const bar of bars) {
     for (const ctx of contexts) {
-      await streamBars(ctx.pipeline.bus, ctx.book, [bar]);
+      // 必须用 pipeline.book：风控 Agent 持有的是它，
+      // 若另建一本价格簿，风控会因「无行情」拒掉全部信号。
+      await feed(ctx.pipeline, [bar]);
     }
   }
 

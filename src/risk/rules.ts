@@ -14,6 +14,8 @@ export interface RiskLimits {
   maxOrderValue: number;
   /** 组合回撤熔断线（0~1） */
   maxDrawdownPct: number;
+  /** 最小调仓金额：低于此值直接忽略，避免频繁微调（0 = 不限制） */
+  minTradeValue: number;
 }
 
 export class RiskRules {
@@ -35,6 +37,12 @@ export class RiskRules {
       return { allowed: false, reason: `目标仓位超过上限 ${(maxPositionWeight * 100).toFixed(0)}%` };
     }
     return { allowed: true, reason: "ok" };
+  }
+
+  /** 调仓金额是否值得下单（低于最小调仓额则忽略）。 */
+  worthTrading(deltaValue: number): boolean {
+    if (this.limits.minTradeValue <= 0) return true;
+    return Math.abs(deltaValue) >= this.limits.minTradeValue;
   }
 
   /** 把调仓金额截断到单笔上限内。 */

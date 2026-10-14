@@ -9,7 +9,7 @@ import { ASSET_LABEL, money, pct } from "../lib/format";
 
 export type PageId =
   | "dashboard"
-  | "markets"
+  | "bots"
   | "exchanges"
   | "strategy"
   | "llm"
@@ -19,7 +19,7 @@ export type PageId =
 
 const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "dashboard", label: "仪表盘", icon: "◧", group: "交易" },
-  { id: "markets", label: "自选标的", icon: "◈", group: "交易" },
+  { id: "bots", label: "交易机器人", icon: "❖", group: "交易" },
   { id: "exchanges", label: "交易所连接", icon: "⇄", group: "交易" },
   { id: "strategy", label: "策略", icon: "⚑", group: "智能" },
   { id: "llm", label: "模型管理", icon: "✦", group: "智能" },

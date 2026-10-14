@@ -1025,3 +1025,243 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .source-rules { color: var(--text); }
 .source-chat { color: var(--warn); background: var(--notice-warn-bg); }
 .source-systemone { color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- 一键选取标的相关 ---------- */
+
+.inline-select {
+  width: auto;
+  min-width: 170px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.loading-inline {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 20px;
+  text-align: center;
+}
+
+.symbol-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+
+.symbol-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.symbol-card:hover:not(.symbol-card-added) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.symbol-card-added {
+  border-style: dashed;
+  cursor: default;
+  opacity: 0.85;
+}
+
+.symbol-card-code { font-size: 14px; font-weight: 600; }
+.symbol-card-name { font-size: 12px; color: var(--text-dim); }
+.symbol-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  flex-wrap: wrap;
+}
+.symbol-card-add {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  font-size: 11.5px;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.symbol-card:hover .symbol-card-add { opacity: 1; }
+
+/* ---------- 交易机器人 ---------- */
+
+.page-bots .panel-body { display: block; }
+
+.bot-list { display: flex; flex-direction: column; gap: 12px; }
+
+.bot-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.bot-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bot-name { font-size: 15px; font-weight: 600; }
+
+.bot-actions { margin-left: auto; display: flex; gap: 6px; }
+
+.bot-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.bot-meta em { font-style: normal; margin-right: 4px; }
+.bot-meta b { color: var(--text); font-weight: 500; }
+
+.bot-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.bot-stats b { font-weight: 600; }
+.bot-stats .up b { color: var(--up); }
+.bot-stats .down b { color: var(--down); }
+
+.bot-error {
+  font-size: 12.5px;
+  color: var(--notice-err-text);
+  background: var(--notice-err-bg);
+  border: 1px solid var(--notice-err-border);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.bot-events summary {
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.bot-events summary:hover { color: var(--text); }
+
+/* 候选池里 chip 上的移除按钮 */
+.chip-x {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.5;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 0 0 5px;
+}
+.chip-x:hover { opacity: 1; color: var(--down); }
+
+/* ---------- 混合决策：融合配比 ---------- */
+
+.blend-rows {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.blend-title { font-size: 12.5px; color: var(--text-dim); }
+.blend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.blend-name { width: 66px; flex: none; }
+.blend-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.blend-pct { width: 42px; text-align: right; flex: none; }
+.blend-warn {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--notice-warn-text);
+  background: var(--notice-warn-bg);
+  border: 1px solid var(--notice-warn-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.blend-preview { margin-top: 2px; }
+
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12.5px;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* ---------- 各账号资产配置 ---------- */
+
+.alloc { display: flex; flex-direction: column; gap: 5px; }
+.alloc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.alloc-bar {
+  display: flex;
+  height: 16px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+.alloc-seg { transition: opacity 0.15s; }
+.alloc-seg:hover, .alloc-hover { opacity: 0.85; }
+.alloc-cash { background: repeating-linear-gradient(45deg, var(--row-alt), var(--row-alt) 4px, transparent 4px, transparent 8px); }
+.alloc-seg-1 { background: var(--accent); }
+.alloc-seg-2 { background: var(--accent-2); }
+.alloc-seg-3 { background: var(--up); }
+.alloc-seg-4 { background: var(--warn); }
+.alloc-seg-5 { background: var(--text-dim); }
+
+.alloc-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+.alloc-item { display: inline-flex; align-items: center; gap: 5px; }
+.alloc-item b { font-weight: 500; }
+.alloc-dim { opacity: 0.45; }
+.alloc-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+.alloc-overview {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+}
+.alloc-overview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+.alloc-table td, .alloc-table th { font-size: 12px; }

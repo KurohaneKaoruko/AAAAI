@@ -3,11 +3,11 @@
  */
 
 import { EventBus, Topic } from "../core/eventBus.js";
-import { mergeBarsByTime, streamBars } from "../data/streaming.js";
+import { mergeBarsByTime } from "../data/streaming.js";
 import type { EquityPoint, Position, TradeRecord } from "../core/types.js";
 import type { PortfolioMetrics } from "../core/types.js";
 import type { AppConfig } from "../configSchema.js";
-import { buildPipeline } from "../agents/orchestrator.js";
+import { buildPipeline, feed } from "../agents/orchestrator.js";
 import type { Broker } from "../execution/broker.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import type { PriceBook } from "../data/streaming.js";
@@ -49,7 +49,7 @@ export async function runBacktest(
     ),
   );
   const bars = mergeBarsByTime(groups);
-  await streamBars(pipeline.bus, pipeline.book, bars);
+  await feed(pipeline, bars);
 
   return {
     symbol: options.symbols.join(", "),
