@@ -3,7 +3,7 @@
 import type { EventBus } from "../core/eventBus.js";
 import { Topic } from "../core/eventBus.js";
 import type { OrderIntent, Side, Signal } from "../core/types.js";
-import type { PriceBook } from "../data/marketDataService.js";
+import type { PriceBook } from "../data/streaming.js";
 import type { PortfolioManager } from "../portfolio/portfolioManager.js";
 import { RiskRules } from "../risk/rules.js";
 import { getLogger } from "../core/logger.js";

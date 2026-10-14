@@ -2,9 +2,9 @@
 
 import { EventBus, Topic } from "../core/eventBus.js";
 import type { Fill, OrderIntent } from "../core/types.js";
-import type { Broker } from "./broker.js";
-import type { PriceBook } from "../data/marketDataService.js";
+import type { PriceBook } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
+import type { Broker } from "./broker.js";
 
 const log = getLogger("broker:paper");
 
@@ -14,20 +14,16 @@ export interface PaperBrokerOptions {
 }
 
 export class PaperBroker implements Broker {
-  readonly name = "paper-broker";
+  readonly name = "paper";
   readonly paper = true;
 
   constructor(
     private readonly bus: EventBus,
     private readonly book: PriceBook,
     private readonly opts: PaperBrokerOptions,
-  ) {
-    bus.subscribe<OrderIntent>(Topic.ORDER_INTENT, async (e) => {
-      await this.submit(e.payload);
-    });
-  }
+  ) {}
 
-  async submit(intent: OrderIntent): Promise<Fill | null> {
+  async handle(intent: OrderIntent): Promise<Fill | null> {
     const price = this.book.last(intent.symbol);
     if (price === undefined || !(intent.quantity > 0)) {
       log.warn("无行情或数量为 0，订单被驳回: %s", intent.symbol);

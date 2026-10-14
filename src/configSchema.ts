@@ -16,15 +16,13 @@ export interface ServerSection {
 }
 
 export interface MarketSection {
-  /** stub = 内置确定性假数据 | binance = 币安行情 */
-  source: string;
+  /** 默认标的（为空则用自选列表） */
   symbols: string[];
   /** K 线间隔，如 1m / 5m / 1h */
   interval: string;
   barCount: number;
   /** live 模式轮询间隔（毫秒） */
   pollMs: number;
-  seed: number;
 }
 
 export interface LLMSection {
@@ -60,13 +58,11 @@ export interface RiskSection {
 }
 
 export interface ExecutionSection {
-  /** paper = 模拟成交 | binance = 实盘下单 */
-  broker: string;
-  /** true = 只记录不真正下单 */
-  dryRun: boolean;
+  /** paper = 本地模拟成交 | live = 走交易所真实下单 */
+  mode: "paper" | "live";
+  /** 行情/交易使用的连接 ID */
+  connectionId: string;
   baseUrl: string;
-  apiKeyEnv: string;
-  apiSecretEnv: string;
   apiKey: string;
   apiSecret: string;
 }
@@ -82,10 +78,8 @@ export interface AppConfig {
 }
 
 export function buildConfig(raw: Record<string, unknown>): AppConfig {
-  const symbols = dig(raw, "market", "symbols", ["BTCUSDT"]);
+  const symbols = dig(raw, "market", "symbols", []);
   const llmApiKeyEnv = str(raw, ["llm", "api_key_env"], "OPENAI_API_KEY");
-  const execApiKeyEnv = str(raw, ["execution", "api_key_env"], "BINANCE_API_KEY");
-  const execApiSecretEnv = str(raw, ["execution", "api_secret_env"], "BINANCE_API_SECRET");
 
   return {
     app: {
@@ -97,12 +91,10 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       host: str(raw, ["server", "host"], "0.0.0.0"),
     },
     market: {
-      source: str(raw, ["market", "source"], "stub"),
-      symbols: Array.isArray(symbols) ? (symbols as string[]) : [String(symbols)],
+      symbols: Array.isArray(symbols) ? (symbols as string[]) : [],
       interval: str(raw, ["market", "interval"], "1m"),
       barCount: Math.max(2, num(raw, ["market", "bar_count"], 200)),
       pollMs: Math.max(1000, num(raw, ["market", "poll_ms"], 15000)),
-      seed: num(raw, ["market", "seed"], 42),
     },
     llm: {
       enabled: bool(raw, ["llm", "enabled"], false),
@@ -130,13 +122,56 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       maxDrawdownPct: num(raw, ["risk", "max_drawdown_pct"], 0.15),
     },
     execution: {
-      broker: str(raw, ["execution", "broker"], "paper"),
-      dryRun: bool(raw, ["execution", "dry_run"], true),
-      baseUrl: str(raw, ["execution", "base_url"], "https://testnet.binance.vision"),
-      apiKeyEnv: execApiKeyEnv,
-      apiSecretEnv: execApiSecretEnv,
-      apiKey: fromEnv(execApiKeyEnv),
-      apiSecret: fromEnv(execApiSecretEnv),
+      mode: str(raw, ["execution", "mode"], "paper") === "live" ? "live" : "paper",
+      connectionId: str(raw, ["execution", "connection_id"], ""),
+      baseUrl: str(raw, ["execution", "base_url"], ""),
+      apiKey: "",
+      apiSecret: "",
+    },
+  };
+}
+
+/**
+ * AppConfig -> 配置文件结构（snake_case，与 config/default.yaml 一致）。
+ * 不含任何密钥，可安全写盘。
+ */
+export function serializeConfig(config: AppConfig): Record<string, unknown> {
+  return {
+    app: { name: config.app.name, log_level: config.app.logLevel },
+    server: { host: config.server.host, port: config.server.port },
+    market: {
+      symbols: config.market.symbols,
+      interval: config.market.interval,
+      bar_count: config.market.barCount,
+      poll_ms: config.market.pollMs,
+    },
+    llm: {
+      enabled: config.llm.enabled,
+      provider: config.llm.provider,
+      base_url: config.llm.baseUrl,
+      api_key_env: config.llm.apiKeyEnv,
+      model: config.llm.model,
+      temperature: config.llm.temperature,
+      timeout_ms: config.llm.timeoutMs,
+      decision_interval: config.llm.decisionInterval,
+    },
+    strategy: {
+      name: config.strategy.name,
+      fast_window: config.strategy.fastWindow,
+      slow_window: config.strategy.slowWindow,
+      max_target_weight: config.strategy.maxTargetWeight,
+    },
+    risk: {
+      initial_cash: config.risk.initialCash,
+      fee_rate: config.risk.feeRate,
+      slippage_bps: config.risk.slippageBps,
+      max_order_value: config.risk.maxOrderValue,
+      max_position_weight: config.risk.maxPositionWeight,
+      max_drawdown_pct: config.risk.maxDrawdownPct,
+    },
+    execution: {
+      mode: config.execution.mode,
+      connection_id: config.execution.connectionId,
     },
   };
 }
@@ -146,6 +181,6 @@ export function redactConfig(config: AppConfig): Record<string, unknown> {
   return {
     ...config,
     llm: { ...config.llm, apiKey: config.llm.apiKey ? "***" : "" },
-    execution: { ...config.execution, apiKey: "***", apiSecret: config.execution.apiSecret ? "***" : "" },
+    execution: { ...config.execution, apiKey: "", apiSecret: "" },
   };
 }

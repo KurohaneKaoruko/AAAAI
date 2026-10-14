@@ -1,14 +1,14 @@
 /**
- * 装配层：把数据、Agent、策略、风控、执行、组合连成一条流水线。
+ * 装配层：把连接（行情源）、Agent、策略、风控、券商、组合连成一条流水线。
  */
 
-import { EventBus } from "../core/eventBus.js";
-import { createDataSource } from "../data/binanceSource.js";
-import type { DataSource } from "../data/dataSource.js";
-import { PriceBook } from "../data/marketDataService.js";
+import { EventBus, Topic } from "../core/eventBus.js";
+import type { OrderIntent } from "../core/types.js";
+import { PriceBook } from "../data/streaming.js";
 import type { Broker } from "../execution/broker.js";
-import { BinanceBroker } from "../execution/binanceBroker.js";
 import { PaperBroker } from "../execution/paperBroker.js";
+import { ExchangeBroker } from "../execution/exchangeBroker.js";
+import type { ExchangeAdapter } from "../exchanges/types.js";
 import { MarketAnalystAgent } from "./marketAnalyst.js";
 import { RiskGuardAgent } from "./riskGuard.js";
 import { StrategistAgent } from "./strategist.js";
@@ -20,16 +20,22 @@ import type { Strategy } from "../strategies/strategy.js";
 import { createLLMClient } from "../llm/nullClient.js";
 import type { AppConfig } from "../configSchema.js";
 
+export interface PipelineOptions {
+  /** 行情/交易适配器 */
+  adapter: ExchangeAdapter;
+  /** true = 真实下单（需适配器支持且已配 Key） */
+  liveTrading: boolean;
+}
+
 export interface Pipeline {
   bus: EventBus;
   book: PriceBook;
   portfolio: PortfolioManager;
   broker: Broker;
   strategy: Strategy;
-  source: DataSource;
 }
 
-export function buildPipeline(config: AppConfig): Pipeline {
+export function buildPipeline(config: AppConfig, options: PipelineOptions): Pipeline {
   const bus = new EventBus();
   const book = new PriceBook();
   const portfolio = new PortfolioManager(bus, config.risk.initialCash);
@@ -59,18 +65,17 @@ export function buildPipeline(config: AppConfig): Pipeline {
   ).attach();
 
   const broker: Broker =
-    config.execution.broker === "binance"
-      ? new BinanceBroker(bus, {
-          baseUrl: config.execution.baseUrl,
-          apiKey: config.execution.apiKey,
-          apiSecret: config.execution.apiSecret,
-          dryRun: config.execution.dryRun,
-        })
+    options.liveTrading && options.adapter.placeOrder
+      ? new ExchangeBroker(bus, options.adapter)
       : new PaperBroker(bus, book, {
           feeRate: config.risk.feeRate,
           slippageBps: config.risk.slippageBps,
         });
 
-  const source = createDataSource(config.market.source, config.market.seed);
-  return { bus, book, portfolio, broker, strategy, source };
+  // 执行层接入总线：订单意图 -> 券商 -> 成交广播
+  bus.subscribe<OrderIntent>(Topic.ORDER_INTENT, async (e) => {
+    await broker.handle(e.payload);
+  });
+
+  return { bus, book, portfolio, broker, strategy };
 }
