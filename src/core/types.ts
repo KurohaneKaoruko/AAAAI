@@ -72,6 +72,8 @@ export interface TradeRecord {
   fee: number;
   /** 卖出/减仓时按均价结算的已实现盈亏；买入为 0 */
   realizedPnl: number;
+  /** 触发该成交的信号理由（含 [llm] / [fallback] / systemone 标记） */
+  reason: string;
 }
 
 /** 某一时刻的组合快照。 */

@@ -20,8 +20,8 @@ const log = getLogger("main");
 
 async function main(): Promise<void> {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const configPath = readEnv("CONFIG") ?? join(root, "config", "default.yaml");
-  const dataDir = readEnv("DATA_DIR") ?? join(root, "data");
+  const configPath = readEnv("CONFIG") || join(root, "config", "default.yaml");
+  const dataDir = readEnv("DATA_DIR") || join(root, "data");
 
   const config = buildConfig(loadYamlFile<Record<string, unknown>>(configPath));
   setLogLevel(config.app.logLevel);

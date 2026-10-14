@@ -810,3 +810,113 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   color: var(--text-dim);
 }
 .llm-stats b { color: var(--text); font-weight: 600; }
+
+/* ---------- 模型对照页 ---------- */
+
+.runner-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.runner-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.runner-chip:hover { border-color: var(--accent); }
+.runner-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.runner-kind {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.runner-name { font-size: 13px; font-weight: 600; }
+.runner-model { font-size: 11px; color: var(--text-dim); }
+
+.runner-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.row-winner { background: color-mix(in srgb, var(--up) 8%, transparent); }
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.legend-item { display: inline-flex; align-items: center; }
+.legend-item b { margin-left: 5px; font-family: var(--mono); }
+
+.runner-positions {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+}
+.runner-positions-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.runner-positions-head .mono { margin-left: auto; }
+
+/* ---------- 页面级 Tab ---------- */
+
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 0;
+}
+
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  padding: 9px 16px;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.page-tab:hover { color: var(--text); }
+.page-tab-on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.page-tab-count {
+  background: var(--bg-hover);
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.page-tab-on .page-tab-count { background: var(--accent-soft); color: var(--accent); }

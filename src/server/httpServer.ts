@@ -18,10 +18,11 @@ import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import { listAdapterMetas } from "../exchanges/registry.js";
 import { serializeConfig } from "../configSchema.js";
 import { fromEnv } from "../config.js";
+import { listAdapterMetas as _unused } from "../exchanges/registry.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { AuthService } from "../auth/auth.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
-import { STRATEGY_LABEL } from "../llm/llmManager.js";
+import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
 
 const log = getLogger("http");
@@ -217,6 +218,24 @@ export function createServer(controller: EngineController, options: ServerOption
       .catch((err) => fail(res, err, 409));
   });
 
+  /** 多模型并行模拟盘对照实验 */
+  app.post("/api/bench/compare", (req, res) => {
+    const body = (req.body ?? {}) as {
+      symbols?: string[];
+      bars?: number;
+      interval?: string;
+      runnerIds?: string[];
+      includeBaseline?: boolean;
+      kinds?: ("chat" | "systemone")[];
+    };
+    void controller
+      .runModelComparison(body)
+      .then((result) => ok(res, { result }))
+      .catch((err) => fail(res, err, 409));
+  });
+
+  app.get("/api/bench/compare", (_req, res) => ok(res, { result: controller.snapshot().comparison }));
+
   app.post("/api/engine/stop", (_req, res) => {
     controller.stop();
     ok(res, { state: controller.snapshot() });
@@ -225,6 +244,16 @@ export function createServer(controller: EngineController, options: ServerOption
   // ---------------- 交易所目录与连接 ----------------
 
   app.get("/api/exchanges", (_req, res) => ok(res, { adapters: listAdapterMetas() }));
+
+  // System One 预设（前端表单用）
+  app.get("/api/llm/presets", (_req, res) =>
+    ok(res, {
+      presets: Object.entries(SYSTEM_ONE_PRESETS).map(([id, p]) => ({ id, ...p })),
+      levels: DEFAULT_LEVELS,
+      levelWeights: DEFAULT_LEVEL_WEIGHTS,
+      instructions: DEFAULT_INSTRUCTIONS,
+    }),
+  );
 
   app.get("/api/connections", (_req, res) => ok(res, { connections: connections.list() }));
 

@@ -26,6 +26,7 @@ import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { LlmManager } from "../llm/llmManager.js";
+import { runComparison, buildRunners, type ComparisonResult, type RunnerKind } from "../bench/comparison.js";
 
 const log = getLogger("engine");
 
@@ -62,6 +63,10 @@ export interface EngineState {
   broker: { name: string; paper: boolean } | null;
   strategy: string | null;
   realizedPnl: number;
+  /** 最近一次多模型对照结果 */
+  comparison: ComparisonResult | null;
+  /** 对照实验进行中 */
+  comparing: boolean;
   config: Record<string, unknown>;
 }
 
@@ -144,6 +149,8 @@ export class EngineController {
       broker: null,
       strategy: null,
       realizedPnl: 0,
+      comparison: null,
+      comparing: false,
       config: {},
     };
   }
@@ -336,6 +343,65 @@ export class EngineController {
     });
     this.startTickerPolling();
     log.info("实时模式已启动: %s 每 %dms 轮询", symbols.join(","), this.config.market.pollMs);
+  }
+
+  /**
+   * 多模型并行模拟盘：同一份行情、同一套风控，每个模型独立操盘独立记账。
+   * 用来横向比较「哪个模型更会赚钱」。
+   */
+  async runModelComparison(options: {
+    symbols?: string[];
+    bars?: number;
+    interval?: string;
+    runnerIds?: string[];
+    includeBaseline?: boolean;
+    kinds?: RunnerKind[];
+  } = {}): Promise<ComparisonResult> {
+    if (this.state.status === "running") {
+      throw new Error("引擎正在运行，请先停止后再做对照实验");
+    }
+    if (this.state.comparing) {
+      throw new Error("对照实验正在进行中");
+    }
+    this.state.comparing = true;
+    this.emitState();
+
+    const connection = this.resolveConnection();
+    const symbols = this.resolveSymbols(connection.id, options.symbols);
+    const interval = options.interval ?? this.config.market.interval;
+    const adapter = this.connections.adapter(connection.id);
+
+    // 组装选手：指定 id 优先，否则按 kind 全选 + 可选基线
+    const all = this.llm.list();
+    const wanted = options.runnerIds?.length
+      ? all.filter((p) => options.runnerIds!.includes(p.id))
+      : all.filter((p) => !options.kinds || options.kinds.includes(p.kind as RunnerKind));
+
+    const runners = buildRunners({
+      profiles: wanted,
+      clientFor: (id) => this.llm.clientFor(id),
+      includeBaseline: options.includeBaseline ?? true,
+    });
+    if (runners.length === 0) {
+      this.state.comparing = false;
+      throw new Error("没有可参赛的模型：请先在「LLM 大模型」页添加并配置密钥");
+    }
+
+    try {
+      const result = await runComparison(this.config, {
+        adapter,
+        symbols,
+        bars: options.bars ?? this.config.market.barCount,
+        interval,
+        liveTrading: false, // 对照实验始终用本地模拟成交，避免动真钱
+        runners,
+      });
+      this.state.comparison = result;
+      return result;
+    } finally {
+      this.state.comparing = false;
+      this.emitState();
+    }
   }
 
   stop(): void {

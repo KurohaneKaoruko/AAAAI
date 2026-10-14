@@ -3,8 +3,11 @@
 import type {
   AdapterMeta,
   AuthStatus,
+  ComparisonResult,
   LlmOverview,
   LlmProfile,
+  RunnerKind,
+  SystemOnePreset,
   AppConfig,
   Broadcast,
   Connection,
@@ -63,10 +66,14 @@ export const api = {
     }>("/api/llm/profiles"),
   createLlm: (body: {
     label: string;
+    kind: "chat" | "systemone";
     baseUrl: string;
     model: string;
     apiKey?: string;
     provider?: string;
+    levels?: string[];
+    levelWeights?: number[];
+    instructions?: string;
     temperature?: number;
     timeoutMs?: number;
     weight?: number;
@@ -83,6 +90,25 @@ export const api = {
     }),
   resetLlmStats: (id: string) =>
     request<{ profiles: LlmProfile[] }>(`/api/llm/profiles/${id}/reset`, { method: "POST" }),
+  llmPresets: () =>
+    request<{
+      presets: SystemOnePreset[];
+      levels: string[];
+      levelWeights: number[];
+      instructions: string;
+    }>("/api/llm/presets"),
+
+  // 多模型并行模拟盘对照
+  runComparison: (body: {
+    symbols?: string[];
+    bars?: number;
+    interval?: string;
+    runnerIds?: string[];
+    includeBaseline?: boolean;
+    kinds?: RunnerKind[];
+  }) => request<{ result: ComparisonResult }>("/api/bench/compare", { method: "POST", body: JSON.stringify(body) }),
+  lastComparison: () => request<{ result: ComparisonResult | null }>("/api/bench/compare"),
+
   lbTest: (prompt: string) =>
     request<{ ok: boolean; text: string; latencyMs: number }>("/api/llm/test", {
       method: "POST",

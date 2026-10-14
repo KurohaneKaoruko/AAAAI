@@ -10,6 +10,7 @@ import { ExchangesPage } from "./pages/ExchangesPage";
 import { StrategyPage } from "./pages/StrategyPage";
 import { RiskPage } from "./pages/RiskPage";
 import { LlmPage } from "./pages/LlmPage";
+import { ComparePage } from "./pages/ComparePage";
 import { SystemPage } from "./pages/SystemPage";
 import { LoginPage } from "./pages/LoginPage";
 import { api } from "./api";
@@ -48,6 +49,8 @@ export function App() {
         return <RiskPage store={store} />;
       case "llm":
         return <LlmPage store={store} />;
+      case "compare":
+        return <ComparePage store={store} />;
       case "system":
         return <SystemPage store={store} />;
     }

@@ -61,13 +61,16 @@ export function Select<T extends string>({
         triggerRef.current?.focus();
       }
     };
+    const dismiss = (): void => setOpen(false);
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", () => setOpen(false));
-    window.addEventListener("scroll", () => setOpen(false), true);
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("scroll", dismiss, true);
     return () => {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("scroll", dismiss, true);
     };
   }, [open]);
 
@@ -100,7 +103,7 @@ export function Select<T extends string>({
     if (!opt) return;
     onChange(opt.value);
     setOpen(false);
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -163,6 +166,8 @@ export function Select<T extends string>({
           ref={menuRef}
           className="select-menu"
           role="listbox"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.preventDefault()}
           style={{
             top: pos.top,
             left: pos.left,
@@ -178,7 +183,11 @@ export function Select<T extends string>({
               aria-selected={o.value === value}
               className={`select-option ${o.value === value ? "select-selected" : ""} ${i === active ? "select-active" : ""}`}
               onMouseEnter={() => setActive(i)}
-              onClick={() => commit(i)}
+              onClick={(e) => {
+                // 阻断冒泡：避免点击穿透到触发器导致菜单重新打开
+                e.stopPropagation();
+                commit(i);
+              }}
             >
               <span className="select-option-label">{o.label}</span>
               {o.hint && <span className="select-option-hint">{o.hint}</span>}

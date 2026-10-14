@@ -81,6 +81,7 @@ export class PortfolioManager {
       price: fill.price,
       fee: fill.fee,
       realizedPnl,
+      reason: order.reason ?? "",
     });
     if (this.trades.length > 500) this.trades.shift();
     log.debug(

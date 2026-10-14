@@ -52,6 +52,32 @@ export function Field({
   );
 }
 
+/**
+ * 自定义控件（如下拉框）的容器。
+ *
+ * 不能用 <label> 包裹：label 会把内部任意点击转发给它关联的控件
+ * （这里是下拉触发按钮），导致「点选项 -> setOpen(false) -> 触发器 toggle -> 又打开」。
+ */
+export function FieldBox({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">
+        {label}
+        {hint && <em className="field-hint">{hint}</em>}
+      </span>
+      {children}
+    </div>
+  );
+}
+
 export function NumberField({
   label,
   hint,
@@ -132,9 +158,9 @@ export function SelectField<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <Field label={label} hint={hint}>
+    <FieldBox label={label} hint={hint}>
       <Select value={value} options={options} onChange={onChange} />
-    </Field>
+    </FieldBox>
   );
 }
 
