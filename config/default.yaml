@@ -1,8 +1,11 @@
 # ============================================================
-# AAAAI —— 多智能体自动资产投研框架，全局配置
-# 提示：绝大多数设置可在 WebUI 中修改并即时生效，
-#       本文件仅作为默认值与启动兜底。密钥在 WebUI「交易所」页配置，
-#       存入 data/secrets.json（0600，已被 .gitignore 忽略）。
+# AAAAI —— 多智能体自动资产投研框架，默认配置
+#
+# 说明：
+# - 绝大多数设置可在 WebUI 中修改并即时生效（见「策略/风控/模型管理」页）；
+#   本文件是启动兜底，WebUI 的「写入配置文件」会覆盖此文件。
+# - 密钥从不写进本文件：LLM 密钥读环境变量（llm.api_key_env 指定名字），
+#   交易所与模型密钥在 WebUI 配置，存于 data/secrets.json（0600，已 gitignore）。
 # ============================================================
 
 app:
@@ -13,26 +16,40 @@ server:
   host: 0.0.0.0
   port: 8787                 # WebUI / API 端口
 
+# 可选鉴权：留空 = 不启用。启用后可用 AAAAI_AUTH_USERNAME/PASSWORD 登录面板，
+# 或用 AAAAI_AUTH_TOKEN 走 Authorization: Bearer <token>
+auth:
+  enabled: false
+  username: ""               # 默认登录用户名
+  session_ttl_hours: 12      # 会话有效期
+
 market:
   symbols: []                # 留空 = 使用「自选标的」页的列表
-  interval: 1m               # K 线间隔：1m/5m/15m/30m/1h/4h/1d
+  interval: 1m               # K 线周期：1m/5m/15m/30m/1h/4h/1d
   bar_count: 200             # 回测/实时预热的 K 线根数
   poll_ms: 15000             # 实时模式轮询间隔（毫秒）
 
 llm:
-  enabled: false             # true = 启用 LLM 决策（需 OPENAI_API_KEY）
+  # 已由 strategy.decision_source 取代，此项仅用于兼容旧配置迁移
+  enabled: false
   provider: openai-compatible
   base_url: https://api.openai.com/v1
   api_key_env: OPENAI_API_KEY
   model: gpt-4o-mini
   temperature: 0.2
   timeout_ms: 20000
-  decision_interval: 10      # 每隔多少根 K 线请求一次 LLM（限流/控费）
+  decision_interval: 10      # 每隔多少根 K 线请求一次模型（限流/控费）
+  strategy: round-robin      # 多实例负载均衡：round-robin | weighted | random | latency
 
 strategy:
-  name: llm-momentum         # llm-momentum = LLM 决策+动量兜底 | momentum = 纯规则
-  fast_window: 5
-  slow_window: 20
+  # 智能体决策来源（三选一），WebUI「策略」页顶部可随时切换
+  #   rules      = 纯规则，双均线动量本地计算，不调用模型
+  #   chat       = 对话模型池（OpenAI 兼容大模型）
+  #   systemone  = System One 决策模型池（Jev / Laya / 阿里云百炼）
+  decision_source: rules
+  name: llm-momentum         # momentum = 纯动量 | llm-momentum = 模型决策+动量兜底
+  fast_window: 5             # 快线窗口
+  slow_window: 20            # 慢线窗口（须大于快线）
   max_target_weight: 0.5     # 策略目标仓上限（占总权益）
 
 risk:
