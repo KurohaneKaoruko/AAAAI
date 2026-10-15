@@ -6,7 +6,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │ WebUI (React+Vite)      web/src/pages   7 个独立页面               │  界面
 ├──────────────────────────────────────────────────────────────────┤
-│ Server                  src/server      REST + SSE + 引擎控制器     │  接入层
+│ Server                  src/server      REST + SSE + 配置/策略/对照控制器 │  接入层
 ├──────────────────────────────────────────────────────────────────┤
 │ Agents                  src/agents      分析/策略/风控/装配          │  智能体
 │ Strategies              src/strategies  动量 / LLM 决策              │
@@ -98,7 +98,7 @@ Agent 之间不允许直接引用对方实例（装配层除外），一律经 E
 ```
 web/src/
 ├── App.tsx                 # 壳：侧边导航 + 顶栏 + 页面路由（state 驱动，无路由库）
-├── state/useAppStore.ts    # 全局状态：引擎快照 + SSE + 连接/自选缓存 + Toast
+├── state/useAppStore.ts    # 全局状态：配置/行情/对照 + SSE + 连接/自选缓存 + Toast
 ├── api.ts                  # REST 客户端 + EventSource 订阅
 ├── pages/                  # dashboard / markets / exchanges / strategy / llm / risk / system
 ├── components/             # Shell / 图表 / 表格 / 事件流 / 运行控制 / UI 原子组件

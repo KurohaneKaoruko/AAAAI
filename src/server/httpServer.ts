@@ -3,7 +3,7 @@
  *
  * API 分组：
  * - /api/state、/api/config             引擎状态与配置
- * - /api/engine/start|stop              引擎控制
+ * - /api/bots                          交易机器人（唯一的运行入口）
  * - /api/exchanges、/api/connections    交易所目录与连接管理
  * - /api/markets/search、/api/watchlist 标的搜索与自选
  */
@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { dump as dumpYaml } from "js-yaml";
-import type { EngineController, StartOptions } from "./engineController.js";
+import type { EngineController } from "./engineController.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import { listAdapterMetas } from "../exchanges/registry.js";
 import { serializeConfig } from "../configSchema.js";
@@ -114,7 +114,10 @@ export function createServer(controller: EngineController, options: ServerOption
 
   app.post("/api/config", (req, res) => {
     try {
-      controller.applyConfig(req.body ?? {});
+      const next = controller.applyConfig(req.body ?? {});
+      // 机器人持有自己的配置副本：不同步的话，实盘判定会读到旧的执行方式
+      // （表现为"明明切到真实下单了，机器人还是拒绝启动"）。
+      bots.useConfig(next);
       ok(res, { config: controller.snapshot().config });
     } catch (err) {
       fail(res, err);
@@ -211,28 +214,11 @@ export function createServer(controller: EngineController, options: ServerOption
       .catch((err) => fail(res, err, 502));
   });
 
-  // ---------------- 引擎控制 ----------------
-
-  app.post("/api/engine/start", (req, res) => {
-    const body = (req.body ?? {}) as Partial<StartOptions>;
-    const mode = body.mode === "live" ? "live" : "backtest";
-    void controller
-      .start({
-        mode,
-        symbols: Array.isArray(body.symbols) ? body.symbols : undefined,
-        connectionId: body.connectionId,
-        bars: typeof body.bars === "number" ? body.bars : undefined,
-        interval: body.interval,
-      })
-      .then(() => ok(res, { state: controller.snapshot() }))
-      .catch((err) => fail(res, err, 409));
-  });
-
   // ---------------- 前推验证 / 稳健性 ----------------
 
   app.get("/api/validation/robustness", async (req, res) => {
     const symbolParam = String(req.query.symbols ?? "").split(",").filter(Boolean);
-    const symbols = symbolParam.length > 0 ? symbolParam : controller.snapshot().symbols;
+    const symbols = symbolParam.length > 0 ? symbolParam : controller.resolveRunTarget().symbols;
     if (symbols.length === 0) {
       res.status(400).json({ error: "请先在候选池里选好标的（或用 ?symbols=A,B 指定）" });
       return;
@@ -254,7 +240,7 @@ export function createServer(controller: EngineController, options: ServerOption
 
   app.get("/api/validation/walk-forward", async (req, res) => {
     const symbolParam = String(req.query.symbols ?? "").split(",").filter(Boolean);
-    const symbols = symbolParam.length > 0 ? symbolParam : controller.snapshot().symbols;
+    const symbols = symbolParam.length > 0 ? symbolParam : controller.resolveRunTarget().symbols;
     if (symbols.length === 0) {
       res.status(400).json({ error: "请先在候选池里选好标的（或用 ?symbols=A,B 指定）" });
       return;
@@ -424,11 +410,6 @@ export function createServer(controller: EngineController, options: ServerOption
   });
 
   app.get("/api/bench/compare", (_req, res) => ok(res, { result: controller.snapshot().comparison }));
-
-  app.post("/api/engine/stop", (_req, res) => {
-    controller.stop();
-    ok(res, { state: controller.snapshot() });
-  });
 
   // ---------------- 交易所目录与连接 ----------------
 

@@ -2,7 +2,10 @@
  * 因子与组合优化面板：让用户看得见、也调得动策略到底怎么算权重。
  */
 
+import { useEffect, useState } from "react";
+import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
+import type { Bot } from "../types";
 import { Notice, NumberField, Panel, SelectField } from "./ui";
 import { pct } from "../lib/format";
 import { FACTOR_META } from "../../../src/factors/meta";
@@ -198,62 +201,87 @@ function ExecutionSlicing({ store }: { store: AppStore }) {
   );
 }
 
-/** 实际执行统计：把「拆单到底省没省」摊到面板上，而不是让人自己猜。 */
+/**
+ * 实际执行统计。
+ *
+ * 数据源是**机器人**：单账户引擎删除后，拆单只发生在机器人里，
+ * 所以统计必须跟着机器人走，否则这里会变成一个永远空的图表。
+ */
 function SlicingStats({ store }: { store: AppStore }) {
-  const slicing = store.state?.broker?.slicing;
-  if (!slicing) return null;
-  const done = slicing.completed;
+  const [rows, setRows] = useState<Bot[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const d = await api.bots();
+        if (alive) setRows(d.bots);
+      } catch {
+        /* 忽略 */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 3000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  const active = rows.filter((b) => b.slicing);
+  if (active.length === 0) return null;
+  const completed = active.reduce((a, b) => a + (b.slicing?.completed ?? 0), 0);
+  const pending = active.reduce((a, b) => a + (b.slicing?.pending ?? 0), 0);
+  const shortfall =
+    active.reduce((a, b) => a + (b.slicing?.completed ?? 0) * (b.slicing?.avgShortfallBps ?? 0), 0) /
+    Math.max(1, completed);
+
   return (
     <>
       <div className="grid-2">
         <div className="stat-tile">
-          <span className="stat-label">本次运行已完成拆单</span>
-          <strong>{done.length} 笔</strong>
+          <span className="stat-label">已完成拆单</span>
+          <strong>{completed} 笔</strong>
           <span className="stat-note">
-            {slicing.pending.length > 0
-              ? `进行中 ${slicing.pending.length} 笔（数据结束时未到期的切片，按未成交计入，不假装成交）`
-              : "全部已成交"}
+            {pending > 0
+              ? `进行中 ${pending} 笔（数据结束时未到期的切片，按未成交计入，不假装成交）`
+              : `来自 ${active.length} 个机器人`}
           </span>
         </div>
         <div className="stat-tile">
           <span className="stat-label">平均实施短缺</span>
-          <strong>{slicing.avgShortfallBps.toFixed(1)} bps</strong>
+          <strong>{shortfall.toFixed(1)} bps</strong>
           <span className="stat-note">正数 = 拆单期间多付（含手续费），负数 = 省下</span>
         </div>
       </div>
-      {done.length > 0 && (
+      <div className="table-scroll">
         <table className="table">
           <thead>
             <tr>
-              <th>标的</th>
-              <th>方向</th>
-              <th>进度</th>
-              <th>参考价</th>
-              <th>成交均价</th>
-              <th>实施短缺</th>
+              <th>机器人</th>
+              <th>算法</th>
+              <th className="num">已完成</th>
+              <th className="num">进行中</th>
+              <th className="num">实施短缺</th>
             </tr>
           </thead>
           <tbody>
-            {done.slice(0, 6).map((o) => (
-              <tr key={o.id}>
-                <td>{o.symbol}</td>
-                <td>{o.side === "BUY" ? "买入" : "卖出"}</td>
-                <td className="mono">
-                  {o.slicesDone}/{o.slices} 片 · {o.filledQuantity.toFixed(4)}
-                </td>
-                <td className="mono">{o.referencePrice.toFixed(4)}</td>
-                <td className="mono">{o.averageFillPrice.toFixed(4)}</td>
+            {active.map((b) => (
+              <tr key={b.id}>
+                <td>{b.name}</td>
+                <td>{b.slicing!.algo.toUpperCase()} · {b.slicing!.slices} 片</td>
+                <td className="num mono">{b.slicing!.completed}</td>
+                <td className="num mono">{b.slicing!.pending}</td>
                 <td
-                  className="mono"
-                  style={{ color: o.shortfallBps > 0 ? "var(--notice-warn-text)" : "var(--notice-ok-text)" }}
+                  className="num mono"
+                  style={{ color: b.slicing!.avgShortfallBps > 0 ? "var(--notice-warn-text)" : "var(--notice-ok-text)" }}
                 >
-                  {o.shortfallBps.toFixed(1)} bps
+                  {b.slicing!.avgShortfallBps.toFixed(1)} bps
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+      </div>
     </>
   );
 }

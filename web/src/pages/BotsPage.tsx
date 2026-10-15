@@ -178,7 +178,13 @@ function BotCard({
         <span className="bot-name">{bot.name}</span>
         <span className={`badge ${st.cls}`}>{st.text}</span>
         <span className="chip chip-sm">{bot.mode === "live" ? "持续运行" : "回测"}</span>
-        {bot.state.liveTrading && <span className="chip chip-sm chip-live">实盘下单中</span>}
+        {/* "实盘下单中" 只在真的在跑的时候出现：停了还挂着这四个字会让人以为订单还在发 */}
+        {bot.state.liveTrading && bot.state.status === "running" && (
+          <span className="chip chip-sm chip-live">实盘下单中</span>
+        )}
+        {bot.state.liveTrading && bot.state.status !== "running" && (
+          <span className="chip chip-sm chip-off">上次运行为实盘</span>
+        )}
         {bot.mode === "live" && !bot.state.liveTrading && bot.state.status !== "running" && (
           <span className="chip chip-sm chip-off">实时模式 · 未实盘</span>
         )}

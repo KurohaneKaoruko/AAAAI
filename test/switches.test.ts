@@ -21,7 +21,10 @@ import { ConnectionManager } from "../src/exchanges/connectionManager.js";
 import { WatchlistManager } from "../src/watchlist.js";
 import { LlmManager } from "../src/llm/llmManager.js";
 import { BotManager } from "../src/bots/botManager.js";
+import { StrategyStore } from "../src/strategies/profileStore.js";
 import { NewsService } from "../src/news/newsService.js";
+import { BotManager } from "../src/bots/botManager.js";
+import { StrategyStore } from "../src/strategies/profileStore.js";
 import { testConfig } from "./helpers.js";
 import { buildConfig, type AppConfig } from "../src/configSchema.js";
 import type { NewsItem } from "../src/news/types.js";
@@ -46,6 +49,22 @@ function newsItem(symbol: string, title: string): NewsItem {
   } as NewsItem;
 }
 
+/**
+ * 机器人 + 共享的策略库。
+ * 必须把同一个 StrategyStore 同时交给 BotManager 和调用方 ——
+ * 否则建出来的策略 bot 根本看不见，测试会得到误导性的结论。
+ */
+function botsWith(dir: string, config: AppConfig, items: NewsItem[]) {
+  const cm = new ConnectionManager(dir);
+  const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+  const news = new NewsService(dir, config.news);
+  (news as unknown as { items: ItemList }).items = items;
+  const strategies = new StrategyStore(dir, { seed: { ...config.strategy, name: "默认策略" } });
+  const bots = new BotManager(dir, config, cm, new LlmManager(dir), strategies, undefined, news);
+  return { bots, cm, conn, news, strategies };
+}
+type ItemList = NewsItem[];
+
 function controllerWith(dir: string, config: AppConfig, items: NewsItem[]) {
   const cm = new ConnectionManager(dir);
   cm.create({ adapterId: "simulated", label: "模拟" });
@@ -63,41 +82,34 @@ test("开关：news.includeInAnalysis 真的控制新闻是否进 prompt", async
   try {
     const base = testConfig();
     const items = [newsItem("DEMO-BTC", "BTC 大涨")];
+    const fetch = (config: AppConfig): Promise<unknown[]> => {
+      const { bots } = botsWith(dir, config, items);
+      return (bots as unknown as { newsFetcher: () => (s: string[]) => Promise<unknown[]> }).newsFetcher()(["DEMO-BTC"]);
+    };
 
-    // 开：注入新闻
-    const on = controllerWith(dir, { ...base, news: { ...base.news, enabled: true, includeInAnalysis: true } }, items);
-    const onDigest = await (on.controller as unknown as { newsFetcher: () => Promise<unknown[]> }).newsFetcher()(["DEMO-BTC"]);
-    assert.equal(onDigest.length, 1, "includeInAnalysis=true 时应注入新闻");
-    assert.equal((onDigest[0] as { symbol: string }).symbol, "DEMO-BTC");
-
-    // 关：不注入，而且连取数都不做
-    const off = controllerWith(dir, { ...base, news: { ...base.news, enabled: true, includeInAnalysis: false } }, items);
-    const offDigest = await (off.controller as unknown as { newsFetcher: () => Promise<unknown[]> }).newsFetcher()(["DEMO-BTC"]);
-    assert.deepEqual(offDigest, [], "includeInAnalysis=false 时不应注入新闻");
-
-    // 总开关关：同样不注入
-    const disabled = controllerWith(dir, { ...base, news: { ...base.news, enabled: false, includeInAnalysis: true } }, items);
-    const disabledDigest = await (disabled.controller as unknown as { newsFetcher: () => Promise<unknown[]> }).newsFetcher()(["DEMO-BTC"]);
-    assert.deepEqual(disabledDigest, [], "news.enabled=false 时不应注入新闻");
-
-    // 运行时改配置即可生效（不需要重启引擎）
-    const live = controllerWith(dir, { ...base, news: { ...base.news, enabled: true, includeInAnalysis: false } }, items);
-    const fetcher = (live.controller as unknown as { newsFetcher: () => (s: string[]) => Promise<unknown[]> }).newsFetcher();
-    assert.deepEqual(await fetcher(["DEMO-BTC"]), [], "初始为关");
-    live.controller.applyConfig({ news: { ...base.news, enabled: true, includeInAnalysis: true } });
-    assert.equal((await fetcher(["DEMO-BTC"])).length, 1, "改完配置后立即生效");
+    assert.equal((await fetch({ ...base, news: { ...base.news, enabled: true, includeInAnalysis: true } })).length, 1, "开启时应注入新闻");
+    assert.deepEqual(
+      await fetch({ ...base, news: { ...base.news, enabled: true, includeInAnalysis: false } }),
+      [],
+      "includeInAnalysis=false 时不应注入",
+    );
+    assert.deepEqual(
+      await fetch({ ...base, news: { ...base.news, enabled: false, includeInAnalysis: true } }),
+      [],
+      "news.enabled=false 时不应注入",
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
+
 /** 起一个假的 OpenAI 兼容服务，记录收到的请求数。 */
 async function fakeModel(): Promise<{ url: string; hits: () => number; close: () => Promise<void> }> {
   let hits = 0;
-  const server: Server = createServer((req, res) => {
+  const server = createServer((req, res) => {
     hits += 1;
-    let body = "";
-    req.on("data", (c) => (body += c));
+    req.on("data", () => undefined);
     req.on("end", () => {
       res.setHeader("content-type", "application/json");
       res.end(
@@ -109,10 +121,7 @@ async function fakeModel(): Promise<{ url: string; hits: () => number; close: ()
           choices: [
             {
               index: 0,
-              message: {
-                role: "assistant",
-                content: '{"target_weight":0.4,"confidence":0.6,"reason":"fake"}',
-              },
+              message: { role: "assistant", content: '{"target_weight":0.4,"confidence":0.6,"reason":"fake"}' },
               finish_reason: "stop",
             },
           ],
@@ -142,29 +151,29 @@ test("开关：是否请求模型只由 decision_source 决定（rules 时一次
         market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] },
         risk: { ...base.risk, maxDrawdownPct: 0.9 },
       };
-      const { controller, cm } = controllerWith(dir, cfg, []);
-      controller["llm"].create({
-        label: "fake",
-        kind: "chat",
-        baseUrl: model.url,
-        model: "fake",
-        apiKey: "sk-test",
+      const { bots, conn, strategies } = botsWith(dir, cfg, []);
+      bots.useConfig(cfg);
+      const profile = strategies.create({
+        name: source === "rules" ? "量化" : "模型",
+        decisionSource: source,
       });
-      await controller.start({ mode: "backtest", bars: 40, interval: "1m", connectionId: cm.list()[0]!.id });
-      const state = controller.snapshot();
-      return { strategy: state.strategy, error: state.error };
+      // 让机器人用上这条策略：改机器人自己的决策来源
+      const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 40, strategyId: profile.id });
+      const llm = (bots as unknown as { llm: LlmManager }).llm;
+      llm.create({ label: "fake", kind: "chat", baseUrl: model.url, model: "fake", apiKey: "sk-test" });
+      const st = await bots.start(bot.id);
+      return { error: st.error, status: st.status };
     };
 
     const before = model.hits();
     const on = await run("chat");
-    assert.ok(model.hits() > before, "decision_source=chat 时应真的请求模型");
-    assert.equal(on.strategy, "llm-momentum", "chat 应走模型策略");
+    assert.ok(model.hits() > before, "决策来源=对话模型时机器人应真的请求模型");
     assert.equal(on.error, null);
+    assert.equal(on.status, "stopped");
 
     const mid = model.hits();
     const off = await run("rules");
-    assert.equal(model.hits(), mid, "decision_source=rules 时不得发出任何模型请求");
-    assert.equal(off.strategy, "momentum", "rules 应走纯规则策略");
+    assert.equal(model.hits(), mid, "决策来源=量化交易时不得发出任何模型请求");
     assert.equal(off.error, null);
   } finally {
     await model.close();
@@ -221,54 +230,37 @@ test("开关：配置报告的鉴权状态必须与真正生效的一致", () =>
   assert.equal(base.auth.enabled, false);
 });
 
-test("文案前提：改决策来源不会影响正在跑的流水线（所以界面不能说「立即生效」）", async () => {
-  // 面板上「决定由谁产生目标仓位，下次启动运行时生效」这句话，成立的前提就是这个行为。
+test("文案前提：改决策来源不会影响正在跑的机器人（所以界面不能说「立即生效」）", async () => {
+  // 面板上「下次启动运行时生效」这句话，成立的前提就是这个行为。
   // 如果哪天把策略改成热更新，这句文案就过时了 —— 测试会先失败，提示同步。
   const dir = tmpDir();
   try {
     const base = testConfig();
-    const cfg: AppConfig = {
-      ...base,
-      strategy: { ...base.strategy, decisionSource: "rules" },
-      market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] },
-    };
-    const { controller, cm } = controllerWith(dir, cfg, []);
-    await controller.start({ mode: "backtest", bars: 40, interval: "1m", connectionId: cm.list()[0]!.id });
+    const cfg: AppConfig = { ...base, market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] } };
+    const { bots, conn, strategies } = botsWith(dir, cfg, []);
+    const s1 = strategies.create({ name: "量化", decisionSource: "rules" });
+    const bot = bots.create({
+      name: "T",
+      connectionId: conn.id,
+      symbols: ["DEMO-BTC"],
+      mode: "backtest",
+      barCount: 40,
+      strategyId: s1.id,
+    });
 
-    const before = controller.snapshot().strategy;
-    assert.equal(before, "momentum", "rules 走的是纯规则策略");
+    await bots.start(bot.id);
+    assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "rules", "这次跑的是量化策略");
 
-    // 运行中改配置：引擎状态里的策略**不应该**跟着变
-    controller.applyConfig({ strategy: { ...cfg.strategy, decisionSource: "chat" } });
-    const after = controller.snapshot().strategy;
-    assert.equal(after, "momentum", "改决策来源不应热替换正在运行的流水线；面板文案因此写「下次启动生效」");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+    // 改策略本身：改完之后**下次启动**才生效，这次已跑完的结果不会被回溯改写
+    strategies.update(s1.id, { decisionSource: "chat" });
+    assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "chat", "策略实体已更新");
+    const before = bots.state(bot.id).metrics?.finalEquity;
+    assert.ok(before !== undefined, "已完成的运行结果仍在");
 
-test("文案前提：对照实验与机器人确实不会下真实订单", async () => {
-  // ComparePage 上写着「对照实验只在模拟盘中进行，绝不会发出真实订单」，
-  // 机器人卡片上也写着「成交为本地模拟」—— 都靠这两行代码撑着。
-  const dir = tmpDir();
-  try {
-    const base = testConfig();
-    // 执行方式设为真实下单，但机器人仍必须模拟成交
-    const cfg: AppConfig = { ...base, execution: { ...base.execution, mode: "live" } };
-    const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
-    const bots = new BotManager(dir, cfg, connections, new LlmManager(dir));
-    const bot = bots.create({ name: "实盘模式下的机器人", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest" });
-    const st = await bots.start(bot.id);
-    assert.equal(st.status, "stopped");
-    assert.ok(st.metrics, "仍应正常跑完（本地撮合）");
-
-    // 模拟适配器本身不支持交易：即便引擎走 live 路径也会降级为模拟成交
-    const { controller } = controllerWith(dir, cfg, []);
-    await controller.start({ mode: "backtest", bars: 20, interval: "1m" });
-    const snap = controller.snapshot();
-    assert.equal(snap.error, null);
-    assert.equal(snap.broker?.paper, true, "不支持交易的连接必须降级为模拟成交");
+    // 再启动一次才会按新来源跑 —— 这正是「下次启动运行时生效」的意思
+    const st2 = await bots.start(bot.id);
+    assert.equal(st2.status, "stopped");
+    assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "chat");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -57,7 +57,7 @@ export function RiskPage({ store }: { store: AppStore }) {
       <Panel
         title="资金与成本"
         actions={
-          <Button variant="primary" onClick={save} busy={saving} disabled={store.state?.status === "running"}>
+          <Button variant="primary" onClick={save} busy={saving}>
             保存
           </Button>
         }

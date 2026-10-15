@@ -132,6 +132,20 @@ export interface BotState {
 
 export interface BotView extends BotConfig {
   state: BotState;
+  /**
+   * 拆单执行统计（仅 paper 券商且开了拆单时有值）。
+   * 单账户引擎删除后，这里是拆单执行结果的唯一来源。
+   */
+  slicing?: {
+    algo: "none" | "twap" | "vwap";
+    slices: number;
+    /** 已完成的拆单笔数 */
+    completed: number;
+    /** 尚未到期的切片笔数 */
+    pending: number;
+    /** 平均实施短缺（bps，正 = 多付，负 = 省下） */
+    avgShortfallBps: number;
+  };
   /** 生效的模型实例名称，便于一眼确认"这个机器人在用谁" */
   modelLabels: string[];
 }

@@ -16,7 +16,6 @@ import type { AppStore } from "../state/useAppStore";
 import { EquityChart } from "../components/EquityChart";
 import { EventLog } from "../components/EventLog";
 import { PositionsTable } from "../components/PositionsTable";
-import { RunControls } from "../components/RunControls";
 import { TradesTable } from "../components/TradesTable";
 import { Button, Empty, Panel } from "../components/ui";
 import type { Bot } from "../types";
@@ -69,7 +68,6 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
   const worst = returns.length > 0 ? returns.reduce((a, c) => (c.r < a.r ? c : a)) : null;
   // 所有机器人都一样时，"最好/最差"指向同一个名字反而误导，直接说持平
   const allEqual = returns.length > 1 && returns.every((x) => Math.abs(x.r - returns[0]!.r) < 1e-12);
-  const engineRan = state.status !== "idle" || (state.equityCurve?.length ?? 0) > 0;
 
   return (
     <div className="page page-dashboard">
@@ -194,38 +192,8 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
         </div>
       )}
 
-      <details className="collapse" open={engineRan}>
-        <summary>
-          单账户运行（引擎）—— 可实盘，与机器人互不影响
-          {engineRan ? `　当前：${state.status === "running" ? "运行中" : state.status === "stopped" ? "已结束" : "待机"}` : ""}
-        </summary>
-        <div className="collapse-body">
-          <div className="hint-line">
-            机器人适合并行跑多个账户：各自独立资金与策略，成交走本地模拟。
-            这里跑的是单账户、独立的另一条流水线，可以用来快速验证一次改动；
-            当「风控」页的执行方式设为真实下单且连接具备交易权限时，这条路径会真的下单（机器人目前不支持）。
-            两者的数据互不相通 —— 上方展示的是机器人，这里展示的是本次单账户运行。
-          </div>
-          <div className="grid-dash">
-            <div className="col">
-              <Panel title="运行引擎" subtitle={state.startedAt ? `开始时间 ${dateTime(state.startedAt)}` : undefined}>
-                <RunControls store={store} />
-              </Panel>
-            </div>
-            <div className="col">
-              <Panel title="权益曲线" subtitle={state.symbols.length > 0 ? state.symbols.join(" / ") : "尚未运行"}>
-                <EquityChart curve={state.equityCurve ?? []} initialCash={initialCashOf(state)} />
-              </Panel>
-            </div>
-          </div>
-        </div>
-      </details>
     </div>
   );
-}
-
-function initialCashOf(state: NonNullable<AppStore["state"]>): number {
-  return state.config?.risk?.initialCash ?? 0;
 }
 
 /** 机器人持仓：用它自己的资产配置视图（与交易机器人页一致）。 */

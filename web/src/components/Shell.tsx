@@ -1,8 +1,9 @@
 /** 侧边导航 + 顶栏 + 行情跑马灯 + 主题切换 + 提示条。 */
 
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { AppStore } from "../state/useAppStore";
-import type { EngineState } from "../types";
+import type { Bot } from "../types";
 import type { Theme } from "../lib/theme";
 import { Badge } from "./ui";
 import { ASSET_LABEL, money, pct } from "../lib/format";
@@ -27,13 +28,6 @@ const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "risk", label: "风控", icon: "⛨", group: "系统" },
   { id: "system", label: "系统与日志", icon: "⚙", group: "系统" },
 ];
-
-const STATUS_TEXT: Record<EngineState["status"], string> = {
-  idle: "待机",
-  running: "运行中",
-  stopped: "已停止",
-  error: "异常",
-};
 
 export function Sidebar({
   page,
@@ -97,41 +91,58 @@ export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () =>
 
 export function TopBar({
   store,
-  actions,
   theme,
   onToggleTheme,
 }: {
   store: AppStore;
-  actions: ReactNode;
   theme: Theme;
   onToggleTheme: () => void;
 }) {
   const state = store.state;
   const tickers = state?.tickers ?? [];
+  // 顶栏反映的是"现在到底在跑什么" = 机器人（单账户引擎已删除）
+  const [bots, setBots] = useState<Bot[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const d = await fetch("/api/bots").then((r) => r.json());
+        if (alive && Array.isArray(d.bots)) setBots(d.bots);
+      } catch {
+        /* 忽略 */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 3000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  const running = bots.filter((b) => b.state.status === "running");
+  const liveCount = running.filter((b) => b.state.liveTrading).length;
+  const execMode = state?.config?.execution?.mode ?? "paper";
+
   return (
     <header className="topbar">
       <div className="topbar-main">
-        <span className={`badge badge-${state?.status ?? "idle"}`}>
-          {STATUS_TEXT[state?.status ?? "idle"]}
+        {running.length > 0 ? (
+          <>
+            <span className="badge badge-running">{running.length} 个机器人运行中</span>
+            {liveCount > 0 && <span className="chip chip-live">实盘下单中 · {liveCount} 个</span>}
+            <span className="chip">{running.map((b) => b.name).slice(0, 3).join(" / ")}</span>
+          </>
+        ) : (
+          <span className="badge badge-idle">待机</span>
+        )}
+        <span className={`chip ${execMode === "live" ? "chip-live" : ""}`}>
+          {execMode === "live" ? "真实下单" : "模拟成交"}
         </span>
-        {state?.mode && (
-          <span className="chip">
-            {state.mode === "live" ? "实时" : "回测"} · {state.symbols.join(" / ") || "无标的"}
-          </span>
-        )}
-        {state?.connectionLabel && <span className="chip">连接: {state.connectionLabel}</span>}
-        {state?.broker && (
-          <span className={`chip ${state.broker.paper ? "" : "chip-live"}`}>
-            {state.broker.paper ? "模拟成交" : "真实下单"}
-          </span>
-        )}
-        {state?.strategy && <span className="chip">策略: {state.strategy}</span>}
         <span className={`chip ${store.connected ? "chip-ok" : "chip-off"}`}>
           {store.connected ? "实时通道 OK" : "通道断开"}
         </span>
       </div>
       <div className="topbar-actions">
-        {actions}
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>
       {tickers.length > 0 && (
