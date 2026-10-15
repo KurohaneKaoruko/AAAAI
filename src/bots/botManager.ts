@@ -36,6 +36,8 @@ import type {
 
 const log = getLogger("bots");
 const MAX_EVENTS_PER_BOT = 120;
+/** 每个机器人保留的权益曲线点数（内存与传输都要节制）。 */
+const CURVE_POINTS = 400;
 
 interface Runtime {
   bus: EventBus;
@@ -419,16 +421,19 @@ export class BotManager {
     for (const bar of bars) {
       if (rt.stopRequested) break;
       await feed(rt.pipeline, [bar]);
+      const st = this.state(bot.id);
       this.states.set(bot.id, {
-        ...this.state(bot.id),
-        bars: this.state(bot.id).bars + 1,
+        ...st,
+        bars: st.bars + 1,
         durationMs: Date.now() - started,
+        equityCurve: pushPoint(st.equityCurve, rt.pipeline.portfolio.equityCurve().at(-1)),
       });
     }
     this.states.set(bot.id, {
       ...this.state(bot.id),
       metrics: this.metricsOf(bot, rt),
       allocation: this.allocationOf(bot, rt),
+      equityCurve: pushPoint(this.state(bot.id).equityCurve, rt.pipeline.portfolio.equityCurve().at(-1)),
       durationMs: Date.now() - started,
     });
   }
@@ -445,6 +450,7 @@ export class BotManager {
       bars: warm.length,
       metrics: this.metricsOf(bot, rt),
       allocation: this.allocationOf(bot, rt),
+      equityCurve: rt.pipeline.portfolio.equityCurve().slice(-CURVE_POINTS),
     });
 
     const poller = new LivePoller(adapter, rt.bus, rt.pipeline.book, {
@@ -548,6 +554,16 @@ function round8(v: number): number {
   return Number(v.toFixed(8));
 }
 
+/** 追加一个权益点并裁掉超出部分；point 为空（还没成交）时不记。 */
+function pushPoint(
+  curve: { timestamp: string; equity: number }[],
+  point?: { timestamp: string; equity: number },
+): { timestamp: string; equity: number }[] {
+  if (!point) return curve;
+  const next = [...curve, point];
+  return next.length > CURVE_POINTS ? next.slice(next.length - CURVE_POINTS) : next;
+}
+
 function freshState(id: string): BotState {
   return {
     id,
@@ -557,6 +573,7 @@ function freshState(id: string): BotState {
     error: null,
     metrics: null,
     allocation: null,
+    equityCurve: [],
     bars: 0,
     durationMs: 0,
     events: [],
