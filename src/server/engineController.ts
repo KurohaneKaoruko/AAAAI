@@ -22,6 +22,7 @@ import { getLogger } from "../core/logger.js";
 import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
+import { PaperBroker, type SlicedOrderReport } from "../execution/paperBroker.js";
 import { defaultToolBox, type ToolBox, type ToolContext } from "../llm/tools.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
@@ -64,7 +65,21 @@ export interface EngineState {
   prices: Record<string, number>;
   equityCurve: EquityPoint[];
   events: EngineEventLine[];
-  broker: { name: string; paper: boolean } | null;
+  broker: {
+    name: string;
+    paper: boolean;
+    /** 拆单执行状态（只在 paper 模式下有值） */
+    slicing?: {
+      algo: "none" | "twap" | "vwap";
+      slices: number;
+      pending: SlicedOrderReport[];
+      completed: SlicedOrderReport[];
+      /** 已完成拆单的累计实施短缺（bps，正 = 多付） */
+      avgShortfallBps: number;
+      /** 已完成拆单省下的成本（相对一次性成交的差额，按名义金额累计） */
+      savedCost: number;
+    };
+  } | null;
   strategy: string | null;
   realizedPnl: number;
   /** 回测进度与耗时 */
@@ -674,6 +689,8 @@ export class EngineController {
       strategy: { ...this.config.strategy, ...(patch.strategy ?? {}) },
       llm: { ...this.config.llm, ...(patch.llm ?? {}) },
       execution: { ...this.config.execution, ...(patch.execution ?? {}) },
+      optimize: { ...this.config.optimize, ...(patch.optimize ?? {}) },
+      cost: { ...this.config.cost, ...(patch.cost ?? {}) },
       market: { ...this.config.market, ...(patch.market ?? {}) },
       news: { ...this.config.news, ...(patch.news ?? {}) },
       evolution: { ...this.config.evolution, ...(patch.evolution ?? {}) },
@@ -698,8 +715,33 @@ export class EngineController {
     this.state.realizedPnl = portfolio.realizedPnl();
     this.state.equityCurve = portfolio.equityCurve().slice(-1500);
     this.state.prices = this.pipeline.book.snapshot();
-    this.state.broker = { name: broker.name, paper: broker.paper };
+    this.state.broker = { name: broker.name, paper: broker.paper, ...this.slicingState() };
     this.state.strategy = strategy.name;
+  }
+
+  /** 拆单执行状态：只有 paper 券商有，且必须是真开了拆单（否则面板不该显示统计）。 */
+  private slicingState(): Pick<NonNullable<EngineState["broker"]>, "slicing"> {
+    const broker = this.pipeline?.broker;
+    if (!(broker instanceof PaperBroker)) return {};
+    const slicing = broker.slicingState();
+    if (!slicing) return {};
+    const done = slicing.completed;
+    const avgShortfallBps =
+      done.length > 0 ? done.reduce((a, o) => a + o.shortfallBps, 0) / done.length : 0;
+    const savedCost = done.reduce(
+      (a, o) => a + (o.referencePrice - o.averageFillPrice) * o.filledQuantity * (o.side === "BUY" ? 1 : -1),
+      0,
+    );
+    return {
+      slicing: {
+        algo: slicing.algo,
+        slices: slicing.slices,
+        pending: slicing.pending,
+        completed: done.slice(-20).reverse(),
+        avgShortfallBps: Number(avgShortfallBps.toFixed(4)),
+        savedCost: Number(savedCost.toFixed(4)),
+      },
+    };
   }
 }
 

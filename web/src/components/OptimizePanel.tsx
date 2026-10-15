@@ -17,6 +17,8 @@ export function OptimizePanel({ store }: { store: AppStore }) {
     void store.patchConfig({ optimize: { ...opt, ...patch } } as never);
 
   const weights = { ...factorWeights(opt.factorWeights) };
+  // 只有真正用到协方差矩阵的模式才显示这个选项；否则它会是个「勾了没用」的死开关
+  const usesCovariance = opt.method === "risk_parity" || opt.targetVol > 0;
 
   return (
     <Panel title="因子与组合优化" subtitle="规则路径怎么算权重">
@@ -87,6 +89,25 @@ export function OptimizePanel({ store }: { store: AppStore }) {
         />
       </div>
 
+      {usesCovariance && (
+        <SelectField
+          label="协方差估计"
+          value={opt.covariance}
+          options={[
+            { value: "lw", label: "Ledoit-Wolf 收缩（样本少时更稳）" },
+            { value: "sample", label: "原始样本协方差" },
+          ]}
+          onChange={(v) => save({ covariance: v as "sample" | "lw" })}
+        />
+      )}
+      {usesCovariance && (
+        <div className="hint-line">
+          {opt.covariance === "lw"
+            ? "收缩只压相关系数、保留各方差：样本少时成对相关性几乎全是噪声，压掉它能显著降低估计误差，同时保证协方差矩阵正定（样本协方差在资产高度相关时可能是奇异的）。"
+            : "直接用样本协方差：样本足够多时更「忠实」，但样本少或资产高度相关时结果会明显跑偏。"}
+        </div>
+      )}
+
       {cost.impactK > 0 && (
         <Notice tone="info">
           滑点 = 固定点差 + {cost.impactK}·波动率·√(订单占日成交额比)。订单越大、流动性越差，成交价越不利 —— 回测因此不再"高估小单、低估大单"。
@@ -95,7 +116,145 @@ export function OptimizePanel({ store }: { store: AppStore }) {
       {opt.targetVol > 0 && opt.method === "none" && (
         <Notice tone="warn">波动率目标只在 score / risk_parity 模式下生效。</Notice>
       )}
+
+      <ExecutionSlicing store={store} />
     </Panel>
+  );
+}
+
+/**
+ * 拆单执行（TWAP/VWAP）。
+ *
+ * 只在 paper 模式下有意义：live 模式走交易所原生订单，本地切片器不介入。
+ * 关闭时明确说明「不会改变任何成交结果」，免得看起来像个勾了有影响的开关。
+ */
+function ExecutionSlicing({ store }: { store: AppStore }) {
+  const exec = store.state?.config?.execution;
+  if (!exec) return null;
+  const on = exec.slicingAlgo !== "none";
+
+  const save = (patch: Partial<typeof exec>) =>
+    void store.patchConfig({ execution: { ...exec, ...patch } } as never);
+
+  return (
+    <>
+      <div className="hint-line" style={{ marginTop: 16, marginBottom: 6, color: "var(--text)", fontWeight: 600 }}>
+        拆单执行
+        <span className="dim small" style={{ marginLeft: 8, fontWeight: 400 }}>
+          大单分批成交，降低冲击成本
+        </span>
+      </div>
+      {exec.mode === "live" && (
+        <Notice tone="warn">
+          当前是 live 模式：下单走交易所原生订单，本地拆单器不介入。这里改动仅对 paper 回测/模拟生效。
+        </Notice>
+      )}
+      <div className="grid-2">
+        <SelectField
+          label="执行算法"
+          value={exec.slicingAlgo}
+          options={[
+            { value: "none", label: "不拆（一次性成交）" },
+            { value: "twap", label: "TWAP 按时间等量切片" },
+            { value: "vwap", label: "VWAP 按历史量能分配" },
+          ]}
+          onChange={(v) => save({ slicingAlgo: v as typeof exec.slicingAlgo })}
+        />
+        {on && (
+          <NumberField
+            label="切片数"
+            value={exec.slicingSlices}
+            min={2}
+            max={24}
+            onChange={(v) => save({ slicingSlices: v })}
+          />
+        )}
+        {on && (
+          <NumberField
+            label="切片间隔（根）"
+            value={exec.slicingSpacingBars}
+            min={1}
+            max={24}
+            onChange={(v) => save({ slicingSpacingBars: v })}
+          />
+        )}
+      </div>
+      <div className="hint-line">
+        {exec.slicingAlgo === "none"
+          ? "关闭：整笔单按当前价一次性成交，与之前的结果完全一致。"
+          : exec.slicingAlgo === "twap"
+            ? `TWAP：整笔单平均分成 ${exec.slicingSlices} 片，每 ${exec.slicingSpacingBars} 根 K 线成交一片。每片各算各的冲击成本，总冲击约降到 1/√${exec.slicingSlices}。`
+            : `VWAP：权重来自最近 ${exec.slicingVolumeProfileBars} 根 K 线的成交量分布（只用已观测到的量，不用未来数据），尽量在活跃时段成交。`}
+        {" "}拆单只改执行不改信号 —— 整笔单仍会执行完，不会因为拆单而少买少卖。
+      </div>
+      {on && (
+        <Notice tone="info">
+          基础点差按成交金额比例计费，拆单不会额外增加它；省下的是冲击项，而冲击 ∝ 订单占日成交额的比例 ——
+          所以小单拆了也几乎不省，只有大单（占日成交额 10% 以上）才值得拆。
+        </Notice>
+      )}
+      <SlicingStats store={store} />
+    </>
+  );
+}
+
+/** 实际执行统计：把「拆单到底省没省」摊到面板上，而不是让人自己猜。 */
+function SlicingStats({ store }: { store: AppStore }) {
+  const slicing = store.state?.broker?.slicing;
+  if (!slicing) return null;
+  const done = slicing.completed;
+  return (
+    <>
+      <div className="grid-2">
+        <div className="stat-tile">
+          <span className="stat-label">本次运行已完成拆单</span>
+          <strong>{done.length} 笔</strong>
+          <span className="stat-note">
+            {slicing.pending.length > 0
+              ? `进行中 ${slicing.pending.length} 笔（数据结束时未到期的切片，按未成交计入，不假装成交）`
+              : "全部已成交"}
+          </span>
+        </div>
+        <div className="stat-tile">
+          <span className="stat-label">平均实施短缺</span>
+          <strong>{slicing.avgShortfallBps.toFixed(1)} bps</strong>
+          <span className="stat-note">正数 = 拆单期间多付（含手续费），负数 = 省下</span>
+        </div>
+      </div>
+      {done.length > 0 && (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th>方向</th>
+              <th>进度</th>
+              <th>参考价</th>
+              <th>成交均价</th>
+              <th>实施短缺</th>
+            </tr>
+          </thead>
+          <tbody>
+            {done.slice(0, 6).map((o) => (
+              <tr key={o.id}>
+                <td>{o.symbol}</td>
+                <td>{o.side === "BUY" ? "买入" : "卖出"}</td>
+                <td className="mono">
+                  {o.slicesDone}/{o.slices} 片 · {o.filledQuantity.toFixed(4)}
+                </td>
+                <td className="mono">{o.referencePrice.toFixed(4)}</td>
+                <td className="mono">{o.averageFillPrice.toFixed(4)}</td>
+                <td
+                  className="mono"
+                  style={{ color: o.shortfallBps > 0 ? "var(--notice-warn-text)" : "var(--notice-ok-text)" }}
+                >
+                  {o.shortfallBps.toFixed(1)} bps
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 

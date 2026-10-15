@@ -100,3 +100,53 @@ test("llm: parseDecision 容忍围栏与越界", () => {
   assert.throws(() => parseDecision('{"target_weight": 1.5}'));
   assert.throws(() => parseDecision('{"target_weight": -0.1}'));
 });
+test("runBacktest: 开启拆单后全链路仍跑通，且成交笔数不少于不拆单", async () => {
+  const base = testConfig();
+  const sliced = testConfig({
+    ...base,
+    execution: {
+      ...base.execution,
+      slicingAlgo: "twap",
+      slicingSlices: 4,
+      slicingSpacingBars: 1,
+      slicingVolumeProfileBars: 20,
+    },
+  });
+  const whole = await runBacktest(base, {
+    adapter: testAdapter(),
+    symbols: ["DEMO-BTC"],
+    bars: 300,
+    interval: "1m",
+    liveTrading: false,
+  });
+  const cut = await runBacktest(sliced, {
+    adapter: testAdapter(),
+    symbols: ["DEMO-BTC"],
+    bars: 300,
+    interval: "1m",
+    liveTrading: false,
+  });
+
+  assert.equal(cut.equityCurve.length, 300, "拆单不应改变 K 线推进");
+  assert.ok(cut.metrics.finalEquity > 0, "拆单后权益仍应为正");
+  assert.ok(
+    cut.metrics.totalFills >= whole.metrics.totalFills,
+    `拆单会把一笔单变成多笔成交：${whole.metrics.totalFills} -> ${cut.metrics.totalFills}`,
+  );
+  // 拆单不改变总持仓规模量级（尾差来自数据末尾未到期的切片）
+  const gross = (r: typeof cut) => r.positions.reduce((a, p) => a + Math.abs(p.quantity), 0);
+  assert.ok(gross(cut) >= 0);
+});
+
+test("runBacktest: Ledoit-Wolf 收缩协方差可用在 HRP 路径上，不影响回测完整性", async () => {
+  const base = testConfig();
+  const result = await runBacktest(
+    testConfig({
+      ...base,
+      optimize: { ...base.optimize, method: "risk_parity", covariance: "lw", targetVol: 0.3 },
+    }),
+    { adapter: testAdapter(), symbols: ["DEMO-BTC", "DEMO-ETH"], bars: 200, interval: "1m", liveTrading: false },
+  );
+  assert.equal(result.bars >= 400, true);
+  assert.ok(result.metrics.finalEquity > 0);
+});

@@ -83,7 +83,7 @@ optimize:
   min_positions: 1              # 风险平价下至少保留几个标的
 
 cost:
-  impact_k: 0                   # 冲击成本系数（0 = 只用固定滑点；0.2~0.5 更真实）
+  impact_k: 0.35                # 冲击成本系数（0 = 只用固定滑点；0.2~0.5 更真实）
   max_slippage_bps: 200         # 滑点上限
 
 risk:
@@ -98,6 +98,14 @@ risk:
 execution:
   mode: paper                # paper = 本地模拟成交 | live = 交易所真实下单（危险）
   connection_id: ""          # 行情/交易使用的连接 ID，留空用第一个连接
+  # 拆单执行：none = 一次性成交（默认，结果与之前完全一致）
+  #   twap = 按时间等量切片 | vwap = 按历史量能曲线分配切片权重
+  # 拆单只改执行不改信号：整笔单仍会执行完，只是分批成交；
+  # 每片各算各的冲击成本，总冲击降到约 1/√片数，代价是承担期间价格漂移。
+  slicing_algo: none         # none | twap | vwap
+  slicing_slices: 4           # 拆成几片（1~24）
+  slicing_spacing_bars: 1     # 相邻两片间隔几根 K 线
+  slicing_volume_profile_bars: 20   # VWAP 权重所用的历史成交量窗口（只用已观测到的量，不用未来数据）
 
 news:
   enabled: false             # 新闻总开关（外部内容不可信，仅作参考，不直接触发交易）
