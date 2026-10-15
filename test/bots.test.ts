@@ -2,10 +2,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BotManager } from "../src/bots/botManager.js";
+// 与 botManager 的上限保持一致：测试要断言"截断到这么多笔"，两边必须同源
+const HISTORY_TRADES_PER_RUN = 60;
 import { EvolutionEngine } from "../src/evolution/engine.js";
 import { StrategyStore } from "../src/strategies/profileStore.js";
 import { ConnectionManager } from "../src/exchanges/connectionManager.js";
@@ -543,6 +545,195 @@ test("实时机器人启动后必须保持 running（轮询器在跑，start 返
 
     bots.stop(bot.id);
     assert.equal(bots.state(bot.id).status, "stopped", "stop 后才是 stopped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档：stop 后写盘，重启进程（重建 BotManager）后历史仍在", async () => {
+  // 这是「机器人战绩」能不能留下来的根：重启只重放配置不重放战绩，
+  // 长期是赚是赔就永远没有答案。endRun 必须落盘、loadHistory 必须读回。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const config = testConfig();
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+    const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 120 });
+
+    await bots.start(bot.id);
+    bots.stop(bot.id);
+    const v1 = bots.list()[0]!;
+    assert.equal(v1.history.length, 1, "应留下一次运行存档");
+    const rec = v1.history[0]!;
+    assert.equal(rec.status, "stopped");
+    assert.ok(rec.metrics, "存档应含盈利指标");
+    assert.ok(rec.trades.length > 0, "存档应含成交流水");
+    assert.ok(rec.equityCurve.length > 0, "存档应含曲线");
+    assert.equal(rec.tradesTruncated, false, "未截断必须如实标注 false");
+
+    // 重启：新建一个 BotManager（模拟进程重启）
+    const bots2 = new BotManager(dir, config, connections, new LlmManager(dir));
+    const v2 = bots2.list()[0]!;
+    assert.equal(v2.history.length, 1, "重启后历史必须仍在");
+    assert.equal(v2.totals.runs, 1);
+    assert.equal(v2.totals.totalFills, v2.history[0]!.metrics?.totalFills ?? -1);
+    assert.ok(v2.totals.lastRunAt, "应记录最近运行时间");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档汇总：多次运行求和、胜负统计只算已结束的运行", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist2-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 120 });
+    await bots.start(bot.id);
+    await bots.start(bot.id);
+    const v = bots.list()[0]!;
+    assert.equal(v.history.length, 2, "两次运行两条存档");
+
+    // 汇总口径：各次独立从初始资金开始（非复利），累计是已实现盈亏之和
+    const sumPnl = v.history.reduce((acc, r) => acc + (r.metrics?.realizedPnl ?? 0), 0);
+    assert.ok(Math.abs(v.totals.cumulativeRealizedPnl - sumPnl) < 0.01, "累计已实现盈亏应等于各次之和");
+    assert.equal(v.totals.totalFills, v.history.reduce((a, r) => a + (r.metrics?.totalFills ?? 0), 0));
+    const expectedWins = v.history.filter((r) => (r.metrics?.totalReturn ?? 0) > 0).length;
+    const expectedLosses = v.history.filter((r) => (r.metrics?.totalReturn ?? 0) < 0).length;
+    assert.equal(v.totals.wins, expectedWins);
+    assert.equal(v.totals.losses, expectedLosses);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档：明细被截断时必须如实标注（不能让人以为看到的是全部）", async () => {
+  // 只留尾部若干笔省空间可以接受，但界面若把它当全部就是在骗人。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist3-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 400 });
+    await bots.start(bot.id);
+    bots.stop(bot.id);
+    const rec = bots.list()[0]!.history[0]!;
+    const total = rec.metrics?.totalFills ?? 0;
+    if (total > HISTORY_TRADES_PER_RUN) {
+      assert.equal(rec.trades.length, HISTORY_TRADES_PER_RUN, "截断到上限");
+      assert.equal(rec.tradesTruncated, true, "截断必须标注");
+    } else {
+      assert.equal(rec.trades.length, total, "不截断时应保留全部");
+      assert.equal(rec.tradesTruncated, false);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档：机器人删除后存档一并消失（不留幽灵数据）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist4-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 60 });
+    bots.stop(bot.id);
+    bots.remove(bot.id);
+
+    // 重启后不应看到已删机器人的存档
+    const bots2 = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    assert.equal(bots2.list().length, 0);
+    const raw = existsSync(join(dir, "bots-history.json"))
+      ? (JSON.parse(readFileSync(join(dir, "bots-history.json"), "utf8")) as Record<string, unknown>)
+      : {};
+    assert.ok(!(bot.id in raw), `已删机器人的存档应清除，实际 ${JSON.stringify(raw).slice(0, 80)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档：正在运行的快照有节流，不会每次轮询都写盘", async () => {
+  // 节流表记在内存里（记在 record 上会算错时间窗，导致只写第一次）。
+  // 验证：强制写一次后立刻再写应该被跳过。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist5-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "节流", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
+    await bots.start(bot.id);
+    const rec0 = bots.list()[0]!.history[0]!;
+    assert.equal(rec0.status, "running", "运行中的存档应是 running");
+    assert.ok(rec0.metrics, "预热后应已有快照");
+
+    // 节流期内：把存档内容改坏（标记），再触发一次非强制 checkpooint，应不被覆盖
+    rec0.metrics = null;
+    bots["checkpointRun"](bot);
+    assert.equal(bots.list()[0]!.history[0]!.metrics, null, "节流期内不应再次写盘");
+
+    // 强制写：恢复
+    bots["checkpointRun"](bot, true);
+    assert.ok(bots.list()[0]!.history[0]!.metrics, "强制写应更新快照");
+    bots.stop(bot.id);
+    assert.equal(bots.list()[0]!.history[0]!.status, "stopped", "stop 后应收尾");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("运行存档：上次进程遗留的 running 存档必须标为中断（否则幽灵状态永远显示运行中）", () => {
+  // 进程被 kill 时没有机会 endRun —— 存档会永远停在"运行中"。
+  // 界面若一直显示"运行中"，用户等到天荒地老也不会看到结局。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-stale-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const config = testConfig();
+
+    // 先建机器人拿到 id，再写一份"上次进程"留下的运行中存档
+    const bots0 = new BotManager(dir, config, connections, new LlmManager(dir));
+    const id = bots0.create({ name: "被杀", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 30 }).id;
+    writeFileSync(
+      join(dir, "bots-history.json"),
+      JSON.stringify({
+        [id]: [
+          {
+            id: "ghost",
+            botId: id,
+            name: "被杀",
+            mode: "live",
+            paperTrading: true,
+            liveTrading: false,
+            status: "running",
+            startedAt: new Date(Date.now() - 600_000).toISOString(),
+            finishedAt: null,
+            durationMs: 42,
+            bars: 3,
+            symbols: ["DEMO-BTC"],
+            strategyName: "默认策略",
+            metrics: null,
+            equityCurve: [],
+            trades: [],
+            tradesTruncated: false,
+            pnlBySymbol: [],
+            error: null,
+          },
+        ],
+      }),
+    );
+
+    // 新进程起来：必须把 running 残局标掉
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+    const view = bots.list()[0]!;
+    const rec = view.history.find((r) => r.id === "ghost")!;
+    assert.ok(rec, "应读回上次的存档");
+    assert.equal(rec.status, "error", "running 残局必须标掉");
+    assert.ok((rec.error ?? "").includes("中断"), "应说明是中断，而不是当成跑完");
+    // 残局不该计入胜负统计（没有收益可言）
+    assert.equal(view.totals.wins + view.totals.losses, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

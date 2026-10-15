@@ -163,8 +163,67 @@ export interface BotState {
   pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
 }
 
+/**
+ * 一次运行（start -> stop）的存档记录。
+ *
+ * 为什么要有它：机器人的运行状态只活在内存里，重启即失，而且每次启动都从初始资金
+ * 重新跑 —— 只看当前状态，用户无法回答"这个机器人长期是赚是赔、哪几次跑得好"。
+ * 这个结构就是为了回答那个问题，所以它的每一项都必须是真的（截断的明细必须标注截断）。
+ */
+export interface BotRunRecord {
+  id: string;
+  botId: string;
+  /** 运行时的机器人名字（改名后历史里仍保留当时的名字） */
+  name: string;
+  mode: BotMode;
+  /** 这次运行是模拟成交（true）还是真实下单（false） */
+  paperTrading: boolean;
+  /** 这次运行是否真的把订单发给了交易所 */
+  liveTrading: boolean;
+  status: "running" | "stopped" | "error";
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number;
+  bars: number;
+  /** 当时跑的标的（历史里保留，避免改名/换标的后对不上账） */
+  symbols: string[];
+  /** 当时引用的策略名 */
+  strategyName: string;
+  metrics: BotMetrics | null;
+  equityCurve: { timestamp: string; equity: number }[];
+  /** 成交流水尾部若干条（可能被截断，见 tradesTruncated） */
+  trades: BotTrade[];
+  /** trades 是否只是尾部若干笔而非全部 —— 界面必须据此说明，不能让人误读 */
+  tradesTruncated: boolean;
+  pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
+  error: string | null;
+}
+
+/** 跨多次运行的汇总（口径写在界面上：各次已实现盈亏求和，不是复利）。 */
+export interface BotHistoryTotals {
+  runs: number;
+  /** 收益率为正的运行次数 */
+  wins: number;
+  /** 收益率为负的运行次数 */
+  losses: number;
+  /** 各次运行已实现盈亏之和（绝对金额口径） */
+  cumulativeRealizedPnl: number;
+  /** 各次运行成交笔数之和 */
+  totalFills: number;
+  /** 最好单次收益率 */
+  bestReturn: number;
+  /** 最差单次收益率 */
+  worstReturn: number;
+  /** 最近一次运行的时间（优先 finishedAt） */
+  lastRunAt: string | null;
+}
+
 export interface BotView extends BotConfig {
   state: BotState;
+  /** 历史运行存档（新 -> 旧，跨重启保留） */
+  history: BotRunRecord[];
+  /** 历史汇总（由 history 实时算出，不落盘） */
+  totals: BotHistoryTotals;
   /**
    * 拆单执行统计（仅 paper 券商且开了拆单时有值）。
    * 单账户引擎删除后，这里是拆单执行结果的唯一来源。

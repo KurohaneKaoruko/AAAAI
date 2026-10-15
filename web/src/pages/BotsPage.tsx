@@ -259,6 +259,9 @@ function BotCard({
       {/* 交易统计明细：成交流水 + 分标的盈亏。"赚不赚、哪笔赚"就在这里看 */}
       {bot.state.trades.length > 0 && <TradeStats state={bot.state} />}
 
+      {/* 历史战绩：跨重启保留的运行存档。机器人长期是赚是赔只能靠它回答 */}
+      {bot.history.length > 0 && <RunHistory bot={bot} />}
+
       {bot.state.error && <div className="bot-error">{bot.state.error}</div>}
 
       {bot.state.events.length > 0 && (
@@ -293,12 +296,85 @@ function wPct(w: number): string {
  * 模拟成交的机器人跟真实市场干跑，统计必须完整 —— 用户要回答的问题是
  * "这个机器人赚钱吗、靠哪个标的赚的、最近几笔是怎么决策的"。
  */
-function TradeStats({ state }: { state: Bot["state"] }) {
-  const total = state.pnlBySymbol.reduce((a, p) => a + p.realizedPnl, 0);
+/**
+ * 历史战绩：每次运行一条（新 -> 旧，重启后仍在）。
+ *
+ * 口径必须说清楚：每次运行都从初始资金重新开始（不复利），
+ * 所以「累计」是各次已实现盈亏之和 —— 写成"总收益率"就是在误导。
+ */
+function RunHistory({ bot }: { bot: Bot }) {
+  const t = bot.totals;
   return (
     <details className="bot-events">
       <summary>
-        交易统计 · 已实现 {signed(total)} · {state.trades.length} 笔成交
+        历史战绩 · {t.runs} 次运行 · 盈利 {t.wins} / 亏损 {t.losses} · 累计已实现 {signed(t.cumulativeRealizedPnl)}
+      </summary>
+      <div className="dim small" style={{ margin: "4px 0 8px" }}>
+        每次运行都从初始资金 {money(bot.risk.initialCash, 0)} 重新开始，累计盈亏为各次已实现盈亏之和，不是复利累计。
+        汇总只计正常结束的运行；出错或中断的运行仍列在下方，不计入汇总。
+        {t.lastRunAt ? ` 最近一次：${time(t.lastRunAt)}` : ""}
+      </div>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>开始时间</th>
+            <th>方式</th>
+            <th>状态</th>
+            <th className="num">收益</th>
+            <th className="num">成交</th>
+            <th className="num">已实现盈亏</th>
+            <th className="num">时长</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bot.history.map((r) => {
+            const m = r.metrics;
+            const ret = m?.totalReturn ?? 0;
+            return (
+              <tr key={r.id}>
+                <td className="mono dim">{time(r.startedAt)}</td>
+                <td className="dim">
+                  {r.mode === "backtest" ? "回测" : r.liveTrading ? "实时 · 真实下单" : "实时 · 模拟成交"}
+                </td>
+                <td>
+                  {r.status === "stopped" ? (
+                    <span className="dim">已停止</span>
+                  ) : r.status === "running" ? (
+                    <span className="chip chip-sm chip-ok">运行中</span>
+                  ) : (
+                    <span className="chip chip-sm chip-off" title={r.error ?? ""}>出错</span>
+                  )}
+                </td>
+                <td className={`num mono ${ret > 0 ? "up" : ret < 0 ? "down" : "dim"}`}>
+                  {m ? `${(ret * 100).toFixed(2)}%` : "—"}
+                </td>
+                <td className="num mono">{m ? m.totalFills : "—"}</td>
+                <td className={`num mono ${(m?.realizedPnl ?? 0) > 0 ? "up" : (m?.realizedPnl ?? 0) < 0 ? "down" : "dim"}`}>
+                  {m ? signed(m.realizedPnl) : "—"}
+                </td>
+                <td className="num mono dim">{(r.durationMs / 1000).toFixed(0)}s</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="dim small" style={{ marginTop: 4 }}>
+        收益口径：该次运行的期末权益 ÷ 初始资金 − 1；累计成交为各次之和。明细截断说明见「交易统计」。
+      </div>
+    </details>
+  );
+}
+
+function TradeStats({ state }: { state: Bot["state"] }) {
+  const total = state.pnlBySymbol.reduce((a, p) => a + p.realizedPnl, 0);
+  const shown = state.trades.length;
+  const pumps = state.metrics?.totalFills ?? shown;
+  return (
+    <details className="bot-events">
+      <summary>
+        {/* 流水只留尾部若干条：必须如实说清"看到的不是全部"，否则等于骗人 */}
+        交易统计 · 已实现 {signed(total)} ·{" "}
+        {shown < pumps ? `最近 ${shown} / 共 ${pumps} 笔成交` : `${shown} 笔成交`}
       </summary>
       {state.pnlBySymbol.length > 0 && (
         <table className="table" style={{ marginBottom: 8 }}>
