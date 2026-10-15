@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
 import type { RiskSection } from "../types";
-import { Button, Notice, NumberField, Panel } from "../components/ui";
+import { Button, Notice, NumberField, Panel, SelectField } from "../components/ui";
 import { money, pct } from "../lib/format";
 
 export function RiskPage({ store }: { store: AppStore }) {
@@ -26,8 +26,34 @@ export function RiskPage({ store }: { store: AppStore }) {
   const set = <K extends keyof RiskSection>(k: K, v: RiskSection[K]) =>
     setForm({ ...form, [k]: v });
 
+  const exec = config?.execution;
+  const live = exec?.mode === "live";
+
   return (
     <div className="page page-risk">
+      <Panel title="执行方式" subtitle="模拟成交还是真实下单 —— 动真金的地方放最前面">
+        <SelectField
+          label="执行"
+          value={exec?.mode ?? "paper"}
+          options={[
+            { value: "paper", label: "模拟成交（本地撮合，不动真钱）" },
+            { value: "live", label: "真实下单（需交易所 API Key，危险）" },
+          ]}
+          onChange={(v) =>
+            void store.patchConfig({ execution: { ...exec!, mode: v as "paper" | "live" } })
+          }
+        />
+        {live ? (
+          <Notice tone="warn">
+            当前为<strong>真实下单</strong>：订单会通过交易所 API 发出去。若所选连接不支持交易或未配置 Key，
+            系统会自动降级为模拟成交。切回模拟请立刻修改此处。
+          </Notice>
+        ) : (
+          <Notice tone="info">当前为模拟成交：所有订单在本地撮合，不涉及真实资金。</Notice>
+        )}
+        <div className="hint-line">改动立即生效，下次运行（引擎启动）时使用。</div>
+      </Panel>
+
       <Panel
         title="资金与成本"
         actions={
