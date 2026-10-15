@@ -8,7 +8,7 @@
  * 这些都只做评估与展示，不改参数、不参与交易。
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import { Button, Empty, Notice, Panel } from "./ui";
@@ -33,7 +33,7 @@ interface RobustnessReport {
 }
 
 export function ValidationPanel({ store }: { store: AppStore }) {
-  const symbols = store.state?.symbols ?? [];
+  const symbols = useMemo(() => store.watchlist.map((w) => w.symbol), [store.watchlist]);
   const pool = store.watchlist.map((w) => w.symbol);
   const [folds, setFolds] = useState<FoldResult[] | null>(null);
   const [wfSummary, setWfSummary] = useState<{ avgOosReturn: number; avgGap: number; oosPositiveRatio: number } | null>(null);

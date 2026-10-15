@@ -67,7 +67,7 @@ type Tab = "strategy" | "pool" | "intel" | "validate";
 
 export function StrategyPage({ store }: { store: AppStore }) {
   const config = store.state?.config;
-  const running = store.state?.status === "running";
+  const running = false; // 机器人各自独立运行，策略配置随时可改（下次该机器人启动时生效）
   const [tab, setTab] = useState<Tab>("strategy");
 
   const [strategies, setStrategies] = useState<StrategyProfile[]>([]);

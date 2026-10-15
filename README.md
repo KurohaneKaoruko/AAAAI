@@ -90,7 +90,7 @@ npm run typecheck # 服务端 + WebUI 全量类型检查
 1. 进入 **交易所连接** 页 → 新建连接 → 选择 `Binance 币安`（或东财 / Stooq）→ 保存；
 2. 进入 **自选标的** 页 → 选择该连接 → 搜索 `BTC` / `600519` / `AAPL` → 加入自选；
    （Gate.io 的 `BTC_USDT` 与其它家的 `BTCUSDT` 写法不同，搜索结果已统一成无下划线形式）
-3. 回仪表盘 → 运行引擎选择该连接与标的 → 开始回测。
+3. 进 **交易机器人** 页 → 新建机器人 → 选连接、选标的、选策略 → 「启动」。
 
 ### 实盘交易（高危）
 
@@ -100,8 +100,10 @@ BINANCE_API_KEY=...
 BINANCE_API_SECRET=...
 ```
 
-在连接表单里填好 Key，并在 **策略页 → 执行模式** 切到「真实下单」。
-**默认 `paper` 模拟成交**：适配器不支持交易或未配 Key 时会自动降级为模拟，界面顶部会显示「模拟成交 / 真实下单」标识。实盘有资金风险，请自行负责。
+在连接表单里填好 Key，并在 **风控页 → 执行方式** 切到「真实下单」。
+机器人运行模式选「实时」时，只有在下列条件全部满足才会真的下单：执行方式=真实下单、连接支持交易、需要 Key 时已配置。**任一条不满足会直接拒绝启动并说明缺哪一条**（不会悄悄退回模拟）—— 用户以为钱打出去了实际没动，是最糟的结局。
+**同一连接同时只允许一个实盘机器人**，避免并行下真单；机器人卡片会标出「实盘下单中」。
+默认 `paper` 模拟成交。实盘有资金风险，请自行负责。
 
 ### 启用 LLM
 
@@ -136,7 +138,7 @@ AAAAI/
 │   ├── execution/          # 执行：paperBroker / exchangeBroker
 │   ├── llm/                # LLM：协议 / OpenAI 兼容 / 空实现
 │   ├── backtest/           # 回测引擎（多标的）
-│   ├── server/             # HTTP API + SSE + 引擎控制器
+│   ├── server/             # HTTP API + SSE + 配置/策略/对照控制器
 │   ├── watchlist.ts        # 自选管理
 │   └── index.ts            # 入口
 ├── web/                    # WebUI（React + Vite）
@@ -150,7 +152,6 @@ AAAAI/
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/state` `/api/config` `/api/logs` | 状态 / 配置 / 服务日志 |
-| POST | `/api/engine/start` `/api/engine/stop` | 引擎控制 |
 | POST | `/api/config` `/api/config/persist` | 热更新 / 写回文件 |
 | GET | `/api/exchanges` | 交易所目录 |
 | GET/POST/PUT/DELETE | `/api/connections[/:id]` | 连接管理 |

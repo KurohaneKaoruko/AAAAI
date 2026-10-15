@@ -370,3 +370,34 @@ test("机器人也会给自我进化留痕（否则用了机器人等于关掉�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("配置热更新会同步到机器人（否则实盘判定读到旧的执行方式）", () => {
+  // 回归：/api/config 只改了 controller，机器人手里的副本还是旧的 ——
+  // 表现是「明明在界面上切到真实下单了，机器人启动时还说执行方式是模拟」。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-cfg-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const config = testConfig();
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+
+    const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", barCount: 20 });
+    // 模拟 /api/config 的效果：拿到新配置并交给机器人
+    const next: AppConfig = { ...config, execution: { ...config.execution, mode: "live" } };
+    bots.useConfig(next);
+
+    return bots.start(bot.id).then(
+      (st) => {
+        assert.equal(st.status, "stopped", "同步配置后应能启动（模拟适配器支持交易且不需 Key）");
+        assert.equal(st.liveTrading, true);
+        bots.stop(bot.id);
+      },
+      (err) => {
+        assert.fail(`同步配置后不应被拒绝: ${(err as Error).message}`);
+      },
+    ).finally(() => rmSync(dir, { recursive: true, force: true }));
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
+});

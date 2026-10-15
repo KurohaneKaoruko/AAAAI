@@ -47,7 +47,7 @@ export function NewsPanel({ store }: { store: AppStore }) {
     setBusy(true);
     setError(null);
     try {
-      await api.refreshNews(store.state?.symbols);
+      await api.refreshNews(store.watchlist.map((w) => w.symbol));
       await reload();
     } catch (err) {
       setError((err as Error).message);

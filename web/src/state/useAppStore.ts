@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, subscribeEvents } from "../api";
 import type { AdapterMeta, AppConfig, Broadcast, Connection, EngineState, WatchItem } from "../types";
 
-const MAX_EVENTS = 300;
 
 export interface Toast {
   id: number;
@@ -14,7 +13,6 @@ export interface Toast {
 
 export interface AppStore {
   state: EngineState | null;
-  events: EngineState["events"];
   connections: Connection[];
   adapters: AdapterMeta[];
   watchlist: WatchItem[];
@@ -31,7 +29,6 @@ export interface AppStore {
 
 export function useAppStore(): AppStore {
   const [state, setState] = useState<EngineState | null>(null);
-  const [events, setEvents] = useState<EngineState["events"]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [adapters, setAdapters] = useState<AdapterMeta[]>([]);
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
@@ -81,7 +78,6 @@ export function useAppStore(): AppStore {
     try {
       const next = await api.state();
       setState(next);
-      setEvents(next.events ?? []);
     } catch {
       /* 服务未就绪时忽略 */
     }
@@ -108,19 +104,15 @@ export function useAppStore(): AppStore {
     void reloadWatchlist();
 
     const off = subscribeEvents((b: Broadcast) => {
+      // 引擎已删除，SSE 只推送全局状态；事件流改为按机器人从 /api/bots 拉取
       setConnected(true);
-      if (b.type === "state") {
-        setState(b.data);
-      } else if (b.type === "event") {
-        setEvents((prev) => [b.data, ...prev].slice(0, MAX_EVENTS));
-      }
+      setState(b.data);
     });
     return off;
   }, [reloadState, reloadConnections, reloadAdapters, reloadWatchlist]);
 
   return {
     state,
-    events,
     connections,
     adapters,
     watchlist,

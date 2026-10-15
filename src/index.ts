@@ -64,7 +64,7 @@ async function main(): Promise<void> {
     log.info("自我进化已更新运行配置（下次运行生效）");
   });
   // 机器人也要留痕：否则"用了机器人"就等于关掉了自我进化
-  const bots = new BotManager(dataDir, config, connections, llm, strategies, evolution);
+  const bots = new BotManager(dataDir, config, connections, llm, strategies, evolution, news);
   const controller = new EngineController(config, connections, watchlist, llm, news, evolution, strategies);
 
   const app = createServer(controller, {
@@ -96,14 +96,6 @@ async function main(): Promise<void> {
   }
   await controller.refreshTickers().catch(() => undefined);
 
-  if (readEnv("AUTOSTART") === "1") {
-    try {
-      await controller.start({ mode: "backtest" });
-      log.info("启动回测完成: %o", controller.snapshot().metrics);
-    } catch (err) {
-      log.warn("启动回测失败: %s", (err as Error).message);
-    }
-  }
 }
 
 function dirname(p: string): string {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
+import type { Bot } from "../types";
 import { Button, Notice, Panel } from "../components/ui";
 import { dateTime } from "../lib/format";
 
@@ -20,6 +21,7 @@ export function SystemPage({ store }: { store: AppStore }) {
   const [showJson, setShowJson] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [logFilter, setLogFilter] = useState<"all" | "warn" | "error">("all");
+  const [bots, setBots] = useState<Bot[]>([]);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -30,6 +32,28 @@ export function SystemPage({ store }: { store: AppStore }) {
       /* 服务未就绪时忽略 */
     }
   }, []);
+
+  // 机器人概况：单账户引擎删除后，"现在跑着什么"只能从这里看
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const d = await api.bots();
+        if (alive) setBots(d.bots);
+      } catch {
+        /* 忽略 */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 5000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  const runningBots = bots.filter((b) => b.state.status === "running").length;
+  const liveBots = bots.filter((b) => b.state.liveTrading).length;
 
   useEffect(() => {
     void loadLogs();
@@ -61,10 +85,6 @@ export function SystemPage({ store }: { store: AppStore }) {
     }
   };
 
-  const uptime = state.startedAt
-    ? Math.max(0, Math.floor((Date.now() - Date.parse(state.startedAt)) / 1000))
-    : 0;
-
   const visibleLogs = logs.filter((l) =>
     logFilter === "all" ? true : logFilter === "warn" ? l.level === "warn" : l.level === "error",
   );
@@ -86,16 +106,8 @@ export function SystemPage({ store }: { store: AppStore }) {
                 </td>
               </tr>
               <tr>
-                <td>状态</td>
-                <td>{state.status}</td>
-              </tr>
-              <tr>
-                <td>开始时间</td>
-                <td className="mono">{dateTime(state.startedAt)}</td>
-              </tr>
-              <tr>
-                <td>已运行</td>
-                <td>{uptime} 秒</td>
+                <td>交易机器人</td>
+                <td>{bots.length} 个 · {runningBots} 个运行中{liveBots > 0 ? ` · ${liveBots} 个实盘` : ""}</td>
               </tr>
               <tr>
                 <td>默认连接</td>

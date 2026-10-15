@@ -14,11 +14,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventBus, Topic } from "../core/eventBus.js";
+import type { Bar } from "../core/types.js";
 import type { Event } from "../core/eventBus.js";
 import { LivePoller, mergeBarsByTime } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig, DecisionSource } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
+import { PaperBroker } from "../execution/paperBroker.js";
+import type { NewsService } from "../news/newsService.js";
+import { toDigest, type NewsDigest } from "../news/types.js";
+import { defaultToolBox, type ToolBox, type ToolContext } from "../llm/tools.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import type { LlmManager, LlmProfile, ModelKind } from "../llm/llmManager.js";
 import { StrategyStore, type StrategyProfile } from "../strategies/profileStore.js";
@@ -52,6 +57,13 @@ export class BotManager {
   private states = new Map<string, BotState>();
   private events = new Map<string, { topic: string; timestamp: string; summary: string }[]>();
   private runtimes = new Map<string, Runtime>();
+  /**
+   * 各标的的带时间戳 K 线（get_history 工具的数据源）。
+   * 并行机器人看的是同一段行情，所以共用一份，不必每个机器人各存一份。
+   */
+  private readonly historyLog = new Map<string, { timestamp: string; close: number }[]>();
+  /** 每根 K 线最多保留的历史长度 */
+  private static readonly HISTORY_LIMIT = 400;
 
   constructor(
     private readonly dataDir: string,
@@ -75,8 +87,79 @@ export class BotManager {
     }),
     /** 决策留痕：自我进化靠它学习。不传则该机器人不留痕（对照实验/测试用）。 */
     private readonly evolution?: EvolutionEngine,
+    /** 新闻情报：注入分析 prompt，并供只读工具箱查询。 */
+    private readonly news?: NewsService,
   ) {
     this.load();
+  }
+
+  /**
+   * 往分析 prompt 注入新闻摘要。
+   * 与原单账户引擎同一套开关：enabled=false 或 includeInAnalysis=false 都不注入；
+   * 在**调用时**判断，改配置后无需重启即可生效。
+   * 模型主动用 search_news 工具查新闻的能力不受这里影响。
+   */
+  private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
+    return async (symbols: string[]) => {
+      const svc = this.news;
+      const cfg = this.config.news;
+      if (!svc || !cfg.enabled || !cfg.includeInAnalysis) return [];
+      const items = await svc.forSymbols(symbols).catch(() => []);
+      return toDigest(items, Math.max(1, Math.floor(cfg.maxPerSymbol / 2)));
+    };
+  }
+
+  /**
+   * 该机器人的只读工具箱上下文。
+   * 每个机器人有自己的 book/portfolio —— 工具必须反映"这个账户"的持仓，
+   * 而不是全局某一次运行的残留。
+   */
+  private toolsFor(bot: BotConfig, runtime: () => Pipeline | undefined): { box: ToolBox; context: ToolContext } | undefined {
+    if (!this.config.llm.agentEnabled) return undefined;
+    const book = () => runtime()?.book;
+    const portfolio = () => runtime()?.portfolio;
+    const context: ToolContext = {
+      candidates: () => bot.symbols,
+      price: (symbol) => book()?.last(symbol),
+      history: (symbol, limit) => (this.historyLog.get(symbol) ?? []).slice(-limit),
+      allocation: () => {
+        const p = portfolio();
+        if (!p) return { equity: 0, cash: 0, cashWeight: 1, holdings: [] };
+        const equity = p.equity();
+        return {
+          equity: Number(equity.toFixed(2)),
+          cash: Number(p.cash.toFixed(2)),
+          cashWeight: Number((equity > 0 ? p.cash / equity : 1).toFixed(4)),
+          holdings: p.positionsSnapshot().map((pos) => {
+            const price = book()?.last(pos.symbol) ?? pos.avgCost;
+            const value = pos.quantity * price;
+            return {
+              symbol: pos.symbol,
+              weight: equity > 0 ? Number((value / equity).toFixed(4)) : 0,
+              marketValue: Number(value.toFixed(2)),
+              unrealizedPnl: Number(((price - pos.avgCost) * pos.quantity).toFixed(2)),
+            };
+          }),
+        };
+      },
+      performance: () => {
+        const m = portfolio()?.metrics();
+        if (!m) return { totalReturn: 0, maxDrawdownPct: 0, totalFills: 0, openPositions: 0 };
+        const initial = bot.risk.initialCash;
+        return {
+          totalReturn: initial > 0 ? Number(((m.finalEquity - initial) / initial).toFixed(6)) : 0,
+          maxDrawdownPct: m.maxDrawdownPct,
+          totalFills: m.totalFills,
+          openPositions: m.openPositions,
+        };
+      },
+      news: async (symbol, limit) => {
+        const svc = this.news;
+        if (!svc || !this.config.news.enabled) return [];
+        return svc.forSymbols([symbol]).then((items) => items.slice(0, limit)).catch(() => []);
+      },
+    };
+    return { box: defaultToolBox(), context };
   }
 
   /**
@@ -424,8 +507,44 @@ export class BotManager {
     }
   }
 
+  /** 拆单执行统计（paper 券商 + 已开拆单时才有）。 */
+  private slicingOf(bot: BotConfig): { slicing?: BotView["slicing"] } {
+    const rt = this.runtimes.get(bot.id);
+    const broker = rt?.pipeline.broker;
+    if (!(broker instanceof PaperBroker)) return {};
+    const st = broker.slicingState();
+    if (!st) return {};
+    const done = st.completed;
+    return {
+      slicing: {
+        algo: st.algo,
+        slices: st.slices,
+        completed: done.length,
+        pending: st.pending.length,
+        avgShortfallBps:
+          done.length > 0 ? Number((done.reduce((a, o) => a + o.shortfallBps, 0) / done.length).toFixed(4)) : 0,
+      },
+    };
+  }
+
+  /** 记录带时间戳的 K 线（给 get_history 工具用）。 */
+  private trackHistory(bar: Bar): void {
+    const list = this.historyLog.get(bar.symbol) ?? [];
+    list.push({ timestamp: bar.timestamp.toISOString(), close: bar.close });
+    if (list.length > BotManager.HISTORY_LIMIT) list.shift();
+    this.historyLog.set(bar.symbol, list);
+  }
+
   /** 该机器人的全部决策路客户端。 */
+  /**
+   * 该机器人可用的决策路客户端。
+   *
+   * 量化交易（rules）时**一律返回 null**：界面上写着「完全不调用模型」，
+   * 这里就必须一个请求都不发 —— 包括点评 Agent 那条旁路，
+   * 否则会出现"说是纯规则、其实在偷偷调模型"。
+   */
   private lanesFor(bot: BotConfig): { chat: LLMClient | null; systemone: LLMClient | null } {
+    if (this.strategyOf(bot).decisionSource === "rules") return { chat: null, systemone: null };
     return { chat: this.clientFor(bot, "chat"), systemone: this.clientFor(bot, "systemone") };
   }
 
@@ -457,15 +576,22 @@ export class BotManager {
     };
 
     const journal = this.journalFor(bot);
+    const runtimeRef: { current?: Pipeline } = {};
+    const tools = this.toolsFor(bot, () => runtimeRef.current);
     const pipeline = buildPipeline(localConfig, {
       adapter,
       // 实盘由 resolveLiveTrading() 判定并做了互斥；回测与降级情况一律本地撮合
       liveTrading,
       llm: lanes.chat,
       soClient: lanes.systemone,
-      // 决策留痕：自我进化据此学习（与单账户引擎走的是同一份记录）
+      // 新闻摘要：只进 prompt，不直接触发交易
+      news: this.newsFetcher(),
+      // 决策留痕：自我进化据此学习
       ...(journal ? { journal } : {}),
+      // 只读工具箱：让模型自己查新闻/走势/当前配置
+      ...(tools ? { tools } : {}),
     });
+    runtimeRef.current = pipeline;
 
     // 行情必须打进 pipeline 自己的总线：
     // 策略/风控 Agent 都挂在 pipeline.bus 上、持有 pipeline.book，
@@ -499,6 +625,7 @@ export class BotManager {
     const bars = mergeBarsByTime(groups);
     for (const bar of bars) {
       if (rt.stopRequested) break;
+      this.trackHistory(bar);
       await feed(rt.pipeline, [bar]);
       const st = this.state(bot.id);
       this.states.set(bot.id, {
@@ -619,7 +746,7 @@ export class BotManager {
           : `${zh}：未配置可用实例`,
       );
     }
-    return { ...bot, state: this.state(bot.id), modelLabels: labels };
+    return { ...bot, state: this.state(bot.id), modelLabels: labels, ...this.slicingOf(bot) };
   }
 }
 

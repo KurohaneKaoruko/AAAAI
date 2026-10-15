@@ -8,6 +8,7 @@ import { WatchlistManager } from "../src/watchlist.js";
 import { SimulatedAdapter } from "../src/exchanges/simulated.js";
 import { EngineController } from "../src/server/engineController.js";
 import { LlmManager } from "../src/llm/llmManager.js";
+import { BotManager } from "../src/bots/botManager.js";
 import { testConfig } from "./helpers.js";
 
 function tmpDataDir(): string {
@@ -88,55 +89,57 @@ test("WatchlistManager: 添加/去重/删除/持久化", () => {
   }
 });
 
-test("EngineController: 无连接时给出明确错误", async () => {
+test("机器人: 连接不存在 / 没选标的 时给出明确错误", () => {
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const wm = new WatchlistManager(dir);
-    const controller = new EngineController(testConfig(), cm, wm, new LlmManager(dir));
-    await assert.rejects(() => controller.start({ mode: "backtest" }), /尚未配置任何交易所连接/);
+    const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
+    // 原来这些校验挂在单账户引擎上，引擎删除后由机器人自己把关
+    assert.throws(() => bots.create({ name: "X", connectionId: "不存在的连接", symbols: ["DEMO-BTC"] }), /连接不存在/);
+    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    assert.throws(() => bots.create({ name: "X", connectionId: conn.id, symbols: [] }), /请至少选择一个标的/);
+    assert.throws(() => bots.create({ name: "", connectionId: conn.id, symbols: ["DEMO-BTC"] }), /请填写机器人名称/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("EngineController: 无标的时给出明确错误", async () => {
-  const dir = tmpDataDir();
-  try {
-    const cm = new ConnectionManager(dir);
-    cm.create({ adapterId: "simulated", label: "模拟" });
-    const wm = new WatchlistManager(dir);
-    // 自选与配置都为空 -> 必须给出可读错误
-    const empty = testConfig();
-    empty.market.symbols = [];
-    const controller = new EngineController(empty, cm, wm, new LlmManager(dir));
-    await assert.rejects(() => controller.start({ mode: "backtest" }), /没有可运行的标的/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("EngineController: 回测完成后状态完整", async () => {
+test("机器人: 回测跑完后状态完整（引擎删除后，运行数据都来自这里）", async () => {
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
     const conn = cm.create({ adapterId: "simulated", label: "模拟" });
     const wm = new WatchlistManager(dir);
     wm.add({ symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
-    const controller = new EngineController(testConfig(), cm, wm, new LlmManager(dir));
+    const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
+    const bot = bots.create({ name: "回测", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 60 });
+    const st = await bots.start(bot.id);
 
-    await controller.start({ mode: "backtest", bars: 60 });
+    assert.equal(st.status, "stopped");
+    assert.ok(st.metrics, "应产出指标");
+    assert.ok(st.metrics!.finalEquity > 0);
+    assert.ok(st.equityCurve.length > 1, "应产出权益曲线（仪表盘靠它画图）");
+    assert.ok(st.bars > 0);
+    assert.equal(st.liveTrading, false, "回测永远不是实盘");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
-    const state = controller.snapshot();
-    assert.equal(state.status, "stopped");
-    assert.equal(state.mode, "backtest");
-    assert.deepEqual(state.symbols, ["DEMO-BTC"]);
-    assert.equal(state.connectionLabel, "模拟");
-    assert.ok(state.metrics);
-    assert.equal(state.metrics!.equityPoints, 60);
-    assert.ok(state.events.length > 0);
-    assert.ok(state.equityCurve.length === 60);
-    assert.ok(["paper", "exchange"].includes(state.broker!.name));
+test("EngineController: 已删除单账户运行接口（防止又长回来两条并行路径）", () => {
+  const dir = tmpDataDir();
+  try {
+    const cm = new ConnectionManager(dir);
+    const real = new EngineController(testConfig(), cm, new WatchlistManager(dir), new LlmManager(dir));
+    const controller = real as unknown as Record<string, unknown>;
+    for (const gone of ["start", "stop", "runBacktest", "runLive"]) {
+      assert.equal(gone in controller, false, `controller.${gone} 应不存在 —— 交易只有机器人这一条路径`);
+    }
+    const snap = real.snapshot() as unknown as Record<string, unknown>;
+    for (const gone of ["status", "mode", "metrics", "equityCurve", "positions", "trades", "broker"]) {
+      assert.equal(gone in snap, false, `全局状态不应再有 ${gone}（那是单机运行的数据）`);
+    }
+    assert.ok("tickers" in snap && "comparison" in snap && "config" in snap, "全局状态只保留行情、对照与配置");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

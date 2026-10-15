@@ -231,6 +231,14 @@ export interface Bot {
   };
   createdAt: string;
   modelLabels: string[];
+  /** 拆单执行统计（paper 券商且开了拆单时才有） */
+  slicing?: {
+    algo: "none" | "twap" | "vwap";
+    slices: number;
+    completed: number;
+    pending: number;
+    avgShortfallBps: number;
+  };
   state: {
     id: string;
     status: BotStatus;
@@ -400,47 +408,18 @@ export interface AppConfig {
   auth: { enabled: boolean; username: string; sessionTtlHours: number };
 }
 
+/**
+ * 全局状态：只有配置、候选池行情、多模型对照。
+ * 运行相关的数据都在机器人那边（/api/bots）—— 单账户引擎已删除。
+ */
 export interface EngineState {
-  status: EngineStatus;
-  mode: EngineMode | null;
-  symbols: string[];
-  connectionId: string | null;
-  connectionLabel: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  error: string | null;
-  metrics: PortfolioMetrics | null;
-  positions: Position[];
-  trades: TradeRecord[];
   tickers: Ticker[];
-  /** 本次运行各标的标记价 */
-  prices: Record<string, number>;
-  equityCurve: EquityPoint[];
-  events: EngineEventLine[];
-  broker: {
-    name: string;
-    paper: boolean;
-    /** 拆单执行状态（只在 paper 模式且已开启拆单时有值） */
-    slicing?: {
-      algo: "none" | "twap" | "vwap";
-      slices: number;
-      pending: SlicedOrderReport[];
-      completed: SlicedOrderReport[];
-      avgShortfallBps: number;
-      savedCost: number;
-    };
-  } | null;
-  strategy: string | null;
-  realizedPnl: number;
-  /** 最近一次多模型对照结果 */
   comparison: ComparisonResult | null;
   comparing: boolean;
   config: AppConfig;
 }
 
-export type Broadcast =
-  | { type: "state"; data: EngineState }
-  | { type: "event"; data: EngineEventLine };
+export type Broadcast = { type: "state"; data: EngineState };
 
 export interface NewsProviderConfig {
   id: string;
