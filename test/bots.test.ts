@@ -243,7 +243,7 @@ function liveSetup(mode: "paper" | "live") {
 test("实盘：实时模式 + 执行方式为真实下单 => 真的会发真实订单", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
-    const bot = bots.create({ name: "实盘机器人", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const bot = bots.create({ name: "实盘机器人", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
     const st = await bots.start(bot.id);
     assert.equal(st.liveTrading, true, "条件齐备时应标记为实盘");
     assert.equal(bots.state(bot.id).liveTrading, true);
@@ -257,10 +257,10 @@ test("实盘：实时模式 + 执行方式为真实下单 => 真的会发真实�
 test("实盘：选了实时但执行方式仍是模拟 => 拒绝启动，而不是悄悄降级", async () => {
   const { dir, bots, conn } = liveSetup("paper");
   try {
-    const bot = bots.create({ name: "想实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const bot = bots.create({ name: "想实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
     await assert.rejects(
       () => bots.start(bot.id),
-      /设为实时.*执行方式仍是模拟成交.*不会启动/,
+      /设为真实下单.*执行方式仍是模拟成交.*不会启动/,
       "静默降级是最糟的结局：用户以为钱打出去了，实际没动",
     );
     assert.equal(bots.state(bot.id).status, "idle", "被拒绝后不应进入运行态");
@@ -274,8 +274,8 @@ test("实盘：同一连接同时只允许一个实盘机器人", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
     // 手动把一个机器人置为运行中（模拟"已经在实盘跑着"），避免真的并发等待
-    const first = bots.create({ name: "实盘一号", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
-    const second = bots.create({ name: "实盘二号", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", barCount: 30 });
+    const first = bots.create({ name: "实盘一号", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
+    const second = bots.create({ name: "实盘二号", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", paperTrading: false, barCount: 30 });
     bots["states"].set(first.id, { ...bots.state(first.id), status: "running", liveTrading: true });
 
     await assert.rejects(
@@ -291,7 +291,7 @@ test("实盘：同一连接同时只允许一个实盘机器人", async () => {
 test("实盘：回测机器人不受互斥限制，可与实盘机器人并行", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
-    const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
     const backtest = bots.create({ name: "回测", connectionId: conn, symbols: ["DEMO-ETH"], mode: "backtest", barCount: 30 });
     bots["states"].set(liveBot.id, { ...bots.state(liveBot.id), status: "running", liveTrading: true });
     const st = await bots.start(backtest.id);
@@ -311,11 +311,11 @@ test("实盘：不同连接之间互不干扰", async () => {
     const config = { ...testConfig(), execution: { ...testConfig().execution, mode: "live" } };
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
-    const a = bots.create({ name: "A", connectionId: c1.id, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
-    const b = bots.create({ name: "B", connectionId: c2.id, symbols: ["DEMO-ETH"], mode: "live", barCount: 30 });
+    const a = bots.create({ name: "A", connectionId: c1.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
+    const b = bots.create({ name: "B", connectionId: c2.id, symbols: ["DEMO-ETH"], mode: "live", paperTrading: false, barCount: 30 });
     bots["states"].set(a.id, { ...bots.state(a.id), status: "running", liveTrading: true });
     const st = await bots.start(b.id);
-    assert.equal(st.status, "stopped", "不同连接可以各自实盘");
+    assert.equal(st.status, "running", "不同连接可以各自实盘；实时启动后应保持 running");
     assert.equal(st.liveTrading, true);
     bots.stop(b.id); // 关掉实时轮询器
   } finally {
@@ -381,14 +381,13 @@ test("配置热更新会同步到机器人（否则实盘判定读到旧的执�
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
-    const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", barCount: 20 });
-    // 模拟 /api/config 的效果：拿到新配置并交给机器人
+    const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 20 });
     const next: AppConfig = { ...config, execution: { ...config.execution, mode: "live" } };
     bots.useConfig(next);
 
     return bots.start(bot.id).then(
       (st) => {
-        assert.equal(st.status, "stopped", "同步配置后应能启动（模拟适配器支持交易且不需 Key）");
+        assert.equal(st.status, "running", "同步配置后应能启动（模拟适配器支持交易且不需 Key）；实时启动后保持 running");
         assert.equal(st.liveTrading, true);
         bots.stop(bot.id);
       },
@@ -399,5 +398,152 @@ test("配置热更新会同步到机器人（否则实盘判定读到旧的执�
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
     throw err;
+  }
+});
+
+test("模拟成交（默认）：实时机器人用真实行情本地撮合，产出交易统计", async () => {
+  // 这是机器人最常用的跑法：行情是真的（东财/币安拉下来的），撮合在本地，
+  // 零资金风险。它绝不能因为「执行方式=模拟」被拒绝启动 —— 之前恰恰是这个
+  // 门把所有实时机器人都挡在了门外，用户根本没法跑。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-paper-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const config = testConfig(); // execution.mode = paper
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+
+    // paperTrading 缺省 = true：实时 + 模拟成交，应当能启动
+    const bot = bots.create({ name: "干跑", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40 });
+    const st = await bots.start(bot.id);
+    assert.equal(st.liveTrading, false, "模拟成交绝不是实盘");
+    assert.equal(st.status, "running", "实时机器人启动后保持 running（轮询器在跑）");
+    assert.equal(st.error, null);
+    // 交易统计三件套必须产出 —— "统计这个机器人的交易情况和盈利情况"靠它们
+    assert.ok(st.trades.length > 0, `应留下成交流水，实际 ${st.trades.length} 条`);
+    assert.ok(st.pnlBySymbol.length > 0, "应有分标的盈亏统计");
+    assert.ok(st.metrics, "应有盈利指标");
+    bots.stop(bot.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("模拟成交：实时机器人不受实盘互斥限制，可多个并行", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-paper2-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const config = testConfig();
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+
+    const a = bots.create({ name: "干跑A", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40 });
+    const b = bots.create({ name: "干跑B", connectionId: conn.id, symbols: ["DEMO-ETH"], mode: "live", paperTrading: true, barCount: 40 });
+    bots["states"].set(a.id, { ...bots.state(a.id), status: "running", liveTrading: false });
+    const st = await bots.start(b.id);
+    assert.equal(st.status, "running", "模拟成交机器人不应被实盘互斥挡住；启动后保持 running");
+    bots.stop(a.id);
+    bots.stop(b.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("交易统计：成交流水与分标的盈亏来自机器人自己的成交", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-trade-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["DEMO-BTC", "DEMO-ETH"], mode: "backtest", barCount: 120 });
+    const st = await bots.start(bot.id);
+
+    assert.ok(st.trades.length > 0);
+    // 明细字段齐全：价格、数量、手续费、理由
+    const t = st.trades[0]!;
+    assert.ok(t.price > 0 && t.quantity > 0, "成交必须有价格与数量");
+    assert.ok(typeof t.fee === "number", "应有手续费");
+    assert.ok(t.reason.length > 0, "应有决策理由");
+    // 分标的盈亏：两个标的都动过，合计应等于总已实现盈亏
+    const sum = st.pnlBySymbol.reduce((acc, p) => acc + p.realizedPnl, 0);
+    assert.ok(
+      Math.abs(sum - (st.metrics?.realizedPnl ?? 0)) < 0.01,
+      `分标的盈亏合计 ${sum} 应等于总已实现盈亏 ${st.metrics?.realizedPnl}`,
+    );
+    assert.ok(st.pnlBySymbol.every((p) => p.fills > 0), "每个标的的成交笔数应大于 0");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("老数据迁移：没有 paperTrading 字段的机器人补默认值 true（保守）", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-mig-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const config = testConfig();
+    // 直接写一份"旧版"bots.json：没有 paperTrading 字段
+    const legacy = [
+      {
+        id: "old1",
+        name: "老机器人",
+        enabled: true,
+        connectionId: conn.id,
+        symbols: ["DEMO-BTC"],
+        mode: "live",
+        interval: "1m",
+        barCount: 30,
+        pollMs: 1000,
+        decisionSource: "rules",
+        modelProfileIds: [],
+        decisionInterval: 5,
+        strategy: { fastWindow: 5, slowWindow: 20 },
+        risk: { initialCash: 100000 },
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const { writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    writeFileSync(join(dir, "bots.json"), JSON.stringify(legacy, null, 2));
+
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+    const view = bots.list()[0]!;
+    assert.equal(
+      view.paperTrading,
+      true,
+      "老机器人的 paperTrading 必须默认为 true：把旧机器人默认成真下单是不可接受的",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("实时机器人启动后必须保持 running（轮询器在跑，start 返回即停是假状态）", async () => {
+  // 回归：runLive 预热完、启动轮询器就返回，start() 曾无条件把状态标成
+  // stopped —— 机器人明明在跑却显示已停止，还能对它叠着再启动一个轮询器。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-running-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+
+    const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
+    await bots.start(bot.id);
+    const st = bots.state(bot.id);
+    assert.equal(st.status, "running", "start() 返回后实时机器人必须仍是 running");
+    assert.ok(st.bars > 0, "预热应已产出 K 线");
+
+    // 轮询器活着：等两轮，bars 必须增长
+    const before = bots.state(bot.id).bars;
+    await new Promise((r) => setTimeout(r, 600));
+    const after = bots.state(bot.id).bars;
+    assert.ok(after > before, `轮询应推进 K 线数：${before} -> ${after}`);
+
+    // 状态为 running 时重复启动必须被拒绝（防止叠轮询器）
+    await assert.rejects(() => bots.start(bot.id), /已在运行/);
+
+    bots.stop(bot.id);
+    assert.equal(bots.state(bot.id).status, "stopped", "stop 后才是 stopped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
