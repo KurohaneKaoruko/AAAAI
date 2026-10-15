@@ -160,7 +160,30 @@ export interface AuthStatus {
   authenticated: boolean;
 }
 
-export type RunnerKind = "baseline" | "chat" | "systemone";
+export type RunnerKind = "baseline" | "rules" | "chat" | "systemone" | "hybrid";
+
+/** 对照参赛者的来源：机器人 / 策略 / 模型实例 / 基线 */
+export type ParticipantType = "baseline" | "bot" | "strategy" | "model";
+
+/** 服务端摊平的参赛者：能勾哪些、为什么不能勾，都由它说了算。 */
+export interface Participant {
+  /** 提交给服务端的唯一键 */
+  key: string;
+  type: ParticipantType;
+  name: string;
+  detail: string;
+  decisionSource: "rules" | "chat" | "systemone" | "hybrid";
+  params: {
+    fastWindow: number;
+    slowWindow: number;
+    maxTargetWeight: number;
+    maxPositions: number;
+    selfAllocating: boolean;
+  };
+  models: string[];
+  /** 不能参赛的原因；为空即可参赛 */
+  unavailable?: string;
+}
 
 export type BotMode = "backtest" | "live";
 export type BotStatus = "idle" | "running" | "stopped" | "error";
@@ -313,6 +336,10 @@ export interface RunnerResult {
   id: string;
   label: string;
   kind: RunnerKind;
+  decisionSource: "rules" | "chat" | "systemone" | "hybrid";
+  /** 实际生效的策略参数（页面摊开给用户核对） */
+  params: Record<string, number | boolean | string>;
+  origin?: { type: ParticipantType; key: string; name: string };
   model?: string;
   ok: boolean;
   error?: string;
@@ -409,7 +436,7 @@ export interface AppConfig {
 }
 
 /**
- * 全局状态：只有配置、候选池行情、多模型对照。
+ * 全局状态：只有配置、候选池行情、模拟对照。
  * 运行相关的数据都在机器人那边（/api/bots）—— 单账户引擎已删除。
  */
 export interface EngineState {
@@ -417,6 +444,14 @@ export interface EngineState {
   comparison: ComparisonResult | null;
   comparing: boolean;
   config: AppConfig;
+  /** "现在开跑会跑什么"：服务端按连接解析后的真实标的（前端不要自己猜） */
+  runTarget: {
+    connectionId: string | null;
+    connectionLabel: string | null;
+    interval: string;
+    symbols: string[];
+    error: string | null;
+  };
 }
 
 export type Broadcast = { type: "state"; data: EngineState };

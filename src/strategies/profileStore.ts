@@ -258,3 +258,24 @@ export class StrategyStore {
     return rest;
   }
 }
+
+/**
+ * 策略实体 -> AppConfig.strategy 需要的字段（只挑策略侧，不动其它段）。
+ *
+ * 放在这里而不是各调用方自己展开：策略页保存、机器人启动、对照实验选手装配
+ * 都要用同一份映射，否则三处各写一遍，迟早有一处漏字段。
+ */
+export function strategyFields(p: StrategyProfile): Record<string, unknown> {
+  return {
+    decisionSource: p.decisionSource,
+    fastWindow: p.fastWindow,
+    slowWindow: p.slowWindow,
+    maxTargetWeight: p.maxTargetWeight,
+    selfAllocating: p.selfAllocating,
+    maxPositions: p.maxPositions,
+    maxGrossExposure: p.maxGrossExposure,
+    allocationInterval: p.allocationInterval,
+    hybridInfluence: p.hybridInfluence,
+    hybridAnalysisTtlMs: p.hybridAnalysisTtlMs,
+  };
+}

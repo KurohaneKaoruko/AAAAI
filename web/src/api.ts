@@ -24,6 +24,7 @@ import type {
   SymbolInfo,
   Ticker,
   WatchItem,
+  Participant,
 } from "./types";
 
 const BASE = import.meta.env.DEV ? "http://localhost:8787" : "";
@@ -173,14 +174,14 @@ export const api = {
     request<{ bots: Bot[] }>("/api/bots/start-all", { method: "POST", body: JSON.stringify({ ids }) }),
   stopAllBots: () => request<{ bots: Bot[] }>("/api/bots/stop-all", { method: "POST" }),
 
-  // 多模型并行模拟盘对照
+  // 模拟对照：参赛者 = 机器人 / 策略 / 模型 / 基线
+  participants: () => request<{ participants: Participant[] }>("/api/bench/participants"),
   runComparison: (body: {
+    /** 参赛者 key 列表 */
+    keys: string[];
     symbols?: string[];
     bars?: number;
     interval?: string;
-    runnerIds?: string[];
-    includeBaseline?: boolean;
-    kinds?: RunnerKind[];
   }) => request<{ result: ComparisonResult }>("/api/bench/compare", { method: "POST", body: JSON.stringify(body) }),
   lastComparison: () => request<{ result: ComparisonResult | null }>("/api/bench/compare"),
 

@@ -11,7 +11,9 @@ import {
   buildStateFromPrompt,
 } from "../src/llm/systemOne.js";
 import { LlmManager } from "../src/llm/llmManager.js";
-import { runComparison, buildRunners, type RunnerSpec } from "../src/bench/comparison.js";
+import { runComparison, type RunnerSpec } from "../src/bench/comparison.js";
+import { buildParticipants, resolveRunners } from "../src/bench/participants.js";
+import type { StrategyProfile } from "../src/strategies/profileStore.js";
 import { testConfig, testAdapter } from "./helpers.js";
 import type { LLMClient } from "../src/llm/llmClient.js";
 
@@ -170,9 +172,9 @@ function fixedClient(weight: number): LLMClient {
 test("多模型对照：同一份行情、同一资金、各自独立记账", async () => {
   const config = testConfig();
   const runners: RunnerSpec[] = [
-    { id: "baseline", label: "基线", kind: "baseline", client: null },
-    { id: "model-a", label: "模型A", kind: "chat", model: "A", client: fixedClient(0.6) },
-    { id: "model-b", label: "模型B", kind: "chat", model: "B", client: fixedClient(0.05) },
+    { id: "baseline", label: "基线", kind: "baseline", decisionSource: "rules" },
+    { id: "model-a", label: "模型A", kind: "chat", decisionSource: "chat", model: "A", clients: { chat: fixedClient(0.6) } },
+    { id: "model-b", label: "模型B", kind: "chat", decisionSource: "chat", model: "B", clients: { chat: fixedClient(0.05) } },
   ];
   const result = await runComparison(config, {
     adapter: testAdapter(),
@@ -222,25 +224,117 @@ test("多模型对照：无选手时返回空结果", async () => {
   assert.deepEqual(result.winners, []);
 });
 
-test("buildRunners: 自动带上基线、跳过不可用实例", () => {
+test("buildParticipants: 摊平参赛者并标明不可用原因", () => {
   const profiles = [
     { id: "p1", label: "可用", kind: "chat" as const, model: "m1", enabled: true, hasKey: true },
     { id: "p2", label: "无密钥", kind: "chat" as const, model: "m2", enabled: true, hasKey: false },
     { id: "p3", label: "停用", kind: "systemone" as const, model: "m3", enabled: false, hasKey: true },
     { id: "p4", label: "决策模型", kind: "systemone" as const, model: "m4", enabled: true, hasKey: true },
   ];
-  const clientFor = (id: string) =>
-    profiles.find((p) => p.id === id) ? { client: fixedClient(0.3), profile: { model: "x" } } : null;
+  const llm = fakeLlm(profiles);
 
-  const runners = buildRunners({ profiles, clientFor, includeBaseline: true });
-  assert.deepEqual(runners.map((r) => r.id), ["baseline", "p1", "p4"]);
-  assert.equal(runners[0]!.kind, "baseline");
-  assert.equal(runners[2]!.kind, "systemone");
+  const deps = participantDeps(llm);
+  const byKey = new Map(buildParticipants(deps).map((p) => [p.key, p]));
 
-  const noBaseline = buildRunners({ profiles, clientFor, includeBaseline: false });
-  assert.equal(noBaseline.length, 2);
+  assert.ok(byKey.has("baseline"), "基线永远在列");
+  assert.equal(byKey.get("model:p2")!.unavailable, "还没填 API Key", "没 Key 的实例要说明为什么不能上场");
+  assert.equal(byKey.get("model:p3")!.unavailable, "实例已停用");
+  assert.ok(!byKey.get("model:p1")!.unavailable, "可用实例没有 unavailable");
+  // 量化策略也能参赛 —— 这正是这次改造的目的
+  assert.ok(byKey.has("strategy:s-default"), "策略列表里的每一条都应出现在参赛者里");
 });
 
+test("resolveRunners: 机器人按自己的策略与模型上场；勾了不可用的直接报错", () => {
+  const profiles = [
+    { id: "p1", label: "可用chat", kind: "chat" as const, model: "m1", enabled: true, hasKey: true },
+  ];
+  const llm = fakeLlm(profiles);
+  const deps = participantDeps(llm);
+
+  const runners = resolveRunners(["baseline", "bot:b1", "model:p1"], deps);
+  assert.equal(runners.length, 3);
+  const botRunner = runners.find((r) => r.id === "bot:b1")!;
+  assert.equal(botRunner.decisionSource, "rules", "机器人引用的是量化策略 -> 就跑量化");
+  assert.deepEqual(botRunner.strategyPatch!.fastWindow, 3, "策略参数要带上（比策略比的就是它）");
+  assert.equal(runners.find((r) => r.id === "baseline")!.decisionSource, "rules");
+
+  assert.throws(
+    () => resolveRunners(["strategy:s-hybrid"], deps),
+    /不能上场.*缺少可用的/,
+    "勾了缺少模型的策略必须报错，而不是悄悄跳过",
+  );
+  assert.throws(() => resolveRunners(["bot:不存在"], deps), /参赛者不存在/);
+});
+
+test("resolveRunners: 混合决策机器人需要两种模型，缺一就拒绝上场", () => {
+  const profiles = [
+    { id: "p1", label: "只有chat", kind: "chat" as const, model: "m1", enabled: true, hasKey: true },
+  ];
+  const llm = fakeLlm(profiles);
+  const deps = participantDeps(llm, {
+    hybrid: true, // 策略库里的混合策略
+    botStrategy: "hybrid",
+  });
+  const byKey = new Map(buildParticipants(deps).map((p) => [p.key, p]));
+  assert.match(byKey.get("bot:b1")!.unavailable!, /缺少可用的决策模型/, "缺决策模型要说清楚缺哪一类");
+  assert.match(byKey.get("strategy:s-hybrid")!.unavailable!, /缺少可用的决策模型/);
+});
+
+/** 摊平参赛者所依赖的最小 LlmManager 替身。 */
+function fakeLlm(profiles: { id: string; label: string; kind: "chat" | "systemone"; model: string; enabled: boolean; hasKey: boolean }[]) {
+  const available = (kind?: string) => profiles.filter((p) => (!kind || p.kind === kind) && p.enabled && p.hasKey);
+  return {
+    list: () => profiles,
+    available: (kind?: "chat" | "systemone") => available(kind),
+    clientFor: (id: string) => (available().some((p) => p.id === id) ? { client: fixedClient(0.3), profile: { model: "x" } } : null),
+  };
+}
+
+/** 组装一份参赛者依赖：默认策略 + 量化策略 + 混合策略 + 一个机器人。 */
+function participantDeps(
+  llm: ReturnType<typeof fakeLlm>,
+  opts: { hybrid?: boolean; botStrategy?: "rules" | "chat" | "systemone" | "hybrid" } = {},
+) {
+  const def: StrategyProfile = {
+    id: "s-default",
+    name: "默认策略",
+    decisionSource: "rules",
+    fastWindow: 5,
+    slowWindow: 20,
+    maxTargetWeight: 0.5,
+    selfAllocating: false,
+    maxPositions: 3,
+    maxGrossExposure: 1,
+    allocationInterval: 5,
+    hybridInfluence: 0.6,
+    hybridAnalysisTtlMs: 300_000,
+    createdAt: "",
+  };
+  const quant: StrategyProfile = { ...def, id: "s-quant", name: "快线量化", fastWindow: 3, slowWindow: 10 };
+  const hybrid: StrategyProfile = { ...def, id: "s-hybrid", name: "混合", decisionSource: "hybrid" };
+  const botStrategySource = opts.botStrategy ?? "rules";
+  const botProfile: StrategyProfile =
+    botStrategySource === "hybrid" ? hybrid : botStrategySource === "rules" ? { ...quant, id: "s-bot", name: "机器人策略" } : { ...def, id: "s-botc", name: "机器人chat", decisionSource: botStrategySource };
+
+  return {
+    defaultStrategy: def,
+    strategies: [def, quant, hybrid],
+    bots: [
+      {
+        id: "b1",
+        name: "一号机器人",
+        connectionId: "conn1",
+        modelProfileIds: [],
+        enabled: true,
+        decisionSource: botProfile.decisionSource,
+      },
+    ],
+    strategyOf: () => botProfile,
+    llm,
+    connectionId: "conn1",
+    connectionLabel: "模拟盘",
+  } as unknown as Parameters<typeof buildParticipants>[0];
+}
 
 test("决策来源：默认 rules，旧配置 llm.enabled=true 会迁移为 chat", async () => {
   const { buildConfig } = await import("../src/configSchema.js");
@@ -315,9 +409,9 @@ test("对照实验：每个选手只跑自己那一路，基线绝不调用模�
     interval: "1m",
     liveTrading: false,
     runners: [
-      { id: "b", label: "基线", kind: "baseline", client: null },
-      { id: "c", label: "对话", kind: "chat", client: chatSpy },
-      { id: "s", label: "决策", kind: "systemone", client: soSpy },
+      { id: "b", label: "基线", kind: "baseline", decisionSource: "rules" },
+      { id: "c", label: "对话", kind: "chat", decisionSource: "chat", clients: { chat: chatSpy } },
+      { id: "s", label: "决策", kind: "systemone", decisionSource: "systemone", clients: { systemone: soSpy } },
     ],
   });
   assert.equal(result.results.length, 3);
@@ -337,7 +431,7 @@ test("对照引擎：各选手独立记账且价格簿正确（回归）", async
     bars: 200,
     interval: "1m",
     liveTrading: false,
-    runners: [{ id: "b", label: "基线", kind: "baseline", client: null }],
+    runners: [{ id: "b", label: "基线", kind: "baseline", decisionSource: "rules" }],
   });
   assert.ok(
     result.results[0]!.fillCount > 0,

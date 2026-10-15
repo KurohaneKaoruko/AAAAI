@@ -65,7 +65,11 @@ async function main(): Promise<void> {
   });
   // 机器人也要留痕：否则"用了机器人"就等于关掉了自我进化
   const bots = new BotManager(dataDir, config, connections, llm, strategies, evolution, news);
-  const controller = new EngineController(config, connections, watchlist, llm, news, evolution, strategies);
+  const controller = new EngineController(config, connections, watchlist, llm, news, evolution, strategies, {
+    // 对照实验要能直接拿配置好的机器人当参赛者
+    list: () => bots.list(),
+    strategyOf: (bot) => bots.strategyOf(bot),
+  });
 
   const app = createServer(controller, {
     connections,
@@ -118,7 +122,7 @@ function seedLegacyLlmProfile(llm: LlmManager, config: ReturnType<typeof buildCo
     temperature: config.llm.temperature,
     timeoutMs: config.llm.timeoutMs,
   });
-  log.info("已从配置文件迁移 1 个 LLM 实例，可在「LLM 大模型」页继续添加更多");
+  log.info("已从配置文件迁移 1 个 LLM 实例，可在「模型管理」页继续添加更多");
 }
 
 main().catch((err) => {

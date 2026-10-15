@@ -1,18 +1,17 @@
 /**
- * 多模型对照（并行模拟盘 A/B）：
+ * 模拟对照（并行模拟盘 A/B）：
  *
  * 同一份行情、同一套风控、同一笔初始资金，为每个「选手」建立独立的
- * 组合与流水线，同时开跑 —— 用来横向比较哪个模型更会赚钱。
+ * 组合与流水线，同时开跑 —— 用来横向比较"谁的决策更赚钱"：
+ * 可以比模型，也可以比量化策略，或者直接把配置好的机器人拉进来比。
  *
  * 公平性保证：
  * - 行情只拉取一次，按全局时间顺序把同一根 K 线依次广播给所有选手；
- * - 所有选手使用相同的 risk 配置与初始资金；
+ * - 所有选手使用相同的 risk 配置与初始资金（机器人各自的资金/风控不参与对照：
+ *   那属于实盘配置，混进来就不是单变量比较了）；
+ * - 每个选手可以使用**不同的策略参数**（窗口、目标权重、自主配置等），
+ *   这正是"比策略"要考察的变量；
  * - 每个选手拥有独立的 PortfolioManager，互不共享持仓。
- *
- * 选手类型：
- * - baseline  动量基线（不调模型，作为参照系）
- * - chat      对话模型实例（OpenAI 兼容）
- * - systemone System One 纯决策模型（Jev / Laya 等）
  */
 
 import { mergeBarsByTime } from "../data/streaming.js";
@@ -25,22 +24,39 @@ import { getLogger } from "../core/logger.js";
 
 const log = getLogger("bench");
 
-export type RunnerKind = "baseline" | "chat" | "systemone";
+/** 展示分类：参照系 + 决策来源本身。 */
+export type RunnerKind = "baseline" | DecisionSource;
+
+/** 参赛者的来源，结果表里要标出来（不然"这条曲线是谁"只能靠猜）。 */
+export interface RunnerOrigin {
+  type: "baseline" | "strategy" | "bot" | "model";
+  key: string;
+  name: string;
+}
 
 export interface RunnerSpec {
-  /** 唯一标识：baseline 或模型实例 ID */
+  /** 唯一标识（参赛者 key：baseline / bot:… / strategy:… / model:…） */
   id: string;
   label: string;
   kind: RunnerKind;
+  /** 这条选手实际使用的决策来源（对照实验里每条只跑自己那一路） */
+  decisionSource: DecisionSource;
+  /** 该选手的策略参数覆盖；比策略时正是靠它产生差异 */
+  strategyPatch?: Record<string, unknown>;
   model?: string;
-  /** 直连客户端（对照实验不走负载均衡，保证每个模型独立决策） */
-  client?: LLMClient | null;
+  /** 该选手实际使用的模型客户端（每类最多一个，保证单变量） */
+  clients?: { chat?: LLMClient | null; systemone?: LLMClient | null };
+  origin?: RunnerOrigin;
 }
 
 export interface RunnerResult {
   id: string;
   label: string;
   kind: RunnerKind;
+  decisionSource: DecisionSource;
+  /** 实际生效的策略参数（页面摊开给用户核对，避免"以为在跑 A 其实是 B"） */
+  params: Record<string, number | boolean | string>;
+  origin?: RunnerOrigin;
   model?: string;
   ok: boolean;
   error?: string;
@@ -80,6 +96,8 @@ export interface ComparisonOptions {
 /** 单个选手的流水线 + 记账句柄（行情缓存用流水线内部那本，见下）。 */
 interface RunnerCtx {
   spec: RunnerSpec;
+  /** 该选手实际生效的策略段（结果里要摊开给用户核对） */
+  strategy: AppConfig["strategy"];
   pipeline: Pipeline;
 }
 
@@ -88,6 +106,7 @@ export async function runComparison(
   options: ComparisonOptions,
 ): Promise<ComparisonResult> {
   const startedAt = Date.now();
+  // 统一初始资金：机器人各自的钱不参与对照，否则收益率之外还混着"谁本金大"
   const initialCash = config.risk.initialCash;
 
   // 1) 行情只拉一次，所有选手共享
@@ -95,23 +114,27 @@ export async function runComparison(
     options.symbols.map((s) => options.adapter.fetchKlines(s, options.interval, options.bars)),
   );
   const bars = mergeBarsByTime(groups);
-  log.info("对照实验开始：%d 个选手 × %d 根 K 线", options.runners.length, bars.length);
+  log.info("模拟对照开始：%d 个选手 × %d 根 K 线", options.runners.length, bars.length);
 
   // 2) 每个选手一套独立流水线（独立资金/持仓/风控）
   const contexts: RunnerCtx[] = options.runners.map((spec) => {
-    // 对照实验必须单变量：每位选手只跑自己那一路，其余路不介入
-    const soloSource: DecisionSource = spec.kind === "baseline" ? "rules" : spec.kind;
+    // 每位选手跑自己的策略参数 + 自己的决策来源，其余路不介入（单变量）
+    const strategy: AppConfig["strategy"] = {
+      ...config.strategy,
+      ...spec.strategyPatch,
+      decisionSource: spec.decisionSource,
+    };
     const pipeline = buildPipeline(
-      config,
+      { ...config, strategy },
       {
         adapter: options.adapter,
         liveTrading: options.liveTrading,
-        llm: spec.kind === "chat" ? (spec.client ?? null) : null,
-        soClient: spec.kind === "systemone" ? (spec.client ?? null) : null,
+        llm: spec.decisionSource === "rules" || spec.decisionSource === "systemone" ? null : (spec.clients?.chat ?? null),
+        soClient: spec.decisionSource === "rules" || spec.decisionSource === "chat" ? null : (spec.clients?.systemone ?? null),
       },
-      soloSource,
+      spec.decisionSource,
     );
-    return { spec, pipeline };
+    return { spec, strategy, pipeline };
   });
 
   // 3) 同一根 K 线依次喂给所有选手
@@ -146,14 +169,24 @@ export async function runComparison(
 }
 
 function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
-  const { spec, pipeline } = ctx;
+  const { spec, strategy, pipeline } = ctx;
   const metrics = pipeline.portfolio.metrics();
   const trades = pipeline.portfolio.tradeHistory();
   const base: RunnerResult = {
     id: spec.id,
     label: spec.label,
     kind: spec.kind,
-    model: spec.model,
+    decisionSource: spec.decisionSource,
+    params: {
+      decisionSource: strategy.decisionSource,
+      fastWindow: strategy.fastWindow,
+      slowWindow: strategy.slowWindow,
+      maxTargetWeight: strategy.maxTargetWeight,
+      maxPositions: strategy.maxPositions,
+      selfAllocating: strategy.selfAllocating,
+    },
+    ...(spec.origin ? { origin: spec.origin } : {}),
+    ...(spec.model ? { model: spec.model } : {}),
     ok: true,
     initialCash,
     finalEquity: metrics.finalEquity,
@@ -194,24 +227,4 @@ function profitFactor(trades: TradeRecord[]): number {
 /** 模型调用次数：决策类成交数近似（对照实验里用于判断选手是否真的在用模型）。 */
 function countLlmCalls(trades: TradeRecord[]): number {
   return trades.filter((t) => t.reason?.includes("llm") || t.reason?.includes("systemone")).length;
-}
-
-/** 从 LLMManager 组装选手列表（含动量基线）。 */
-export function buildRunners(input: {
-  profiles: { id: string; label: string; kind: "chat" | "systemone"; model: string; enabled: boolean; hasKey: boolean }[];
-  clientFor: (id: string) => { client: LLMClient; profile: { model: string } } | null;
-  includeBaseline: boolean;
-  includeAll?: boolean;
-}): RunnerSpec[] {
-  const runners: RunnerSpec[] = [];
-  if (input.includeBaseline) {
-    runners.push({ id: "baseline", label: "动量基线（不调模型）", kind: "baseline", client: null });
-  }
-  for (const p of input.profiles) {
-    if (!p.enabled || !p.hasKey) continue;
-    const pair = input.clientFor(p.id);
-    if (!pair) continue;
-    runners.push({ id: p.id, label: p.label, kind: p.kind, model: p.model, client: pair.client });
-  }
-  return runners;
 }
