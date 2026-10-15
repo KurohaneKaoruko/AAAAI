@@ -1431,3 +1431,51 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .collapse[open] > summary::before { content: "▾ "; }
 .collapse[open] > summary { border-bottom: 1px solid var(--border-soft); color: var(--text); }
 .collapse-body { padding: 14px 16px; }
+
+/* ---------- 模型对照：运行前把"会跑什么/为什么不能跑"说清楚 ---------- */
+.compare-status {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.compare-status-lead { font-weight: 600; }
+.compare-blocked {
+  background: var(--notice-warn-bg);
+  border: 1px solid var(--notice-warn-border);
+  color: var(--notice-warn-text);
+}
+.compare-ready {
+  background: var(--notice-ok-bg);
+  border: 1px solid var(--notice-ok-border);
+  color: var(--notice-ok-text);
+}
+
+/* ---------- 模拟对照：参赛者卡片 ---------- */
+.participant-groups { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.participant-group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.participant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.participant-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: inherit;
+  font: inherit;
+}
+.participant-card:hover:not(:disabled) { border-color: var(--accent); }
+.participant-on { border-color: var(--accent); background: var(--accent-soft, rgba(79, 142, 247, 0.08)); }
+.participant-off { opacity: 0.45; cursor: not-allowed; }
+.participant-line { display: flex; align-items: center; gap: 8px; }
+.participant-check { margin-left: auto; color: var(--accent); font-weight: 600; font-size: 12px; }
+.participant-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.participant-reason { color: var(--notice-warn-text); }

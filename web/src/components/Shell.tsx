@@ -24,7 +24,7 @@ const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "exchanges", label: "交易所连接", icon: "⇄", group: "交易" },
   { id: "strategy", label: "策略", icon: "⚑", group: "智能" },
   { id: "llm", label: "模型管理", icon: "✦", group: "智能" },
-  { id: "compare", label: "模型对照", icon: "⇆", group: "智能" },
+  { id: "compare", label: "模拟对照", icon: "⇆", group: "智能" },
   { id: "risk", label: "风控", icon: "⛨", group: "系统" },
   { id: "system", label: "系统与日志", icon: "⚙", group: "系统" },
 ];

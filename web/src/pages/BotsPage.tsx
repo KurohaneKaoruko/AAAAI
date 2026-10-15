@@ -114,9 +114,17 @@ export function BotsPage({ store }: { store: AppStore }) {
 
         {bots.some((b) => b.state.allocation) && <AllocationOverview bots={bots} />}
 
+        {bots.length === 0 && !creating && (
+          <div className="btn-row" style={{ marginTop: -4, marginBottom: 12 }}>
+            <Button small variant="primary" onClick={() => setCreating(true)}>
+              + 新建第一个机器人
+            </Button>
+          </div>
+        )}
+
         {bots.length === 0 && !creating ? (
           <Empty>
-            还没有机器人。点「新建机器人」配置一个：它有自己的标的、模型、策略和资金，互不干扰，可并行运行。
+            还没有机器人。每个机器人有自己的标的、模型、策略和资金，互不干扰、可并行运行。
           </Empty>
         ) : (
           <div className="bot-list">

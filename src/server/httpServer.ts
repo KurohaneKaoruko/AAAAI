@@ -393,18 +393,25 @@ export function createServer(controller: EngineController, options: ServerOption
     ok(res, { bots: bots.list() });
   });
 
-  /** 多模型并行模拟盘对照实验 */
+  /** 模拟对照的参赛者清单（机器人 / 策略 / 模型 / 基线，含不可用原因） */
+  app.get("/api/bench/participants", (_req, res) => ok(res, { participants: controller.listParticipants() }));
+
+  /** 模拟对照：勾选参赛者 -> 并行模拟盘 -> 战绩排名 */
   app.post("/api/bench/compare", (req, res) => {
     const body = (req.body ?? {}) as {
+      /** 参赛者 key 列表 */
+      keys?: string[];
       symbols?: string[];
       bars?: number;
       interval?: string;
-      runnerIds?: string[];
-      includeBaseline?: boolean;
-      kinds?: ("chat" | "systemone")[];
     };
     void controller
-      .runModelComparison(body)
+      .runSimulationComparison({
+        keys: body.keys ?? [],
+        symbols: body.symbols,
+        bars: typeof body.bars === "number" ? body.bars : undefined,
+        interval: body.interval,
+      })
       .then((result) => ok(res, { result }))
       .catch((err) => fail(res, err, 409));
   });
