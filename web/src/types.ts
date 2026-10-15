@@ -234,12 +234,14 @@ export interface Bot {
   state: {
     id: string;
     status: BotStatus;
+    /** 本次运行是否真的在发真实订单（实时模式 ≠ 实盘） */
+    liveTrading: boolean;
     startedAt: string | null;
     finishedAt: string | null;
     error: string | null;
-    metrics: BotMetrics | null;
-  /** 权益曲线（尾部若干点），仪表盘用它画图 */
-  equityCurve: { timestamp: string; equity: number }[];
+      metrics: BotMetrics | null;
+    /** 权益曲线（尾部若干点），仪表盘用它画图 */
+    equityCurve: { timestamp: string; equity: number }[];
     /** 当前资产配置（各标的权重 + 现金） */
     allocation: BotAllocation | null;
     bars: number;

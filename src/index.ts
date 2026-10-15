@@ -55,7 +55,6 @@ async function main(): Promise<void> {
       hybridAnalysisTtlMs: config.strategy.hybridAnalysisTtlMs,
     },
   });
-  const bots = new BotManager(dataDir, config, connections, llm, strategies);
   const evolution = new EvolutionEngine(dataDir, config, (next) => {
     // 自我进化的结论作用在运行配置上（默认不写回配置文件，页面可一键 persist）
     controller.applyConfig({ strategy: next.strategy, risk: next.risk });
@@ -64,6 +63,8 @@ async function main(): Promise<void> {
     llm.setStrategy(next.llm.strategy);
     log.info("自我进化已更新运行配置（下次运行生效）");
   });
+  // 机器人也要留痕：否则"用了机器人"就等于关掉了自我进化
+  const bots = new BotManager(dataDir, config, connections, llm, strategies, evolution);
   const controller = new EngineController(config, connections, watchlist, llm, news, evolution, strategies);
 
   const app = createServer(controller, {

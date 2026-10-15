@@ -6,6 +6,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BotManager } from "../src/bots/botManager.js";
+import { EvolutionEngine } from "../src/evolution/engine.js";
+import { StrategyStore } from "../src/strategies/profileStore.js";
 import { ConnectionManager } from "../src/exchanges/connectionManager.js";
 import { LlmManager } from "../src/llm/llmManager.js";
 import { testConfig } from "./helpers.js";
@@ -222,6 +224,148 @@ test("机器人：配置持久化到 bots.json，重启后仍在", async () => {
     assert.match(loaded[0]!.modelLabels.join(" "), /对话模型.*未配置/);
     assert.equal(loaded[0]!.decisionSource, "chat");
     assert.equal(created.id, loaded[0]!.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+// ---------------- 实盘门槛与互斥 ----------------
+
+/** 模拟适配器 supportsTrading=true、requiresKeys=false，用它验证"能不能真下单"的分支 */
+function liveSetup(mode: "paper" | "live") {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-live-"));
+  const connections = new ConnectionManager(dir);
+  const conn = connections.create({ adapterId: "simulated", label: "模拟盘" });
+  const config = { ...testConfig(), execution: { ...testConfig().execution, mode } };
+  const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+  return { dir, bots, conn: conn.id };
+}
+
+test("实盘：实时模式 + 执行方式为真实下单 => 真的会发真实订单", async () => {
+  const { dir, bots, conn } = liveSetup("live");
+  try {
+    const bot = bots.create({ name: "实盘机器人", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const st = await bots.start(bot.id);
+    assert.equal(st.liveTrading, true, "条件齐备时应标记为实盘");
+    assert.equal(bots.state(bot.id).liveTrading, true);
+    // 实时机器人会起轮询器（setInterval），不关掉的话测试进程不会退出
+    bots.stop(bot.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("实盘：选了实时但执行方式仍是模拟 => 拒绝启动，而不是悄悄降级", async () => {
+  const { dir, bots, conn } = liveSetup("paper");
+  try {
+    const bot = bots.create({ name: "想实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    await assert.rejects(
+      () => bots.start(bot.id),
+      /设为实时.*执行方式仍是模拟成交.*不会启动/,
+      "静默降级是最糟的结局：用户以为钱打出去了，实际没动",
+    );
+    assert.equal(bots.state(bot.id).status, "idle", "被拒绝后不应进入运行态");
+    assert.equal(bots.state(bot.id).liveTrading, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("实盘：同一连接同时只允许一个实盘机器人", async () => {
+  const { dir, bots, conn } = liveSetup("live");
+  try {
+    // 手动把一个机器人置为运行中（模拟"已经在实盘跑着"），避免真的并发等待
+    const first = bots.create({ name: "实盘一号", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const second = bots.create({ name: "实盘二号", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", barCount: 30 });
+    bots["states"].set(first.id, { ...bots.state(first.id), status: "running", liveTrading: true });
+
+    await assert.rejects(
+      () => bots.start(second.id),
+      /同一连接已有实盘机器人「实盘一号」在运行/,
+      "并行下真单必须被挡住",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("实盘：回测机器人不受互斥限制，可与实盘机器人并行", async () => {
+  const { dir, bots, conn } = liveSetup("live");
+  try {
+    const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const backtest = bots.create({ name: "回测", connectionId: conn, symbols: ["DEMO-ETH"], mode: "backtest", barCount: 30 });
+    bots["states"].set(liveBot.id, { ...bots.state(liveBot.id), status: "running", liveTrading: true });
+    const st = await bots.start(backtest.id);
+    assert.equal(st.status, "stopped", "回测不应被实盘互斥影响");
+    assert.equal(st.liveTrading, false, "回测永远不发真实订单");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("实盘：不同连接之间互不干扰", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-live2-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const c1 = connections.create({ adapterId: "simulated", label: "盘一" });
+    const c2 = connections.create({ adapterId: "simulated", label: "盘二" });
+    const config = { ...testConfig(), execution: { ...testConfig().execution, mode: "live" } };
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir));
+
+    const a = bots.create({ name: "A", connectionId: c1.id, symbols: ["DEMO-BTC"], mode: "live", barCount: 30 });
+    const b = bots.create({ name: "B", connectionId: c2.id, symbols: ["DEMO-ETH"], mode: "live", barCount: 30 });
+    bots["states"].set(a.id, { ...bots.state(a.id), status: "running", liveTrading: true });
+    const st = await bots.start(b.id);
+    assert.equal(st.status, "stopped", "不同连接可以各自实盘");
+    assert.equal(st.liveTrading, true);
+    bots.stop(b.id); // 关掉实时轮询器
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("机器人也会给自我进化留痕（否则用了机器人等于关掉了进化）", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-bot-evo-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const config: AppConfig = {
+      ...testConfig(),
+      evolution: {
+        ...testConfig().evolution,
+        enabled: true,
+        persist: false,
+        minSamples: 5,
+        cooldownMs: 0,
+        evaluateMs: 600_000,
+        horizonBars: 1,
+        tunable: ["strategy.maxTargetWeight"],
+      },
+    };
+    let latest: AppConfig = config;
+    const evolution = new EvolutionEngine(dir, latest, (next) => {
+      latest = next;
+    });
+    // 留痕挂在资产配置器上（AI 自主配置/混合决策那条路径），逐标的模式本来就不留痕
+    const strategy = new StrategyStore(dir).create({ name: "AI 配置", selfAllocating: true, allocationInterval: 3 });
+    const bots = new BotManager(dir, config, connections, new LlmManager(dir), undefined, evolution);
+    const bot = bots.create({
+      name: "留痕机器人",
+      connectionId: conn.id,
+      symbols: ["DEMO-BTC", "DEMO-ETH"],
+      mode: "backtest",
+      barCount: 80,
+      strategyId: strategy.id,
+    });
+    await bots.start(bot.id);
+
+    const stats = evolution.stats();
+    assert.ok(stats.total > 0, `机器人运行后应留下决策记录（owner=bot:…），实际 ${stats.total} 条`);
+    const recent = evolution.view().recentDecisions;
+    assert.ok(recent.length > 0);
+    assert.ok(
+      recent.some((d) => String(d.owner).startsWith("bot:")),
+      `记录应标明来自机器人，实际 owner=${recent[0]?.owner}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

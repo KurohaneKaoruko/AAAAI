@@ -18,10 +18,11 @@ import type { Event } from "../core/eventBus.js";
 import { LivePoller, mergeBarsByTime } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig, DecisionSource } from "../configSchema.js";
-import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
+import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import type { LlmManager, LlmProfile, ModelKind } from "../llm/llmManager.js";
 import { StrategyStore, type StrategyProfile } from "../strategies/profileStore.js";
+import type { EvolutionEngine } from "../evolution/engine.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type {
@@ -72,8 +73,33 @@ export class BotManager {
         hybridAnalysisTtlMs: config.strategy.hybridAnalysisTtlMs,
       },
     }),
+    /** 决策留痕：自我进化靠它学习。不传则该机器人不留痕（对照实验/测试用）。 */
+    private readonly evolution?: EvolutionEngine,
   ) {
     this.load();
+  }
+
+  /**
+   * 决策留痕出口：把机器人的每次决策交给进化引擎结算。
+   * 以前只有单账户引擎留痕，机器人不写 —— 也就是说"用了机器人就等于关掉了自我进化"。
+   */
+  private journalFor(bot: BotConfig): PipelineJournal | undefined {
+    const evo = this.evolution;
+    if (!evo || !this.config.evolution.enabled) return undefined;
+    return {
+      record: (entry) => {
+        evo.record({
+          owner: `bot:${bot.name}`,
+          source: entry.source,
+          weights: entry.weights,
+          cashWeight: entry.cashWeight,
+          confidence: entry.confidence,
+          reason: entry.reason.slice(0, 300),
+          refPrices: entry.refPrices,
+          entryBarIndex: entry.entryBarIndex,
+        });
+      },
+    };
   }
 
   private get path(): string {
@@ -267,13 +293,24 @@ export class BotManager {
     if (!bot.symbols.length) throw new Error(`机器人「${bot.name}」没有标的`);
 
     const adapter: ExchangeAdapter = this.connections.adapter(bot.connectionId);
-    const runtime = this.buildRuntime(bot, adapter, this.lanesFor(bot));
+    // 选了「实时」就必须真的走实盘：条件不满足时直接拒绝启动，
+    // 而不是悄悄退回本地撮合 —— 用户以为钱打出去了，实际没动，是最糟的结局。
+    const liveTrading = this.resolveLiveTrading(bot, adapter);
+    if (bot.mode === "live" && !liveTrading) {
+      throw new Error(`机器人「${bot.name}」设为实时，但${this.liveBlockedReason(bot, adapter)}；不会启动`);
+    }
+    // 同一连接同时只允许一个实盘机器人，避免并行下真单
+    if (liveTrading) this.assertLiveExclusive(bot);
+
+    const runtime = this.buildRuntime(bot, adapter, this.lanesFor(bot), liveTrading);
 
     this.states.set(id, {
       ...freshState(id),
+      liveTrading,
       status: "running",
       startedAt: new Date().toISOString(),
     });
+    if (liveTrading) log.warn("机器人「%s」进入实盘：订单将真实发往交易所", bot.name);
 
     try {
       if (bot.mode === "backtest") {
@@ -354,12 +391,50 @@ export class BotManager {
     return limited;
   }
 
+  /**
+   * 这个机器人是否真的会发真实订单。
+   * 条件与单账户引擎一致：执行方式为真实下单 + 适配器支持交易 + 需要 Key 时必须已配置。
+   * 任一条不满足就是模拟成交 —— 但那种情况已在 start() 里被拒绝（实时模式不允许降级）。
+   */
+  private resolveLiveTrading(bot: BotConfig, adapter: ExchangeAdapter): boolean {
+    if (bot.mode !== "live") return false;
+    if (this.config.execution.mode !== "live") return false;
+    if (!adapter.meta.supportsTrading) return false;
+    if (adapter.meta.requiresKeys && !this.connections.hasKey(bot.connectionId)) return false;
+    return true;
+  }
+
+  /** 说清楚"为什么不能实盘"，而不是丢一句"不可用"。 */
+  private liveBlockedReason(bot: BotConfig, adapter: ExchangeAdapter): string {
+    if (this.config.execution.mode !== "live") return "「风控」页的执行方式仍是模拟成交";
+    if (!adapter.meta.supportsTrading) return `连接「${this.connections.get(bot.connectionId)?.label ?? bot.connectionId}」不支持下单`;
+    if (adapter.meta.requiresKeys && !this.connections.hasKey(bot.connectionId)) return "该连接还没有配置 API Key";
+    return "实盘条件不满足";
+  }
+
+  /** 互斥：同一连接同时只允许一个实盘机器人。 */
+  private assertLiveExclusive(bot: BotConfig): void {
+    const busy = this.bots.find(
+      (b) => b.id !== bot.id && b.connectionId === bot.connectionId && b.mode === "live" && this.state(b.id).status === "running",
+    );
+    if (busy) {
+      throw new Error(
+        `同一连接已有实盘机器人「${busy.name}」在运行；为避免并行下真单，同一连接同时只允许一个实盘机器人`,
+      );
+    }
+  }
+
   /** 该机器人的全部决策路客户端。 */
   private lanesFor(bot: BotConfig): { chat: LLMClient | null; systemone: LLMClient | null } {
     return { chat: this.clientFor(bot, "chat"), systemone: this.clientFor(bot, "systemone") };
   }
 
-  private buildRuntime(bot: BotConfig, adapter: ExchangeAdapter, lanes: { chat: LLMClient | null; systemone: LLMClient | null }): Runtime {
+  private buildRuntime(
+    bot: BotConfig,
+    adapter: ExchangeAdapter,
+    lanes: { chat: LLMClient | null; systemone: LLMClient | null },
+    liveTrading: boolean,
+  ): Runtime {
     // 策略来自策略列表（按 id 引用），风险/模型间隔仍是机器人自己的
     const strategy = this.strategyOf(bot);
     const localConfig: AppConfig = {
@@ -381,11 +456,15 @@ export class BotManager {
       llm: { ...this.config.llm, decisionInterval: bot.decisionInterval },
     };
 
+    const journal = this.journalFor(bot);
     const pipeline = buildPipeline(localConfig, {
       adapter,
-      liveTrading: false, // 机器人始终模拟成交，避免并行任务误下真单
+      // 实盘由 resolveLiveTrading() 判定并做了互斥；回测与降级情况一律本地撮合
+      liveTrading,
       llm: lanes.chat,
       soClient: lanes.systemone,
+      // 决策留痕：自我进化据此学习（与单账户引擎走的是同一份记录）
+      ...(journal ? { journal } : {}),
     });
 
     // 行情必须打进 pipeline 自己的总线：
@@ -571,6 +650,7 @@ function freshState(id: string): BotState {
     startedAt: null,
     finishedAt: null,
     error: null,
+    liveTrading: false,
     metrics: null,
     allocation: null,
     equityCurve: [],

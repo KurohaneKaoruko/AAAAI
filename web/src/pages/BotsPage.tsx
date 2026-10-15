@@ -177,7 +177,11 @@ function BotCard({
       <div className="bot-card-head">
         <span className="bot-name">{bot.name}</span>
         <span className={`badge ${st.cls}`}>{st.text}</span>
-        <span className="chip chip-sm">{bot.mode === "live" ? "实时" : "回测"}</span>
+        <span className="chip chip-sm">{bot.mode === "live" ? "持续运行" : "回测"}</span>
+        {bot.state.liveTrading && <span className="chip chip-sm chip-live">实盘下单中</span>}
+        {bot.mode === "live" && !bot.state.liveTrading && bot.state.status !== "running" && (
+          <span className="chip chip-sm chip-off">实时模式 · 未实盘</span>
+        )}
         <span className="chip chip-sm">{bot.interval}</span>
         <div className="bot-actions">
           <Button small variant="primary" onClick={onStart} disabled={running} busy={busy}>
@@ -417,6 +421,8 @@ function BotForm({
   }, [connectionId]);
 
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
+  // 实时 ≠ 实盘：是否真下单取决于「风控」页的执行方式
+  const executionMode = store.state?.config?.execution?.mode ?? "paper";
   // 混合决策需要同时用对话模型（分析端）与决策模型（决策端），其余各用自己的那一类
   const chosen = strategies.find((s) => s.id === strategyId);
   const source: DecisionSource = chosen?.decisionSource ?? decisionSource;
@@ -487,6 +493,13 @@ function BotForm({
           ]}
           onChange={(v) => setMode(v as "live" | "backtest")}
         />
+        {mode === "live" && (
+          <Notice tone={executionMode === "live" ? "warn" : "error"}>
+            {executionMode === "live"
+              ? "「风控」页的执行方式是真实下单：这个机器人启动后会真的向交易所发订单。且同一连接同时只允许一个实盘机器人。"
+              : "「风控」页的执行方式目前是模拟成交：这个机器人可以实时跑，但成交只发生在本地，不会下真实订单（启动时会被拒绝，需先把执行方式改成真实下单）。"}
+          </Notice>
+        )}
         <div className="grid-2">
           <div className="field">
             <span className="field-label">决策来源</span>
