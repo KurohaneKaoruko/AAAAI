@@ -285,6 +285,55 @@ export interface Bot {
     /** 各标的的已实现盈亏合计 */
     pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
   };
+  /** 历史运行存档（新 -> 旧，跨重启保留） */
+  history: BotRunRecord[];
+  /** 历史汇总（各次已实现盈亏求和，非复利） */
+  totals: BotHistoryTotals;
+}
+
+/**
+ * 一次运行（start -> stop）的存档。
+ * 只活在内存里的战绩重启就没，等于没有长期战绩——所以它必须落盘。
+ */
+export interface BotRunRecord {
+  id: string;
+  botId: string;
+  /** 运行时的机器人名（改名后保留当时名字） */
+  name: string;
+  mode: BotMode;
+  /** 模拟成交（true）/ 真实下单（false） */
+  paperTrading: boolean;
+  /** 这次运行是否真把订单发给了交易所 */
+  liveTrading: boolean;
+  status: "running" | "stopped" | "error";
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number;
+  bars: number;
+  /** 当时跑的标的 */
+  symbols: string[];
+  /** 当时引用的策略名 */
+  strategyName: string;
+  metrics: BotMetrics | null;
+  equityCurve: { timestamp: string; equity: number }[];
+  /** 成交流水尾部若干条（可能截断，见 tradesTruncated） */
+  trades: BotTrade[];
+  /** trades 是否只是尾部若干笔而非全部——界面必须据此说明 */
+  tradesTruncated: boolean;
+  pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
+  error: string | null;
+}
+
+/** 历史汇总：各次运行独立从初始资金开始，累计为各次已实现盈亏之和（不是复利）。 */
+export interface BotHistoryTotals {
+  runs: number;
+  wins: number;
+  losses: number;
+  cumulativeRealizedPnl: number;
+  totalFills: number;
+  bestReturn: number;
+  worstReturn: number;
+  lastRunAt: string | null;
 }
 
 /** 成交流水的一行。 */

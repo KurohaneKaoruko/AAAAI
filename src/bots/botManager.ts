@@ -34,8 +34,10 @@ import type {
   BotAllocation,
   BotConfig,
   BotHolding,
+  BotHistoryTotals,
   BotInput,
   BotMetrics,
+  BotRunRecord,
   BotState,
   BotTrade,
   BotView,
@@ -43,8 +45,18 @@ import type {
 
 const log = getLogger("bots");
 const MAX_EVENTS_PER_BOT = 120;
+
 /** 成交流水最多保留多少条（新的在前）。 */
 const MAX_TRADES_PER_BOT = 200;
+
+/** 每个机器人最多保留多少次历史运行。 */
+const MAX_RUNS_PER_BOT = 20;
+/** 历史存档里每次运行保留多少笔成交（超出只留尾部，并标注已截断）。 */
+const HISTORY_TRADES_PER_RUN = 60;
+/** 历史存档里每次运行保留多少个曲线点。 */
+const HISTORY_CURVE_POINTS = 120;
+/** 运行中多久写一次存档快照（毫秒）：崩溃时最多丢这么多。 */
+const CHECKPOINT_MS = 30_000;
 /** 每个机器人保留的权益曲线点数（内存与传输都要节制）。 */
 const CURVE_POINTS = 400;
 
@@ -67,6 +79,15 @@ export class BotManager {
   private readonly historyLog = new Map<string, { timestamp: string; close: number }[]>();
   /** 每根 K 线最多保留的历史长度 */
   private static readonly HISTORY_LIMIT = 400;
+  /**
+   * 运行存档：botId -> 历史运行（新 -> 旧）。
+   * 落盘而非只在内存里 —— 机器人的意义在于长期战绩，重启即失等于没有战绩。
+   */
+  private runHistory = new Map<string, BotRunRecord[]>();
+  /** 进行中的运行（用于收尾与定期快照） */
+  private activeRun = new Map<string, BotRunRecord>();
+  /** 快照节流：botId -> 上次写存档的时间戳 */
+  private readonly runCheckpointAt = new Map<string, number>();
 
   constructor(
     private readonly dataDir: string,
@@ -94,6 +115,7 @@ export class BotManager {
     private readonly news?: NewsService,
   ) {
     this.load();
+    this.loadHistory();
   }
 
   /**
@@ -251,6 +273,161 @@ export class BotManager {
     writeFileSync(this.path, JSON.stringify(this.bots, null, 2), { mode: 0o600 });
   }
 
+  // ---------------- 运行存档（跨重启保留） ----------------
+
+  private get historyPath(): string {
+    return join(this.dataDir, "bots-history.json");
+  }
+
+  private loadHistory(): void {
+    if (!existsSync(this.historyPath)) return;
+    try {
+      const raw = JSON.parse(readFileSync(this.historyPath, "utf8")) as Record<string, BotRunRecord[]>;
+      let staleFixed = false;
+      for (const [botId, runs] of Object.entries(raw)) {
+        if (!Array.isArray(runs)) continue;
+        for (const r of runs) {
+          // 上次进程留下的"运行中"存档：进程都没了，运行不可能还在。
+          // 不标掉就是幽灵状态 —— 界面永远显示"运行中"，用户等到天荒地老。
+          // 如实标记为中断，并保留最后的快照内容，不假装它跑完了。
+          if (r.status === "running") {
+            r.status = "error";
+            r.error = "进程被中断，未正常结束（以下为最后保存的快照）";
+            r.finishedAt = null;
+            staleFixed = true;
+          }
+        }
+        this.runHistory.set(botId, runs.slice(0, MAX_RUNS_PER_BOT));
+      }
+      if (staleFixed) this.persistHistory();
+    } catch (err) {
+      log.warn("bots-history.json 解析失败: %s", (err as Error).message);
+    }
+  }
+
+  private persistHistory(): void {
+    mkdirSync(this.dataDir, { recursive: true });
+    const obj: Record<string, BotRunRecord[]> = {};
+    for (const [botId, runs] of this.runHistory) {
+      // 机器人已删除的存档不保留：留着就是幽灵数据，界面上也没有入口能解释它
+      if (!this.bots.some((b) => b.id === botId)) continue;
+      obj[botId] = runs;
+    }
+    writeFileSync(this.historyPath, JSON.stringify(obj), { mode: 0o600 });
+  }
+
+  /** 记一次运行开始。 */
+  private beginRun(bot: BotConfig, liveTrading: boolean): void {
+    const record: BotRunRecord = {
+      id: randomUUID().slice(0, 8),
+      botId: bot.id,
+      name: bot.name,
+      mode: bot.mode,
+      paperTrading: bot.paperTrading,
+      liveTrading,
+      status: "running",
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      durationMs: 0,
+      bars: 0,
+      symbols: [...bot.symbols],
+      strategyName: this.strategyOf(bot).name,
+      metrics: null,
+      equityCurve: [],
+      trades: [],
+      tradesTruncated: false,
+      pnlBySymbol: [],
+      error: null,
+    };
+    const list = this.runHistory.get(bot.id) ?? [];
+    list.unshift(record);
+    this.runHistory.set(bot.id, list.slice(0, MAX_RUNS_PER_BOT));
+    this.activeRun.set(bot.id, record);
+    this.persistHistory();
+  }
+
+  /**
+   * 把当前运行快照写进存档。
+   * 定期调用：进程被杀/断电时，至少不会把整段运行丢掉。
+   * 有节流，否则每次轮询都落盘会把磁盘写满。
+   */
+  private checkpointRun(bot: BotConfig, force = false): void {
+    const record = this.activeRun.get(bot.id);
+    const rt = this.runtimes.get(bot.id);
+    if (!record || !rt) return;
+    // 节流时间戳单独放在内存里：记在 record 上会算错（now - 累计耗时 恒小于阈值，
+    // 结果是只写第一次，之后永远不发车）
+    const now = Date.now();
+    const last = this.runCheckpointAt.get(bot.id) ?? 0;
+    if (!force && now - last < CHECKPOINT_MS) return;
+    this.runCheckpointAt.set(bot.id, now);
+    record.durationMs = now - new Date(record.startedAt).getTime();
+    const st = this.state(bot.id);
+    record.bars = st.bars;
+    record.metrics = st.metrics;
+    record.equityCurve = st.equityCurve.slice(-HISTORY_CURVE_POINTS);
+    const total = st.metrics?.totalFills ?? 0;
+    record.trades = st.trades.slice(0, HISTORY_TRADES_PER_RUN);
+    record.tradesTruncated = total > record.trades.length;
+    record.pnlBySymbol = st.pnlBySymbol;
+    this.persistHistory();
+  }
+
+  /** 结束一次运行：状态写死并落盘（否则下次进来还挂着「运行中」的幽灵存档）。 */
+  private endRun(bot: BotConfig, status: "stopped" | "error", error: string | null = null): void {
+    const record = this.activeRun.get(bot.id);
+    if (!record) return;
+    this.activeRun.delete(bot.id);
+    this.checkpointRun(bot, true);
+    record.status = status;
+    record.error = error;
+    record.finishedAt = new Date().toISOString();
+    const st = this.state(bot.id);
+    record.durationMs = st.durationMs || Date.now() - new Date(record.startedAt).getTime();
+    this.persistHistory();
+  }
+
+  /**
+   * 历史汇总。口径：只统计**正常结束**（stopped）的运行。
+   * 中断/出错的运行不进汇总 —— 它的"收益"只是中断瞬间的中间值，
+   * 算成胜场等于把没跑完的当成跑完。被中断的运行仍在列表里可见（状态标为出错）。
+   * 各次运行独立从初始资金开始（不复利），累计盈亏是各次已实现盈亏之和。
+   */
+  private totalsOf(botId: string): BotHistoryTotals {
+    const runs = this.runHistory.get(botId) ?? [];
+    let wins = 0;
+    let losses = 0;
+    let cumulativeRealizedPnl = 0;
+    let totalFills = 0;
+    let bestReturn = Number.NEGATIVE_INFINITY;
+    let worstReturn = Number.POSITIVE_INFINITY;
+    for (const r of runs) {
+      if (r.status !== "stopped" || !r.metrics) continue;
+      const ret = r.metrics.totalReturn;
+      if (ret > 0) wins += 1;
+      else if (ret < 0) losses += 1;
+      bestReturn = Math.max(bestReturn, ret);
+      worstReturn = Math.min(worstReturn, ret);
+      cumulativeRealizedPnl += r.metrics.realizedPnl;
+      totalFills += r.metrics.totalFills;
+    }
+    const newest = runs[0];
+    return {
+      runs: runs.length,
+      wins,
+      losses,
+      cumulativeRealizedPnl: round2(cumulativeRealizedPnl),
+      totalFills,
+      bestReturn: Number.isFinite(bestReturn) ? bestReturn : 0,
+      worstReturn: Number.isFinite(worstReturn) ? worstReturn : 0,
+      lastRunAt: newest ? (newest.finishedAt ?? newest.startedAt) : null,
+    };
+  }
+
+  private historyOf(botId: string): BotRunRecord[] {
+    return this.runHistory.get(botId) ?? [];
+  }
+
   /** 更新配置引用（WebUI 改设置后调用）。 */
   useConfig(config: AppConfig): void {
     this.config = config;
@@ -367,7 +544,11 @@ export class BotManager {
     this.bots = this.bots.filter((b) => b.id !== id);
     this.states.delete(id);
     this.events.delete(id);
+    this.runHistory.delete(id);
+    this.activeRun.delete(id);
+    this.runCheckpointAt.delete(id);
     this.persist();
+    this.persistHistory();
   }
 
   // ---------------- 运行 ----------------
@@ -416,6 +597,7 @@ export class BotManager {
     } else if (bot.mode === "live") {
       log.info("机器人「%s」实时启动（模拟成交）：行情真实、撮合在本地，零资金风险", bot.name);
     }
+    this.beginRun(bot, liveTrading);
 
     try {
       if (bot.mode === "backtest") {
@@ -425,6 +607,7 @@ export class BotManager {
         if (st.status === "running") {
           this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
         }
+        this.endRun(bot, "stopped");
       } else {
         await this.runLive(bot, runtime, adapter);
         // 实时模式：runLive 只完成预热并启动轮询器就返回，机器人**仍在运行**。
@@ -439,12 +622,15 @@ export class BotManager {
         error: (err as Error).message,
         finishedAt: new Date().toISOString(),
       });
+      this.endRun(bot, "error", (err as Error).message);
       log.error("机器人「%s」异常: %s", bot.name, (err as Error).message);
       return this.state(id);
     }
   }
 
   stop(id: string): void {
+    const bot = this.get(id);
+    if (!bot) return;
     const rt = this.runtimes.get(id);
     if (rt) {
       rt.stopRequested = true;
@@ -454,6 +640,7 @@ export class BotManager {
     const st = this.state(id);
     if (st.status === "running") {
       this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
+      this.endRun(bot, "stopped");
     }
   }
 
@@ -670,6 +857,7 @@ export class BotManager {
       trades: this.tradesOf(rt),
       pnlBySymbol: this.pnlBySymbol(rt),
     });
+    this.checkpointRun(bot, true);
   }
 
   private async runLive(bot: BotConfig, rt: Runtime, adapter: ExchangeAdapter): Promise<void> {
@@ -688,6 +876,7 @@ export class BotManager {
       trades: this.tradesOf(rt),
       pnlBySymbol: this.pnlBySymbol(rt),
     });
+    this.checkpointRun(bot, true);
 
     const poller = new LivePoller(adapter, rt.bus, rt.pipeline.book, {
       symbols: bot.symbols,
@@ -709,6 +898,7 @@ export class BotManager {
           trades: this.tradesOf(rt),
           pnlBySymbol: this.pnlBySymbol(rt),
         });
+        this.checkpointRun(bot);
         // 熔断：该机器人自己的回撤越限 -> 自动停
         if (rt.pipeline.portfolio.drawdownPct >= bot.risk.maxDrawdownPct) {
           log.warn("机器人「%s」回撤越限，自动停机", bot.name);
@@ -810,7 +1000,14 @@ export class BotManager {
           : `${zh}：未配置可用实例`,
       );
     }
-    return { ...bot, state: this.state(bot.id), modelLabels: labels, ...this.slicingOf(bot) };
+    return {
+      ...bot,
+      state: this.state(bot.id),
+      modelLabels: labels,
+      history: this.historyOf(bot.id),
+      totals: this.totalsOf(bot.id),
+      ...this.slicingOf(bot),
+    };
   }
 }
 
