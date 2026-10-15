@@ -364,7 +364,14 @@ export interface AppConfig {
   evolution: EvolutionSection;
   optimize: OptimizeSection;
   cost: CostSection;
-  execution: { mode: "paper" | "live"; connectionId: string };
+  execution: {
+    mode: "paper" | "live";
+    connectionId: string;
+    slicingAlgo: "none" | "twap" | "vwap";
+    slicingSlices: number;
+    slicingSpacingBars: number;
+    slicingVolumeProfileBars: number;
+  };
   auth: { enabled: boolean; username: string; sessionTtlHours: number };
 }
 
@@ -385,7 +392,19 @@ export interface EngineState {
   prices: Record<string, number>;
   equityCurve: EquityPoint[];
   events: EngineEventLine[];
-  broker: { name: string; paper: boolean } | null;
+  broker: {
+    name: string;
+    paper: boolean;
+    /** 拆单执行状态（只在 paper 模式且已开启拆单时有值） */
+    slicing?: {
+      algo: "none" | "twap" | "vwap";
+      slices: number;
+      pending: SlicedOrderReport[];
+      completed: SlicedOrderReport[];
+      avgShortfallBps: number;
+      savedCost: number;
+    };
+  } | null;
   strategy: string | null;
   realizedPnl: number;
   /** 最近一次多模型对照结果 */
@@ -510,6 +529,24 @@ export interface OptimizeSection {
   factorWeights: Record<string, number>;
   targetVol: number;
   minPositions: number;
+  /** 协方差估计：sample = 原始样本；lw = Ledoit-Wolf 收缩 */
+  covariance: "sample" | "lw";
+}
+
+export interface SlicedOrderReport {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  filledQuantity: number;
+  slices: number;
+  slicesDone: number;
+  referencePrice: number;
+  averageFillPrice: number;
+  fee: number;
+  /** 实施短缺（bps，正 = 多付，负 = 省下） */
+  shortfallBps: number;
+  pending: boolean;
 }
 
 export interface CostSection {

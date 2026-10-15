@@ -6,7 +6,7 @@
  * 1) HRP（Hierarchical Risk Parity，分层风险平价）
  *    相关性聚类 -> 递归二分 -> 簇内按 1/σ 分配 -> 簇间按 1/簇波动分配。
  *    相比均值方差，HRP 对协方差估计误差稳健得多（样本越少越该用它），
- *    这是 L��pez de Prado 在均值方差失效场景下的标准替代。
+ *    这是 López de Prado 在均值方差失效场景下的标准替代。
  *
  * 2) 波动率目标（Vol Targeting）
  *    把组合整体波动率拉到目标值：高波动的标的自动减仓。
@@ -17,6 +17,7 @@
  */
 
 import { getLogger } from "../core/logger.js";
+import { shrinkReturns } from "./shrinkage.js";
 
 const log = getLogger("portfolio:opt");
 
@@ -26,8 +27,33 @@ export interface CovInput {
   returns: number[][];
 }
 
+/** 协方差估计方式：sample = 原始样本；lw = Ledoit-Wolf 收缩（样本少时更稳）。 */
+export type CovarianceMethod = "sample" | "lw";
+
+export interface CovOptions {
+  method?: CovarianceMethod;
+  periodsPerYear?: number;
+}
+
 /** 年化协方差矩阵（对角线是方差）。 */
-export function covarianceMatrix(symbols: string[], returns: number[][], periodsPerYear = 252): number[][] {
+export function covarianceMatrix(
+  symbols: string[],
+  returns: number[][],
+  periodsPerYear = 252,
+  options: CovOptions = {},
+): number[][] {
+  if (options.method === "lw" && returns.length > 1) {
+    // 收缩在样本协方差上做，再乘以年化因子
+    const shrunk = shrinkReturns(returns);
+    const k = periodsPerYear;
+    const cov = shrunk.covariance.map((row) => row.map((v) => v * k));
+    log.debug("协方差估计：Ledoit-Wolf 收缩（λ=%s）", shrunk.intensity.toFixed(4));
+    return cov;
+  }
+  return rawCovariance(symbols, returns, periodsPerYear);
+}
+
+function rawCovariance(symbols: string[], returns: number[][], periodsPerYear: number): number[][] {
   const n = symbols.length;
   const cov: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
   const mean = returns.map((r) => (r.length ? r.reduce((a, b) => a + b, 0) / r.length : 0));
@@ -80,12 +106,13 @@ export function riskParityWeights(
   returns: number[][],
   constraints: OptimizeConstraints,
   periodsPerYear = 252,
+  covMethod: CovarianceMethod = "sample",
 ): Record<string, number> {
   const n = symbols.length;
   if (n === 0) return {};
   if (n === 1) return { [symbols[0]!]: 1 };
 
-  const cov = covarianceMatrix(symbols, returns, periodsPerYear);
+  const cov = covarianceMatrix(symbols, returns, periodsPerYear, { method: covMethod });
   const corr = correlationMatrix(cov);
 
   // 1) 聚类距离 d = sqrt(0.5 * (1 - ρ))
@@ -182,10 +209,11 @@ export function portfolioVolatility(
   weights: Record<string, number>,
   returns: number[][],
   periodsPerYear = 252,
+  covMethod: CovarianceMethod = "sample",
 ): number {
   const symbols = Object.keys(weights).filter((s) => (weights[s] ?? 0) > 0);
   if (symbols.length === 0) return 0;
-  const cov = covarianceMatrix(symbols, returns, periodsPerYear);
+  const cov = covarianceMatrix(symbols, returns, periodsPerYear, { method: covMethod });
   let v = 0;
   symbols.forEach((s, i) => {
     symbols.forEach((t, j) => {
@@ -204,10 +232,11 @@ export function applyVolTarget(
   returns: number[][],
   options: VolTargetOptions,
   periodsPerYear = 252,
+  covMethod: CovarianceMethod = "sample",
 ): Record<string, number> {
   const symbols = Object.keys(weights).filter((s) => (weights[s] ?? 0) > 0);
   if (symbols.length === 0) return {};
-  const currentVol = portfolioVolatility(weights, returns, periodsPerYear);
+  const currentVol = portfolioVolatility(weights, returns, periodsPerYear, covMethod);
   if (!(currentVol > 0)) return applyConstraints(weights, options);
   const scale = Math.min(options.targetVol / currentVol, options.maxLeverage ?? 1);
   const scaled: Record<string, number> = {};

@@ -157,6 +157,8 @@ export interface OptimizeSection {
   targetVol: number;
   /** 风险平价最少保留几个标的 */
   minPositions: number;
+  /** 协方差估计：sample = 原始样本协方差；lw = Ledoit-Wolf 收缩（样本少时更稳） */
+  covariance: "sample" | "lw";
 }
 
 export interface CostSection {
@@ -230,6 +232,14 @@ export interface ExecutionSection {
   baseUrl: string;
   apiKey: string;
   apiSecret: string;
+  /** 拆单执行：none = 一次性成交（默认，保持原有行为）| twap = 按时间等量 | vwap = 按历史量能分配 */
+  slicingAlgo: "none" | "twap" | "vwap";
+  /** 拆成几片（1~24，1 等价于不拆） */
+  slicingSlices: number;
+  /** 相邻两片间隔几根 K 线 */
+  slicingSpacingBars: number;
+  /** VWAP 权重所用的历史成交量窗口（根） */
+  slicingVolumeProfileBars: number;
 }
 
 export interface AuthSection {
@@ -253,6 +263,12 @@ export interface AppConfig {
   optimize: OptimizeSection;
   cost: CostSection;
   execution: ExecutionSection;
+}
+
+/** 拆单算法只认这三种取值，其余一律退回 none（不拆）。 */
+function parseSlicingAlgo(value: string): "none" | "twap" | "vwap" {
+  const v = value.trim().toLowerCase();
+  return v === "twap" || v === "vwap" ? v : "none";
 }
 
 export function buildConfig(raw: Record<string, unknown>): AppConfig {
@@ -335,6 +351,7 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       factorWeights: parseFactorWeights(raw),
       targetVol: Math.min(Math.max(num(raw, ["optimize", "target_vol"], 0), 0), 3),
       minPositions: Math.max(0, Math.round(num(raw, ["optimize", "min_positions"], 1))),
+      covariance: str(raw, ["optimize", "covariance"], "lw") === "sample" ? "sample" : "lw",
     },
     cost: {
       impactK: Math.min(Math.max(num(raw, ["cost", "impact_k"], 0), 0), 2),
@@ -356,6 +373,13 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       baseUrl: str(raw, ["execution", "base_url"], ""),
       apiKey: "",
       apiSecret: "",
+      slicingAlgo: parseSlicingAlgo(str(raw, ["execution", "slicing_algo"], "none")),
+      slicingSlices: Math.min(Math.max(Math.round(num(raw, ["execution", "slicing_slices"], 4)), 1), 24),
+      slicingSpacingBars: Math.min(Math.max(Math.round(num(raw, ["execution", "slicing_spacing_bars"], 1)), 1), 24),
+      slicingVolumeProfileBars: Math.min(
+        Math.max(Math.round(num(raw, ["execution", "slicing_volume_profile_bars"], 20)), 1),
+        200,
+      ),
     },
   };
 }
@@ -427,6 +451,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       factor_weights: config.optimize.factorWeights,
       target_vol: config.optimize.targetVol,
       min_positions: config.optimize.minPositions,
+      covariance: config.optimize.covariance,
     },
     cost: {
       impact_k: config.cost.impactK,
@@ -444,6 +469,10 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
     },
     execution: {
       mode: config.execution.mode,
+      slicing_algo: config.execution.slicingAlgo,
+      slicing_slices: config.execution.slicingSlices,
+      slicing_spacing_bars: config.execution.slicingSpacingBars,
+      slicing_volume_profile_bars: config.execution.slicingVolumeProfileBars,
       connection_id: config.execution.connectionId,
     },
   };

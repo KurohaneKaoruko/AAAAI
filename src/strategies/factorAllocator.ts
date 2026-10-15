@@ -27,6 +27,8 @@ export interface OptimizeSettings {
   factorWeights: Record<string, number>;
   targetVol: number;
   minPositions: number;
+  /** 协方差估计方式（HRP / 波动率目标用） */
+  covariance: "sample" | "lw";
 }
 
 export interface ScoreAllocationOptions {
@@ -74,11 +76,17 @@ export function allocateByFactors(
   if (options.optimize.method === "risk_parity" && Object.keys(weights).length > 1) {
     const symbols = Object.keys(weights);
     const returns = symbols.map((s) => returnsOf(inputs.find((i) => i.symbol === s)!.bars));
-    const rp = riskParityWeights(symbols, returns, {
-      maxPositionWeight: options.limits.maxPositionWeight,
-      grossCap: options.grossCap,
-      minPositions: options.optimize.minPositions,
-    });
+    const rp = riskParityWeights(
+      symbols,
+      returns,
+      {
+        maxPositionWeight: options.limits.maxPositionWeight,
+        grossCap: options.grossCap,
+        minPositions: options.optimize.minPositions,
+      },
+      252,
+      options.optimize.covariance,
+    );
     if (Object.keys(rp).length > 0) weights = rp;
   }
 
@@ -128,14 +136,20 @@ function maybeVolTarget(
     const input = inputs.find((i) => i.symbol === s);
     return input ? returnsOf(input.bars) : [];
   });
-  const current = portfolioVolatility(weights, returns);
-  const adjusted = applyVolTarget(weights, returns, {
-    targetVol,
-    maxPositionWeight: options.limits.maxPositionWeight,
-    grossCap: options.grossCap,
-    minPositions: options.optimize.minPositions,
-  });
-  const after = portfolioVolatility(adjusted, returns);
+  const current = portfolioVolatility(weights, returns, 252, options.optimize.covariance);
+  const adjusted = applyVolTarget(
+    weights,
+    returns,
+    {
+      targetVol,
+      maxPositionWeight: options.limits.maxPositionWeight,
+      grossCap: options.grossCap,
+      minPositions: options.optimize.minPositions,
+    },
+    252,
+    options.optimize.covariance,
+  );
+  const after = portfolioVolatility(adjusted, returns, 252, options.optimize.covariance);
   log.debug("波动率目标：%.2f%% -> %.2f%%（目标 %.2f%%）", current * 100, after * 100, targetVol * 100);
   return adjusted;
 }

@@ -139,6 +139,7 @@ export function buildPipeline(
     factorWeights: config.optimize.factorWeights,
     targetVol: config.optimize.targetVol,
     minPositions: config.optimize.minPositions,
+    covariance: config.optimize.covariance,
   };
   const optConstraints: OptimizeConstraints = {
     maxPositionWeight: config.risk.maxPositionWeight,
@@ -244,6 +245,15 @@ export function buildPipeline(
       : new PaperBroker(bus, book, {
           feeRate: config.risk.feeRate,
           slippageBps: config.risk.slippageBps,
+          impactK: config.cost.impactK,
+          maxSlippageBps: config.cost.maxSlippageBps,
+          interval: config.market.interval,
+          slicing: {
+            algo: config.execution.slicingAlgo,
+            slices: config.execution.slicingSlices,
+            sliceSpacingBars: config.execution.slicingSpacingBars,
+            volumeProfileBars: config.execution.slicingVolumeProfileBars,
+          },
         });
 
   // 执行层接入总线：订单意图 -> 券商 -> 成交广播
