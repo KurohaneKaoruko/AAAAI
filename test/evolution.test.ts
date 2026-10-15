@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EvolutionEngine } from "../src/evolution/engine.js";
@@ -30,7 +30,8 @@ function enabledConfig(overrides: Partial<AppConfig["evolution"]> = {}): AppConf
       evaluateMs: 60_000,
       maxChangeRatio: 0.2,
       horizonBars: 1,
-      persist: false,
+      // 默认 true：落盘相关用例需要它；「不落盘」用例会显式传 false
+      persist: true,
       tunable: ["strategy.maxTargetWeight", "strategy.fastWindow", "risk.minTradeValue"],
       ...overrides,
     },
@@ -245,6 +246,52 @@ test("进化：改配置后引擎用的是新值（回归：曾只替换对象�
     assert.equal(evo.evolution.enabled, false);
     assert.equal(evo.evolution.minSamples, 20, "未提交的字段应保持原值，而不是被 undefined 覆盖");
     assert.equal(evo.evolution.maxChangeRatio, config.evolution.maxChangeRatio);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("进化：persist=false 真的不落盘（不是只影响展示）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-evo-nopersist-"));
+  try {
+    const base = testConfig();
+    const config: AppConfig = {
+      ...base,
+      evolution: {
+        ...base.evolution,
+        enabled: true,
+        persist: false,
+        minSamples: 5,
+        cooldownMs: 0,
+        evaluateMs: 60_000,
+        horizonBars: 1,
+        tunable: ["strategy.maxTargetWeight"],
+      },
+    };
+    const { evo } = engine(dir, config);
+    evo.record({ owner: "engine", source: "rules", weights: { A: 0.5 }, cashWeight: 0.5, confidence: 0.5, reason: "r", refPrices: { A: 10 } });
+    evo.record({ owner: "engine", source: "rules", weights: { A: 0.4 }, cashWeight: 0.6, confidence: 0.5, reason: "r", refPrices: { A: 10 } });
+    // 内存里确实记了
+    assert.ok(evo.stats().total >= 2, "内存中应记录了决策");
+    // 但磁盘上不能有任何文件
+    assert.equal(
+      existsSync(join(dir, "evolution.json")),
+      false,
+      "persist=false 时不得写 evolution.json（这个开关曾经完全不挡写入）",
+    );
+
+    // 对照：persist=true 时必须落盘，否则上面那条断言就没意义
+    const dir2 = mkdtempSync(join(tmpdir(), "aaaaai-evo-persist-"));
+    try {
+      const on: AppConfig = { ...config, evolution: { ...config.evolution, persist: true } };
+      const { evo: evo2 } = engine(dir2, on);
+      evo2.record({ owner: "engine", source: "rules", weights: { A: 0.5 }, cashWeight: 0.5, confidence: 0.5, reason: "r", refPrices: { A: 10 } });
+      assert.ok(existsSync(join(dir2, "evolution.json")), "persist=true 时应落盘");
+      const saved = JSON.parse(readFileSync(join(dir2, "evolution.json"), "utf8")) as { records: unknown[] };
+      assert.ok(Array.isArray(saved.records) && saved.records.length >= 1);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

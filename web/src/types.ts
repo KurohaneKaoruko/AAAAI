@@ -318,7 +318,6 @@ export interface AppConfig {
   server: { host: string; port: number };
   market: { symbols: string[]; interval: string; barCount: number; pollMs: number };
   llm: {
-    enabled: boolean;
     provider: string;
     baseUrl: string;
     apiKeyEnv: string;

@@ -72,7 +72,12 @@ export class EvolutionEngine {
     }
   }
 
+  /**
+   * 落盘。evolution.persist = false 时只留内存、不写文件 ——
+   * 这个开关必须真的挡住写入，否则「关闭持久化」就是一句空话。
+   */
   private persist(): void {
+    if (!this.config.evolution.persist) return;
     mkdirSync(this.dataDir, { recursive: true });
     const data: Persisted = {
       seq: this.seq,

@@ -18,10 +18,11 @@ server:
 
 # 可选鉴权：留空 = 不启用。启用后可用 AAAAI_AUTH_USERNAME/PASSWORD 登录面板，
 # 或用 AAAAI_AUTH_TOKEN 走 Authorization: Bearer <token>
-auth:
-  enabled: false
-  username: ""               # 默认登录用户名
-  session_ttl_hours: 12      # 会话有效期
+# 鉴权不在这里配置：密码不该写进配置文件，因此整段只由环境变量决定 ——
+#   AAAAI_AUTH_USERNAME + AAAAI_AUTH_PASSWORD（两者都设才生效）或 AAAAI_AUTH_TOKEN
+#   AAAAI_AUTH_SESSION_HOURS（默认 12）
+# 面板上的「鉴权」显示的是实际生效状态（由环境变量派生，只读），
+# 不再是配置文件里一个改了也没用的开关。
 
 market:
   symbols: []                # 留空 = 使用「自选标的」页的列表
@@ -30,8 +31,9 @@ market:
   poll_ms: 15000             # 实时模式轮询间隔（毫秒）
 
 llm:
-  # 已由 strategy.decision_source 取代，此项仅用于兼容旧配置迁移
-  enabled: false
+  # 注意：这里**没有** enabled 开关。是否使用模型只看 strategy.decision_source
+  #   rules = 纯规则（不请求任何模型）| chat | systemone | hybrid
+  # 旧配置里的 llm.enabled 只在完全没有 decision_source 时被读一次用于迁移，之后不再有任何作用。
   provider: openai-compatible
   base_url: https://api.openai.com/v1
   api_key_env: OPENAI_API_KEY

@@ -82,7 +82,9 @@ test("config: buildConfig 默认值与脱敏", () => {
   assert.equal(config.market.interval, "1m");
   assert.equal(config.execution.mode, "paper");
   assert.equal(config.server.port, 8787);
-  assert.equal(config.llm.enabled, false);
+  // llm.enabled 已删除（从未被读取）：是否用模型只看 strategy.decision_source
+  assert.equal("enabled" in config.llm, false);
+  assert.equal(config.strategy.decisionSource, "rules");
   assert.equal(config.llm.apiKey, "");
   assert.equal(config.risk.initialCash, 100000);
 });

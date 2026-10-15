@@ -188,12 +188,20 @@ export class EngineController {
 
 
   /** 新闻摘要获取器：未启用或没配源时返回空，决策链路照常。 */
-  private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
-    const svc = this.news;
-    if (!svc || !this.config.news.enabled) return async () => [];
+  /**
+ * 往分析 prompt 里注入新闻摘要。
+ *
+ * `includeInAnalysis=false` 表示新闻不进 prompt（模型自己用工具查新闻的能力保留，
+ * 因为那是模型主动发起的动作，和"被动塞给它"是两回事）。
+ * 三个开关都在**调用时**判断，改配置后无需重启引擎即可生效。
+ */
+private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
     return async (symbols: string[]) => {
+      const svc = this.news;
+      const cfg = this.config.news;
+      if (!svc || !cfg.enabled || !cfg.includeInAnalysis) return [];
       const items = await svc.forSymbols(symbols).catch(() => []);
-      return toDigest(items, Math.max(1, Math.floor(this.config.news.maxPerSymbol / 2)));
+      return toDigest(items, Math.max(1, Math.floor(cfg.maxPerSymbol / 2)));
     };
   }
 
@@ -486,11 +494,14 @@ export class EngineController {
     this.historyLog.clear();
     this.barsAdvanced = 0;
 
+    // 决策来源就是唯一的模型开关：rules 时完全不给模型客户端
+    //（orchestrator 对 null 客户端有降级，这里从根上不让它有机会发请求）。
+    const wantsModels = this.config.strategy.decisionSource !== "rules";
     this.pipeline = buildPipeline(this.config, {
       adapter,
       liveTrading,
-      llm: this.llm.clientForKind("chat"),
-      soClient: this.llm.clientForKind("systemone"),
+      llm: wantsModels ? this.llm.clientForKind("chat") : null,
+      soClient: wantsModels ? this.llm.clientForKind("systemone") : null,
       // 新闻摘要：只进 prompt，不直接触发交易
       news: this.newsFetcher(),
       // 决策留痕：自我进化据此学习
@@ -682,9 +693,11 @@ export class EngineController {
 
   /** 运行中更新参数（下次流水线生效）。 */
   applyConfig(patch: Partial<AppConfig>): AppConfig {
+    const { auth: _ignoredAuth, ...rest } = patch;
     this.config = {
       ...this.config,
-      ...patch,
+      ...rest,
+      auth: this.config.auth,
       risk: { ...this.config.risk, ...(patch.risk ?? {}) },
       strategy: { ...this.config.strategy, ...(patch.strategy ?? {}) },
       llm: { ...this.config.llm, ...(patch.llm ?? {}) },

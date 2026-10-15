@@ -291,7 +291,7 @@ export class BotManager {
       ...this.config,
       strategy: { ...this.config.strategy, ...bot.strategy },
       risk: { ...this.config.risk, ...bot.risk },
-      llm: { ...this.config.llm, decisionInterval: bot.decisionInterval, enabled: bot.decisionSource !== "rules" },
+      llm: { ...this.config.llm, decisionInterval: bot.decisionInterval },
     };
     localConfig.strategy.decisionSource = bot.decisionSource;
     localConfig.strategy.hybridInfluence = bot.strategy.hybridInfluence;
