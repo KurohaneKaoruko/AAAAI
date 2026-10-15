@@ -12,7 +12,7 @@ const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random"
 
 const DECISION_SOURCES = new Set<DecisionSource>(["rules", "chat", "systemone", "hybrid"]);
 
-function safeDecisionSource(value: string): DecisionSource {
+export function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
 }
 
@@ -116,7 +116,7 @@ export interface LLMSection {
 
 /**
  * 智能体决策来源：
- * - rules      纯规则：双均线动量本地计算
+ * - rules      量化交易：双均线动量本地计算，不调用任何模型
  * - chat       对话模型：大模型直接给每个标的的目标仓位
  * - systemone  决策模型：System One 逐标的定档位，档位概率换算仓位
  * - hybrid     混合决策：大模型分析行情 -> 决策模型据此定仓位（职责分离）

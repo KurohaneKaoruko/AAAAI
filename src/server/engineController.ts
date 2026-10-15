@@ -23,6 +23,7 @@ import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
 import { PaperBroker, type SlicedOrderReport } from "../execution/paperBroker.js";
+import { StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
 import { defaultToolBox, type ToolBox, type ToolContext } from "../llm/tools.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
@@ -102,6 +103,8 @@ export interface StartOptions {
   connectionId?: string;
   bars?: number;
   interval?: string;
+  /** 用哪条策略（策略列表 id）；缺省用默认策略 */
+  strategyId?: string;
 }
 
 const MAX_EVENT_LINES = 400;
@@ -132,13 +135,71 @@ export class EngineController {
     private readonly connections: ConnectionManager,
     private readonly watchlist: WatchlistManager,
     private readonly llm: LlmManager,
-    private readonly news?: NewsService,
-    private readonly evolution?: EvolutionEngine,
+    private readonly news: NewsService | undefined,
+    private readonly evolution: EvolutionEngine | undefined,
+    // 没显式传入时按当前 config.strategy 现场建一份（单测/一次性实验用，不落盘）
+    private readonly strategies: StrategyStore = new StrategyStore(".", {
+      memoryOnly: true,
+      seed: { ...config.strategy, name: "默认策略" },
+    }),
   ) {
     this.llm.setStrategy(config.llm.strategy);
-    const modelKind = modelKindOf(config.strategy.decisionSource);
-    if (modelKind) this.llm.setActiveKind(modelKind);
+    // 先把默认策略并进 config（此时 this.state 还不存在），再初始化状态
+    this.config = { ...this.config, strategy: { ...this.config.strategy, ...strategyFields(this.strategies.default()) } };
     this.state = this.freshState();
+  }
+
+  // ---------------- 策略列表 ----------------
+
+  /** 策略列表。 */
+  strategyList(): StrategyProfile[] {
+    return this.strategies.list();
+  }
+
+  /** 当前默认策略 id。 */
+  defaultStrategyId(): string {
+    return this.strategies.defaultIdValue();
+  }
+
+  createStrategy(input: StrategyProfileInput): StrategyProfile {
+    const created = this.strategies.create(input);
+    this.applyActiveStrategy();
+    return created;
+  }
+
+  updateStrategy(id: string, patch: Partial<StrategyProfileInput>): StrategyProfile {
+    const updated = this.strategies.update(id, patch);
+    this.applyActiveStrategy();
+    return updated;
+  }
+
+  duplicateStrategy(id: string): StrategyProfile {
+    const copy = this.strategies.duplicate(id);
+    this.applyActiveStrategy();
+    return copy;
+  }
+
+  removeStrategy(id: string): void {
+    this.strategies.remove(id);
+    this.applyActiveStrategy();
+  }
+
+  setDefaultStrategy(id: string): StrategyProfile {
+    const p = this.strategies.setDefault(id);
+    this.applyActiveStrategy();
+    return p;
+  }
+
+  /**
+   * 把默认策略同步进 config.strategy：单次运行/对照实验都读它，
+   * 这样面板改的是同一条数据，不会出现「策略里改了，运行用的却是另一份」。
+   */
+  private applyActiveStrategy(): void {
+    const profile = this.strategies.default();
+    this.config = { ...this.config, strategy: { ...this.config.strategy, ...strategyFields(profile) } };
+    this.state.config = redactConfig(this.config);
+    const modelKind = modelKindOf(profile.decisionSource);
+    if (modelKind) this.llm.setActiveKind(modelKind);
   }
 
   // ---------------- 新闻 / 进化 ----------------
@@ -494,10 +555,14 @@ private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
     this.historyLog.clear();
     this.barsAdvanced = 0;
 
+    // 本次运行用哪条策略：指定 strategyId 就用它，否则用默认策略
+    const strategy = this.strategies.resolve(options.strategyId);
+    const runConfig: AppConfig = { ...this.config, strategy: { ...this.config.strategy, ...strategyFields(strategy) } };
+
     // 决策来源就是唯一的模型开关：rules 时完全不给模型客户端
     //（orchestrator 对 null 客户端有降级，这里从根上不让它有机会发请求）。
-    const wantsModels = this.config.strategy.decisionSource !== "rules";
-    this.pipeline = buildPipeline(this.config, {
+    const wantsModels = strategy.decisionSource !== "rules";
+    this.pipeline = buildPipeline(runConfig, {
       adapter,
       liveTrading,
       llm: wantsModels ? this.llm.clientForKind("chat") : null,
@@ -756,6 +821,22 @@ private newsFetcher(): (symbols: string[]) => Promise<NewsDigest[]> {
       },
     };
   }
+}
+
+/** 策略实体 -> config.strategy 需要的字段（只挑策略侧，不动其它段）。 */
+function strategyFields(p: StrategyProfile) {
+  return {
+    decisionSource: p.decisionSource,
+    fastWindow: p.fastWindow,
+    slowWindow: p.slowWindow,
+    maxTargetWeight: p.maxTargetWeight,
+    selfAllocating: p.selfAllocating,
+    maxPositions: p.maxPositions,
+    maxGrossExposure: p.maxGrossExposure,
+    allocationInterval: p.allocationInterval,
+    hybridInfluence: p.hybridInfluence,
+    hybridAnalysisTtlMs: p.hybridAnalysisTtlMs,
+  };
 }
 
 /** 事件 -> 一行摘要。 */

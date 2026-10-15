@@ -207,6 +207,8 @@ export interface Bot {
   barCount: number;
   pollMs: number;
   decisionSource: DecisionSource;
+  /** 引用的策略 id（策略列表） */
+  strategyId?: string;
   modelProfileIds: string[];
   decisionInterval: number;
   strategy: {
@@ -244,6 +246,24 @@ export interface Bot {
   };
 }
 
+/** 策略列表里的一条（服务端 src/strategies/profileStore.ts 的实体）。 */
+export interface StrategyProfile {
+  id: string;
+  name: string;
+  note?: string;
+  decisionSource: DecisionSource;
+  fastWindow: number;
+  slowWindow: number;
+  maxTargetWeight: number;
+  selfAllocating: boolean;
+  maxPositions: number;
+  maxGrossExposure: number;
+  allocationInterval: number;
+  hybridInfluence: number;
+  hybridAnalysisTtlMs: number;
+  createdAt: string;
+}
+
 export interface BotInput {
   name: string;
   connectionId: string;
@@ -253,6 +273,8 @@ export interface BotInput {
   barCount?: number;
   pollMs?: number;
   decisionSource?: DecisionSource;
+  /** 引用策略列表里的一条 */
+  strategyId?: string;
   modelProfileIds?: string[];
   decisionInterval?: number;
   strategy?: {

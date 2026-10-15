@@ -41,8 +41,8 @@ test("机器人：可创建多个，各自保存独立配置", () => {
     assert.equal(bots.get(b.id)!.name, "A股改");
     assert.equal(bots.get(b.id)!.strategy.slowWindow, 9);
     assert.equal(bots.get(b.id)!.risk.initialCash, 5000);
-    // 纯规则机器人标注清楚
-    assert.deepEqual(bots.list()[0]!.modelLabels, ["双均线动量（纯规则）"]);
+    // 量化交易（纯规则）机器人标注清楚
+    assert.deepEqual(bots.list()[0]!.modelLabels, ["双均线动量（量化交易）"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

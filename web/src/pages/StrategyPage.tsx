@@ -10,7 +10,8 @@ import { EvolutionPanel } from "../components/EvolutionPanel";
 import { OptimizePanel } from "../components/OptimizePanel";
 import { ValidationPanel } from "../components/ValidationPanel";
 import { api } from "../api";
-import type { DecisionSource, PoolCounts } from "../types";
+import type { DecisionSource, PoolCounts, StrategyProfile } from "../types";
+import { StrategyProfiles, describe } from "../components/StrategyProfiles";
 import { pct } from "../lib/format";
 
 interface AgentNode {
@@ -36,7 +37,7 @@ function sourceHint(form: { decisionSource: DecisionSource; hybridInfluence?: nu
   const tail = "模型配置在「模型管理」页；想比较谁更赚钱，去「模型对照」页跑对照实验。";
   switch (form.decisionSource) {
     case "rules":
-      return "当前：纯规则。本地计算，不调用任何模型。" + tail;
+      return "当前：量化交易。本地计算指标与仓位，不调用任何模型。" + tail;
     case "chat":
       return "当前：对话模型。大模型看行情后直接给目标仓位，失败自动回退双均线动量。" + tail;
     case "systemone":
@@ -53,9 +54,43 @@ function visibleAgents(selfAllocating: boolean): AgentNode[] {
 
 export function StrategyPage({ store }: { store: AppStore }) {
   const config = store.state?.config;
-  const [form, setForm] = useState(config?.strategy);
+  const [form, setForm] = useState<StrategyForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [pools, setPools] = useState<PoolCounts | null>(null);
+  // 策略列表与正在编辑的那条
+  const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
+  const [defaultId, setDefaultId] = useState<string>("");
+  const [editingId, setEditingId] = useState<string>("");
+
+  const loadStrategies = async () => {
+    try {
+      const d = await api.strategies();
+      setStrategies(d.strategies);
+      setDefaultId(d.defaultId);
+      setEditingId((cur) => (d.strategies.some((s) => s.id === cur) ? cur : d.defaultId));
+    } catch {
+      /* 列表拉不到时退回单策略编辑 */
+    }
+  };
+  useEffect(() => {
+    void loadStrategies();
+  }, []);
+
+  /** 正在编辑的策略（缺省 = 默认策略，也就是单次运行用的那条）。 */
+  const editing = strategies.find((s) => s.id === editingId) ?? strategies.find((s) => s.id === defaultId) ?? null;
+  const editingDefault = editing !== null && editing.id === defaultId;
+
+  /** 改当前策略：先更新列表里的实体，默认策略再同步到 config.strategy（单次运行读它）。 */
+  const patchStrategy = (patch: Partial<StrategyProfile>) => {
+    if (!editing) return;
+    void api
+      .updateStrategy(editing.id, patch)
+      .then(() => loadStrategies())
+      .then(() => {
+        if (editingDefault) void store.reloadState();
+      })
+      .catch(() => undefined);
+  };
 
   // 决策来源的实例数需要单独拉取
   const loadPools = async () => {
@@ -68,39 +103,56 @@ export function StrategyPage({ store }: { store: AppStore }) {
   };
   useEffect(() => {
     void loadPools();
-  }, [config?.strategy.decisionSource]);
+  }, [editing?.decisionSource]);
 
+  // 编辑哪条策略，表单就跟着切成哪条
   useEffect(() => {
-    if (config?.strategy) setForm(config.strategy);
-  }, [config?.strategy]);
+    if (editing) setForm(toForm(editing));
+  }, [editing?.id]);
 
   if (!form) return <div className="loading">加载中…</div>;
   const running = store.state?.status === "running";
 
+  /** 保存当前策略：改的是策略实体（全体引用它的机器人跟着变）。 */
   const save = async () => {
+    if (!editing) return;
     setSaving(true);
-    await store.patchConfig({ strategy: form });
+    try {
+      await api.updateStrategy(editing.id, fromForm(form));
+      await loadStrategies();
+      if (editingDefault) await store.reloadState();
+    } catch {
+      /* 由列表刷新兜底 */
+    }
     setSaving(false);
   };
 
-  // 是否真的会用模型：唯一取决于决策来源（rules = 纯规则，不请求任何模型）
-  const llmOn = (config?.strategy.decisionSource ?? "rules") !== "rules";
+  // 是否真的会用模型：唯一取决于决策来源（rules = 量化交易，不请求任何模型）
+  const llmOn = (form.decisionSource ?? "rules") !== "rules";
 
-  /** 决策方式变更：立即落库；混合决策只改影响力时也要落库。 */
+  /** 决策方式变更：立即保存到当前策略。 */
   const setSource = (next: { source: DecisionSource; influence: number }) => {
-    if (!config) return;
-    void store.patchConfig({
-      strategy: {
-        ...config.strategy,
-        decisionSource: next.source,
-        hybridInfluence: next.influence,
-      },
-    });
+    setForm((f) => (f ? { ...f, decisionSource: next.source, hybridInfluence: next.influence } : f));
+    patchStrategy({ decisionSource: next.source, hybridInfluence: next.influence });
     void loadPools();
   };
 
   return (
     <div className="page page-strategy">
+      <Panel title="策略列表" subtitle="策略是独立实体，机器人引用同一条即可复用">
+        {strategies.length > 0 && (
+          <div className="grid-2" style={{ marginBottom: 10 }}>
+            <SelectField
+              label="正在编辑"
+              value={editing?.id ?? ""}
+              options={strategies.map((s) => ({ value: s.id, label: describe(s) }))}
+              onChange={setEditingId}
+            />
+          </div>
+        )}
+        <StrategyProfiles store={store} />
+      </Panel>
+
       <Panel title="智能体决策">
         <DecisionSourceSwitch
           value={form.decisionSource}
@@ -206,7 +258,7 @@ export function StrategyPage({ store }: { store: AppStore }) {
               <p className="dim">
                 当前决策来源：
                 {config?.strategy.decisionSource === "rules"
-                  ? "纯规则（按横截面动量选资产，不调用模型）"
+                  ? "量化交易（按横截面动量选资产，不调用模型）"
                   : config?.strategy.decisionSource === "chat"
                     ? "对话模型（OpenAI 兼容）"
                     : "System One 决策模型（每标的各问一道档位题）"}
@@ -268,7 +320,7 @@ export function StrategyPage({ store }: { store: AppStore }) {
             <p>
               每隔 {config?.llm.decisionInterval} 根 K 线把最近 20 根 K 线交给 LLM，
               让它输出 0~1 的目标仓位；LLM 不可用或输出异常时自动回退动量基线，流水线不中断。
-              {llmOn ? "" : "（当前为纯规则模式，不会请求任何模型）"}
+              {llmOn ? "" : "（当前为量化交易模式，不会请求任何模型）"}
             </p>
           )}
         </div>
@@ -312,4 +364,52 @@ export function StrategyPage({ store }: { store: AppStore }) {
       </Panel>
     </div>
   );
+}
+/** 表单：只覆盖策略侧字段（其它策略参数在列表里建/复制时带上）。 */
+interface StrategyForm {
+  name: string;
+  decisionSource: DecisionSource;
+  fastWindow: number;
+  slowWindow: number;
+  maxTargetWeight: number;
+  selfAllocating: boolean;
+  maxPositions: number;
+  maxGrossExposure: number;
+  allocationInterval: number;
+  hybridInfluence: number;
+  hybridAnalysisTtlMs: number;
+}
+
+/** 策略实体 -> 表单。 */
+function toForm(s: StrategyProfile): StrategyForm {
+  return {
+    decisionSource: s.decisionSource,
+    name: s.name,
+    fastWindow: s.fastWindow,
+    slowWindow: s.slowWindow,
+    maxTargetWeight: s.maxTargetWeight,
+    selfAllocating: s.selfAllocating,
+    maxPositions: s.maxPositions,
+    maxGrossExposure: s.maxGrossExposure,
+    allocationInterval: s.allocationInterval,
+    hybridInfluence: s.hybridInfluence,
+    hybridAnalysisTtlMs: s.hybridAnalysisTtlMs,
+  };
+}
+
+/** 表单 -> 策略更新（只回写策略侧字段）。 */
+function fromForm(form: StrategyForm): Partial<StrategyProfile> {
+  return {
+    name: form.name,
+    decisionSource: form.decisionSource,
+    fastWindow: form.fastWindow,
+    slowWindow: form.slowWindow,
+    maxTargetWeight: form.maxTargetWeight,
+    selfAllocating: form.selfAllocating,
+    maxPositions: form.maxPositions,
+    maxGrossExposure: form.maxGrossExposure,
+    allocationInterval: form.allocationInterval,
+    hybridInfluence: form.hybridInfluence,
+    hybridAnalysisTtlMs: form.hybridAnalysisTtlMs,
+  };
 }
