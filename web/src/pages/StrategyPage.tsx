@@ -83,7 +83,8 @@ export function StrategyPage({ store }: { store: AppStore }) {
     setSaving(false);
   };
 
-  const llmOn = config?.llm?.enabled;
+  // 是否真的会用模型：唯一取决于决策来源（rules = 纯规则，不请求任何模型）
+  const llmOn = (config?.strategy.decisionSource ?? "rules") !== "rules";
 
   /** 决策方式变更：立即落库；混合决策只改影响力时也要落库。 */
   const setSource = (next: { source: DecisionSource; influence: number }) => {
@@ -94,7 +95,6 @@ export function StrategyPage({ store }: { store: AppStore }) {
         decisionSource: next.source,
         hybridInfluence: next.influence,
       },
-      llm: { ...config.llm, enabled: next.source !== "rules" },
     });
     void loadPools();
   };
@@ -268,7 +268,7 @@ export function StrategyPage({ store }: { store: AppStore }) {
             <p>
               每隔 {config?.llm.decisionInterval} 根 K 线把最近 20 根 K 线交给 LLM，
               让它输出 0~1 的目标仓位；LLM 不可用或输出异常时自动回退动量基线，流水线不中断。
-              {llmOn ? "" : "（当前 LLM 未启用，将按纯动量运行）"}
+              {llmOn ? "" : "（当前为纯规则模式，不会请求任何模型）"}
             </p>
           )}
         </div>

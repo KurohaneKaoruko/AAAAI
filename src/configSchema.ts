@@ -5,6 +5,7 @@
 
 import { bool, dig, fromEnv, num, str } from "./config.js";
 import { readEnv } from "./env.js";
+import { loadAuthConfig } from "./auth/auth.js";
 import type { BalanceStrategy } from "./llm/llmManager.js";
 
 const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random", "latency"]);
@@ -91,7 +92,6 @@ export interface MarketSection {
 }
 
 export interface LLMSection {
-  enabled: boolean;
   provider: string;
   baseUrl: string;
   /** 环境变量名（默认 OPENAI_API_KEY） */
@@ -189,7 +189,7 @@ export interface NewsProviderConfig {
 }
 
 export interface NewsSection {
-  /** 总开关：关闭时决策链路完全不碰新闻 */
+  /** 新闻总开关：关掉后既不抓取也不注入 */
   enabled: boolean;
   providers: NewsProviderConfig[];
   /** 只要这个小时数内的新闻 */
@@ -227,11 +227,8 @@ export interface EvolutionSection {
 export interface ExecutionSection {
   /** paper = 本地模拟成交 | live = 走交易所真实下单 */
   mode: "paper" | "live";
-  /** 行情/交易使用的连接 ID */
+  /** 行情/交易使用的连接 ID（下单凭证存在连接里，不在配置文件里） */
   connectionId: string;
-  baseUrl: string;
-  apiKey: string;
-  apiSecret: string;
   /** 拆单执行：none = 一次性成交（默认，保持原有行为）| twap = 按时间等量 | vwap = 按历史量能分配 */
   slicingAlgo: "none" | "twap" | "vwap";
   /** 拆成几片（1~24，1 等价于不拆） */
@@ -271,8 +268,13 @@ function parseSlicingAlgo(value: string): "none" | "twap" | "vwap" {
   return v === "twap" || v === "vwap" ? v : "none";
 }
 
-export function buildConfig(raw: Record<string, unknown>): AppConfig {
+/**
+ * 构造完整配置。
+ * @param env 仅用于测试注入环境变量（鉴权状态完全由环境变量决定）
+ */
+export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): AppConfig {
   const symbols = dig(raw, "market", "symbols", []);
+  const authEnv = loadAuthConfig(env);
   const llmApiKeyEnv = str(raw, ["llm", "api_key_env"], "OPENAI_API_KEY");
 
   return {
@@ -280,10 +282,14 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       name: str(raw, ["app", "name"], "AAAAI"),
       logLevel: str(raw, ["app", "log_level"], "info"),
     },
+    // 鉴权只由环境变量决定（密码不该进配置文件）。
+    // 这里是从 AuthService 派生的**只读视图**，保证 /api/config 报告的状态
+    // 与真正生效的状态一致 —— 以前写成「YAML 或有 AUTH_USERNAME 即为真」，
+    // 只设了用户名没设密码时，配置里显示已启用，实际却是关闭的。
     auth: {
-      enabled: bool(raw, ["auth", "enabled"], false) || Boolean(readEnv("AUTH_USERNAME")),
-      username: str(raw, ["auth", "username"], readEnv("AUTH_USERNAME")),
-      sessionTtlHours: num(raw, ["auth", "session_ttl_hours"], 12),
+      enabled: authEnv.required,
+      username: authEnv.username,
+      sessionTtlHours: Math.round(authEnv.sessionTtlMs / 3600_000),
     },
     server: {
       port: num(raw, ["server", "port"], 8787),
@@ -296,7 +302,6 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
       pollMs: Math.max(1000, num(raw, ["market", "poll_ms"], 15000)),
     },
     llm: {
-      enabled: bool(raw, ["llm", "enabled"], false),
       provider: str(raw, ["llm", "provider"], "openai-compatible"),
       baseUrl: str(raw, ["llm", "base_url"], "https://api.openai.com/v1"),
       apiKeyEnv: llmApiKeyEnv,
@@ -370,9 +375,6 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
     execution: {
       mode: str(raw, ["execution", "mode"], "paper") === "live" ? "live" : "paper",
       connectionId: str(raw, ["execution", "connection_id"], ""),
-      baseUrl: str(raw, ["execution", "base_url"], ""),
-      apiKey: "",
-      apiSecret: "",
       slicingAlgo: parseSlicingAlgo(str(raw, ["execution", "slicing_algo"], "none")),
       slicingSlices: Math.min(Math.max(Math.round(num(raw, ["execution", "slicing_slices"], 4)), 1), 24),
       slicingSpacingBars: Math.min(Math.max(Math.round(num(raw, ["execution", "slicing_spacing_bars"], 1)), 1), 24),
@@ -391,11 +393,6 @@ export function buildConfig(raw: Record<string, unknown>): AppConfig {
 export function serializeConfig(config: AppConfig): Record<string, unknown> {
   return {
     app: { name: config.app.name, log_level: config.app.logLevel },
-    auth: {
-      enabled: config.auth.enabled,
-      username: config.auth.username,
-      session_ttl_hours: config.auth.sessionTtlHours,
-    },
     server: { host: config.server.host, port: config.server.port },
     market: {
       symbols: config.market.symbols,
@@ -404,7 +401,6 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       poll_ms: config.market.pollMs,
     },
     llm: {
-      enabled: config.llm.enabled,
       provider: config.llm.provider,
       base_url: config.llm.baseUrl,
       api_key_env: config.llm.apiKeyEnv,
@@ -482,7 +478,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
 export function redactConfig(config: AppConfig): Record<string, unknown> {
   return {
     ...config,
+    // 只有模型 Key 会出现在配置里；交易所凭证存在连接中（SecretsManager），不经过这里
     llm: { ...config.llm, apiKey: config.llm.apiKey ? "***" : "" },
-    execution: { ...config.execution, apiKey: "", apiSecret: "" },
   };
 }
