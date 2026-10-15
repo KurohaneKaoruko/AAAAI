@@ -20,6 +20,7 @@ import { EngineController } from "../src/server/engineController.js";
 import { ConnectionManager } from "../src/exchanges/connectionManager.js";
 import { WatchlistManager } from "../src/watchlist.js";
 import { LlmManager } from "../src/llm/llmManager.js";
+import { BotManager } from "../src/bots/botManager.js";
 import { NewsService } from "../src/news/newsService.js";
 import { testConfig } from "./helpers.js";
 import { buildConfig, type AppConfig } from "../src/configSchema.js";
@@ -218,4 +219,57 @@ test("开关：配置报告的鉴权状态必须与真正生效的一致", () =>
 
   // 6) 运行中改配置也不能篡改这个只读视图
   assert.equal(base.auth.enabled, false);
+});
+
+test("文案前提：改决策来源不会影响正在跑的流水线（所以界面不能说「立即生效」）", async () => {
+  // 面板上「决定由谁产生目标仓位，下次启动运行时生效」这句话，成立的前提就是这个行为。
+  // 如果哪天把策略改成热更新，这句文案就过时了 —— 测试会先失败，提示同步。
+  const dir = tmpDir();
+  try {
+    const base = testConfig();
+    const cfg: AppConfig = {
+      ...base,
+      strategy: { ...base.strategy, decisionSource: "rules" },
+      market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] },
+    };
+    const { controller, cm } = controllerWith(dir, cfg, []);
+    await controller.start({ mode: "backtest", bars: 40, interval: "1m", connectionId: cm.list()[0]!.id });
+
+    const before = controller.snapshot().strategy;
+    assert.equal(before, "momentum", "rules 走的是纯规则策略");
+
+    // 运行中改配置：引擎状态里的策略**不应该**跟着变
+    controller.applyConfig({ strategy: { ...cfg.strategy, decisionSource: "chat" } });
+    const after = controller.snapshot().strategy;
+    assert.equal(after, "momentum", "改决策来源不应热替换正在运行的流水线；面板文案因此写「下次启动生效」");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("文案前提：对照实验与机器人确实不会下真实订单", async () => {
+  // ComparePage 上写着「对照实验只在模拟盘中进行，绝不会发出真实订单」，
+  // 机器人卡片上也写着「成交为本地模拟」—— 都靠这两行代码撑着。
+  const dir = tmpDir();
+  try {
+    const base = testConfig();
+    // 执行方式设为真实下单，但机器人仍必须模拟成交
+    const cfg: AppConfig = { ...base, execution: { ...base.execution, mode: "live" } };
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const bots = new BotManager(dir, cfg, connections, new LlmManager(dir));
+    const bot = bots.create({ name: "实盘模式下的机器人", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest" });
+    const st = await bots.start(bot.id);
+    assert.equal(st.status, "stopped");
+    assert.ok(st.metrics, "仍应正常跑完（本地撮合）");
+
+    // 模拟适配器本身不支持交易：即便引擎走 live 路径也会降级为模拟成交
+    const { controller } = controllerWith(dir, cfg, []);
+    await controller.start({ mode: "backtest", bars: 20, interval: "1m" });
+    const snap = controller.snapshot();
+    assert.equal(snap.error, null);
+    assert.equal(snap.broker?.paper, true, "不支持交易的连接必须降级为模拟成交");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
