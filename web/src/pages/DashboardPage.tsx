@@ -77,7 +77,7 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
         title="交易机器人"
         subtitle={
           bots.length === 0
-            ? "还没有机器人 —— 现在所有交易都通过机器人执行"
+            ? "还没有机器人"
             : `${bots.length} 个机器人 · ${runningCount} 个运行中${withData.length > 0 ? ` · ${withData.length} 个有结果` : ""}`
         }
         actions={
@@ -90,7 +90,7 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
       >
         {bots.length === 0 ? (
           <Empty>
-            还没有机器人。到「交易机器人」新建一个：它有自己的标的、策略、模型和资金，可并行运行，全部模拟成交。
+            还没有机器人。到「交易机器人」新建一个：它有自己的标的、策略、模型和资金，可并行运行，成交为本地模拟。
           </Empty>
         ) : (
           <>
@@ -201,9 +201,10 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
         </summary>
         <div className="collapse-body">
           <div className="hint-line">
-            日常交易请用机器人：多个账户可并行、各自独立资金与策略，且<strong>始终模拟成交</strong>。
-            这里的单账户引擎是另一条路径 —— 它是<strong>唯一能下真实订单</strong>的入口（需在「风控」页把执行方式设为真实下单），
-            也用于快速验证一次改动。两者数据互不相通，仪表盘上方展示的是机器人。
+            机器人适合并行跑多个账户：各自独立资金与策略，成交走本地模拟。
+            这里跑的是单账户、独立的另一条流水线，可以用来快速验证一次改动；
+            当「风控」页的执行方式设为真实下单且连接具备交易权限时，这条路径会真的下单（机器人目前不支持）。
+            两者的数据互不相通 —— 上方展示的是机器人，这里展示的是本次单账户运行。
           </div>
           <div className="grid-dash">
             <div className="col">

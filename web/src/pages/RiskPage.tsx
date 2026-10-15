@@ -51,7 +51,7 @@ export function RiskPage({ store }: { store: AppStore }) {
         ) : (
           <Notice tone="info">当前为模拟成交：所有订单在本地撮合，不涉及真实资金。</Notice>
         )}
-        <div className="hint-line">改动立即生效，下次运行（引擎启动）时使用。</div>
+        <div className="hint-line">已保存。正在运行的引擎继续使用启动时的设置，重新启动后生效。</div>
       </Panel>
 
       <Panel

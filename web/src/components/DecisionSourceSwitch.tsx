@@ -23,7 +23,7 @@ interface Option {
 }
 
 const OPTIONS: Option[] = [
-  { value: "rules", label: "量化交易", desc: "双均线动量 + 因子打分本地计算，不调用任何模型。最快、最稳、零成本。" },
+  { value: "rules", label: "量化交易", desc: "双均线动量 + 因子打分，本地计算，不调用任何模型，也没有 API 费用。" },
   { value: "chat", label: "对话模型", desc: "大模型看行情后，直接给出每个标的的目标仓位。" },
   { value: "systemone", label: "决策模型", desc: "System One（Jev / Laya / 百炼）逐标的定档位，低延迟。" },
   {
@@ -77,7 +77,7 @@ export function DecisionSourceSwitch({
     <div className="decision-switch">
       <div className="decision-switch-head">
         <span className="decision-switch-title">智能体决策来源</span>
-        <span className="decision-switch-hint">决定由谁产生目标仓位，运行时立即生效</span>
+        <span className="decision-switch-hint">决定由谁产生目标仓位，下次启动运行时生效</span>
       </div>
       <div className="decision-options" role="radiogroup" aria-label="智能体决策来源">
         {OPTIONS.map((o) => {
