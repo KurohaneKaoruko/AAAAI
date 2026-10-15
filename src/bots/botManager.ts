@@ -21,6 +21,7 @@ import type { AppConfig, DecisionSource } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import type { LlmManager, LlmProfile, ModelKind } from "../llm/llmManager.js";
+import { StrategyStore, type StrategyProfile } from "../strategies/profileStore.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type {
@@ -54,6 +55,21 @@ export class BotManager {
     private config: AppConfig,
     private readonly connections: ConnectionManager,
     private readonly llm: LlmManager,
+    private readonly strategies: StrategyStore = new StrategyStore(dataDir, {
+      seed: {
+        name: "默认策略",
+        decisionSource: config.strategy.decisionSource,
+        fastWindow: config.strategy.fastWindow,
+        slowWindow: config.strategy.slowWindow,
+        maxTargetWeight: config.strategy.maxTargetWeight,
+        selfAllocating: config.strategy.selfAllocating,
+        maxPositions: config.strategy.maxPositions,
+        maxGrossExposure: config.strategy.maxGrossExposure,
+        allocationInterval: config.strategy.allocationInterval,
+        hybridInfluence: config.strategy.hybridInfluence,
+        hybridAnalysisTtlMs: config.strategy.hybridAnalysisTtlMs,
+      },
+    }),
   ) {
     this.load();
   }
@@ -68,11 +84,46 @@ export class BotManager {
     if (existsSync(this.path)) {
       try {
         this.bots = JSON.parse(readFileSync(this.path, "utf8")) as BotConfig[];
+        if (this.migrateToStrategyRefs()) this.persist();
       } catch (err) {
         log.warn("bots.json 解析失败: %s", (err as Error).message);
         this.bots = [];
       }
     }
+  }
+
+  /**
+   * 旧机器人的策略参数是内联覆盖（bot.strategy）。
+   * 迁移：把它固化成名如「<机器人名> 策略」的一条策略，改为按 id 引用 ——
+   * 这样多个机器人可以共用同一策略，而不是各自抄一份。
+   */
+  private migrateToStrategyRefs(): boolean {
+    let changed = false;
+    for (const bot of this.bots) {
+      if (bot.strategyId) continue;
+      // decisionSource 必须一起搬过去：漏了会把「对话模型机器人」悄悄降级成量化交易
+      const created = this.strategies.create({
+        name: `${bot.name} 策略`,
+        decisionSource: bot.decisionSource,
+        hybridAnalysisTtlMs: this.config.strategy.hybridAnalysisTtlMs,
+        ...bot.strategy,
+      });
+      bot.strategyId = created.id;
+      bot.decisionSource = created.decisionSource;
+      changed = true;
+      log.info("机器人「%s」的旧策略参数已迁移为策略「%s」(%s)", bot.name, created.name, created.id);
+    }
+    return changed;
+  }
+
+  /** 机器人真正生效的策略（引用失效时退回默认策略）。 */
+  strategyOf(bot: BotConfig): StrategyProfile {
+    return this.strategies.resolve(bot.strategyId);
+  }
+
+  /** 策略列表（面板用）。 */
+  strategyList(): StrategyProfile[] {
+    return this.strategies.list();
   }
 
   private persist(): void {
@@ -104,6 +155,25 @@ export class BotManager {
     const connection = this.connections.get(input.connectionId);
     if (!connection) throw new Error(`连接不存在: ${input.connectionId}`);
 
+    // 没给策略 id 就按传入参数新建一条：机器人永远引用一条真实存在的策略，
+    // 不会出现「填了窗口却被忽略」的假配置。
+    const strategyId =
+      input.strategyId ??
+      this.strategies
+        .create({
+          name: `${input.name.trim()} 策略`,
+          decisionSource: input.decisionSource ?? "rules",
+          fastWindow: input.strategy?.fastWindow ?? this.config.strategy.fastWindow,
+          slowWindow: input.strategy?.slowWindow ?? this.config.strategy.slowWindow,
+          maxTargetWeight: input.strategy?.maxTargetWeight ?? this.config.strategy.maxTargetWeight,
+          selfAllocating: input.strategy?.selfAllocating ?? this.config.strategy.selfAllocating,
+          maxPositions: input.strategy?.maxPositions ?? this.config.strategy.maxPositions,
+          maxGrossExposure: input.strategy?.maxGrossExposure ?? this.config.strategy.maxGrossExposure,
+          allocationInterval: input.strategy?.allocationInterval ?? this.config.strategy.allocationInterval,
+          hybridInfluence: input.strategy?.hybridInfluence ?? this.config.strategy.hybridInfluence,
+        })
+        .id;
+
     const bot: BotConfig = {
       id: randomUUID().slice(0, 8),
       name: input.name.trim(),
@@ -117,6 +187,8 @@ export class BotManager {
       decisionSource: input.decisionSource ?? "rules",
       modelProfileIds: input.modelProfileIds ?? [],
       decisionInterval: input.decisionInterval ?? this.config.llm.decisionInterval,
+      // 策略是独立实体：机器人只存 id，参数以策略列表为准（改一处，全体引用生效）
+      strategyId,
       strategy: {
         fastWindow: input.strategy?.fastWindow ?? this.config.strategy.fastWindow,
         slowWindow: input.strategy?.slowWindow ?? this.config.strategy.slowWindow,
@@ -158,7 +230,7 @@ export class BotManager {
     if (patch.interval !== undefined) bot.interval = patch.interval;
     if (patch.barCount !== undefined) bot.barCount = Math.max(2, patch.barCount);
     if (patch.pollMs !== undefined) bot.pollMs = Math.max(1000, patch.pollMs);
-    if (patch.decisionSource !== undefined) bot.decisionSource = patch.decisionSource;
+    if (patch.strategyId !== undefined) bot.strategyId = patch.strategyId;
     if (patch.modelProfileIds !== undefined) bot.modelProfileIds = patch.modelProfileIds;
     if (patch.decisionInterval !== undefined) bot.decisionInterval = Math.max(1, patch.decisionInterval);
     if (patch.strategy) bot.strategy = { ...bot.strategy, ...patch.strategy };
@@ -286,15 +358,26 @@ export class BotManager {
   }
 
   private buildRuntime(bot: BotConfig, adapter: ExchangeAdapter, lanes: { chat: LLMClient | null; systemone: LLMClient | null }): Runtime {
-    // 用机器人自己的参数构造一份"局部配置"
+    // 策略来自策略列表（按 id 引用），风险/模型间隔仍是机器人自己的
+    const strategy = this.strategyOf(bot);
     const localConfig: AppConfig = {
       ...this.config,
-      strategy: { ...this.config.strategy, ...bot.strategy },
+      strategy: {
+        ...this.config.strategy,
+        decisionSource: strategy.decisionSource,
+        fastWindow: strategy.fastWindow,
+        slowWindow: strategy.slowWindow,
+        maxTargetWeight: strategy.maxTargetWeight,
+        selfAllocating: strategy.selfAllocating,
+        maxPositions: strategy.maxPositions,
+        maxGrossExposure: strategy.maxGrossExposure,
+        allocationInterval: strategy.allocationInterval,
+        hybridInfluence: strategy.hybridInfluence,
+        hybridAnalysisTtlMs: strategy.hybridAnalysisTtlMs,
+      },
       risk: { ...this.config.risk, ...bot.risk },
       llm: { ...this.config.llm, decisionInterval: bot.decisionInterval },
     };
-    localConfig.strategy.decisionSource = bot.decisionSource;
-    localConfig.strategy.hybridInfluence = bot.strategy.hybridInfluence;
 
     const pipeline = buildPipeline(localConfig, {
       adapter,
@@ -437,7 +520,7 @@ export class BotManager {
     const labels: string[] = [];
     const kinds: ModelKind[] = bot.decisionSource === "hybrid" ? ["chat", "systemone"] : bot.decisionSource === "rules" ? [] : [bot.decisionSource];
     if (kinds.length === 0) {
-      labels.push("双均线动量（纯规则）");
+      labels.push("双均线动量（量化交易）");
     }
     for (const kind of kinds) {
       const scoped = this.llm

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
-import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularSymbol } from "../types";
+import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
+import { StrategyPicker, describe } from "../components/StrategyProfiles";
 import { money, pct, time } from "../lib/format";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -18,6 +19,7 @@ const STATUS: Record<string, { text: string; cls: string }> = {
 export function BotsPage({ store }: { store: AppStore }) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
+  const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,9 +27,10 @@ export function BotsPage({ store }: { store: AppStore }) {
 
   const reload = useCallback(async () => {
     try {
-      const [b, p] = await Promise.all([api.bots(), api.llmProfiles()]);
+      const [b, p, st] = await Promise.all([api.bots(), api.llmProfiles(), api.strategies()]);
       setBots(b.bots);
       setProfiles(p.profiles);
+      setStrategies(st.strategies);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -97,11 +100,12 @@ export function BotsPage({ store }: { store: AppStore }) {
           </div>
         }
       >
-        {creating && <BotForm store={store} profiles={profiles} onDone={() => { setCreating(false); void reload(); }} />}
+        {creating && <BotForm store={store} profiles={profiles} strategies={strategies} onDone={() => { setCreating(false); void reload(); }} />}
         {editing && (
           <BotForm
             store={store}
             profiles={profiles}
+            strategies={strategies}
             editing={editing}
             onDone={() => { setEditing(null); void reload(); }}
           />
@@ -120,6 +124,7 @@ export function BotsPage({ store }: { store: AppStore }) {
               <BotCard
                 key={b.id}
                 bot={b}
+                strategies={strategies}
                 busy={busyId === b.id}
                 onStart={() => void start(b.id)}
                 onStop={() => void stop(b.id)}
@@ -145,6 +150,7 @@ export function BotsPage({ store }: { store: AppStore }) {
 
 function BotCard({
   bot,
+  strategies,
   busy,
   onStart,
   onStop,
@@ -153,6 +159,7 @@ function BotCard({
   onToggle,
 }: {
   bot: Bot;
+  strategies: StrategyProfile[];
   busy: boolean;
   onStart: () => void;
   onStop: () => void;
@@ -193,13 +200,16 @@ function BotCard({
         <span>
           <em>策略</em>{" "}
           <b className="mono">
-            {bot.decisionSource === "hybrid"
-              ? `大模型分析→决策模型定仓位·影响力 ${pct(bot.strategy.hybridInfluence, 0)}`
-              : bot.strategy.selfAllocating
-                ? `AI 选资产·最多 ${bot.strategy.maxPositions} 个·总仓位 ${pct(bot.strategy.maxGrossExposure, 0)}`
-                : bot.decisionSource === "rules"
-                  ? `双均线 ${bot.strategy.fastWindow}/${bot.strategy.slowWindow}`
-                  : `${SOURCE_ZH[bot.decisionSource]}·每 ${bot.decisionInterval} 根`}
+            {(() => {
+              const s = strategies.find((x) => x.id === bot.strategyId);
+              if (s) return describe(s);
+              // 老机器人还没有 strategyId：退回读它自己的参数
+              return bot.decisionSource === "hybrid"
+                ? `大模型分析→决策模型定仓位·影响力 ${pct(bot.strategy.hybridInfluence, 0)}`
+                : bot.strategy.selfAllocating
+                  ? `AI 选资产·最多 ${bot.strategy.maxPositions} 个`
+                  : `双均线 ${bot.strategy.fastWindow}/${bot.strategy.slowWindow}`;
+            })()}
           </b>
         </span>
         <span><em>资金</em> <b className="mono">{money(bot.risk.initialCash, 0)}</b></span>
@@ -372,32 +382,28 @@ function AllocationBars({ alloc }: { alloc: BotAllocation }) {
 function BotForm({
   store,
   profiles,
+  strategies,
   editing,
   onDone,
 }: {
   store: AppStore;
   profiles: LlmProfile[];
+  strategies: StrategyProfile[];
   editing?: Bot | null;
   onDone: () => void;
 }) {
   const { connections, watchlist } = store;
   const [name, setName] = useState(editing?.name ?? "");
+  // 机器人只存策略 id：参数以策略列表为准，避免两处配置对不上
+  const [strategyId, setStrategyId] = useState(editing?.strategyId ?? strategies[0]?.id ?? "");
   const [connectionId, setConnectionId] = useState(editing?.connectionId ?? connections[0]?.id ?? "");
   const [symbols, setSymbols] = useState<string[]>(editing?.symbols ?? []);
   const [mode, setMode] = useState<"live" | "backtest">(editing?.mode ?? "live");
   const [decisionSource, setDecisionSource] = useState<DecisionSource>(editing?.decisionSource ?? "rules");
-  const [influence, setInfluence] = useState(editing?.strategy.hybridInfluence ?? 0.6);
   const [modelIds, setModelIds] = useState<string[]>(editing?.modelProfileIds ?? []);
   const [interval, setInterval] = useState(editing?.interval ?? "1m");
   const [barCount, setBarCount] = useState(editing?.barCount ?? 200);
   const [decisionInterval, setDecisionInterval] = useState(editing?.decisionInterval ?? 10);
-  const [fast, setFast] = useState(editing?.strategy.fastWindow ?? 5);
-  const [slow, setSlow] = useState(editing?.strategy.slowWindow ?? 20);
-  const [maxWeight, setMaxWeight] = useState(editing?.strategy.maxTargetWeight ?? 0.5);
-  const [selfAllocating, setSelfAllocating] = useState(editing?.strategy.selfAllocating ?? false);
-  const [maxPositions, setMaxPositions] = useState(editing?.strategy.maxPositions ?? 3);
-  const [grossCap, setGrossCap] = useState(editing?.strategy.maxGrossExposure ?? 1);
-  const [allocInterval, setAllocInterval] = useState(editing?.strategy.allocationInterval ?? 5);
   const [cash, setCash] = useState(editing?.risk.initialCash ?? 100000);
   const [minTrade, setMinTrade] = useState(editing?.risk.minTradeValue ?? 0);
   const [maxDD, setMaxDD] = useState(editing?.risk.maxDrawdownPct ?? 0.15);
@@ -412,8 +418,10 @@ function BotForm({
 
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   // 混合决策需要同时用对话模型（分析端）与决策模型（决策端），其余各用自己的那一类
+  const chosen = strategies.find((s) => s.id === strategyId);
+  const source: DecisionSource = chosen?.decisionSource ?? decisionSource;
   const modelKinds: ("chat" | "systemone")[] =
-    decisionSource === "hybrid" ? ["chat", "systemone"] : decisionSource === "rules" ? [] : [decisionSource];
+    source === "hybrid" ? ["chat", "systemone"] : source === "rules" ? [] : [source];
   const intervals =
     connections.find((c) => c.id === connectionId)?.adapter?.klineIntervals ??
     ["1m", "5m", "15m", "1h", "4h", "1d"];
@@ -428,18 +436,9 @@ function BotForm({
       mode,
       interval,
       barCount,
-      modelProfileIds: decisionSource === "rules" ? [] : modelIds,
+      ...(strategyId ? { strategyId } : {}),
+      modelProfileIds: source === "rules" ? [] : modelIds,
       decisionInterval,
-      strategy: {
-        fastWindow: fast,
-        slowWindow: slow,
-        maxTargetWeight: maxWeight,
-        selfAllocating,
-        maxPositions,
-        maxGrossExposure: grossCap,
-        allocationInterval: allocInterval,
-        hybridInfluence: influence,
-      },
       risk: { initialCash: cash, minTradeValue: minTrade, maxDrawdownPct: maxDD },
     };
     try {
@@ -460,6 +459,16 @@ function BotForm({
     <div className="connection-form">
       <div className="grid-2">
         <TextField label="名称" value={name} onChange={setName} placeholder="如：BTC 趋势跟踪" />
+        {strategies.length > 0 ? (
+          <StrategyPicker items={strategies} value={strategyId} onChange={setStrategyId} />
+        ) : (
+          <div className="field">
+            <span className="field-label">策略</span>
+            <div className="dim small">
+              还没有策略。请到「策略」页新建一条，机器人会引用它（窗口、是否 AI 选资产、混合影响力都在那里配）。
+            </div>
+          </div>
+        )}
         <SelectField
           label="行情连接"
           value={connectionId}
@@ -478,17 +487,15 @@ function BotForm({
           ]}
           onChange={(v) => setMode(v as "live" | "backtest")}
         />
-        <SelectField
-          label="决策来源"
-          value={decisionSource}
-          options={[
-            { value: "rules", label: "纯规则（双均线，不调模型）" },
-            { value: "chat", label: "对话模型（直接给仓位）" },
-            { value: "systemone", label: "决策模型（System One 定档位）" },
-            { value: "hybrid", label: "混合决策（大模型分析 → 决策模型定仓位）" },
-          ]}
-          onChange={(v) => setDecisionSource(v as DecisionSource)}
-        />
+        <div className="grid-2">
+          <div className="field">
+            <span className="field-label">决策来源</span>
+            <div className="dim small">
+              {chosen ? describe(chosen) : "选择一条策略"}
+              {chosen && !chosen.selfAllocating && chosen.decisionSource !== "rules" ? " · 模型只定仓位" : ""}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="symbol-picker">
@@ -536,48 +543,23 @@ function BotForm({
         </div>
       )}
 
-      {decisionSource === "hybrid" && (
-        <div className="blend-rows">
-          <div className="blend-title">分析影响力（大模型结论对决策模型的权重）</div>
-          <div className="blend-row">
-            <span className="blend-name">影响力</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={10}
-              value={Math.round(influence * 100)}
-              onChange={(e) => setInfluence(Number(e.target.value) / 100)}
-            />
-            <span className="blend-pct mono">{pct(influence, 0)}</span>
-          </div>
-          <div className="blend-preview small dim">
-            0% = 决策模型独立决策；100% = 以大模型分析结论为主要依据。
-          </div>
+      {chosen ? (
+        <div className="explain-box">
+          <strong>本机器人将使用策略「{chosen.name}」</strong>
+          <p>
+            {chosen.decisionSource === "rules"
+              ? `量化交易：双均线 ${chosen.fastWindow}/${chosen.slowWindow}，目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}，不调用任何模型。`
+              : `${chosen.decisionSource === "hybrid" ? "混合决策" : chosen.decisionSource === "chat" ? "对话模型" : "决策模型"}；` +
+                (chosen.selfAllocating
+                  ? `由 AI 在候选池里自选资产（最多 ${chosen.maxPositions} 个、总仓位 ${pct(chosen.maxGrossExposure, 0)}，每 ${chosen.allocationInterval} 轮配置一次）。`
+                  : `按上面的标的逐个定仓位，目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}。`)}
+            {chosen.decisionSource === "hybrid" && `分析影响力 ${pct(chosen.hybridInfluence, 0)}。`}
+          </p>
+          <p className="dim">
+            想改这些参数，去「策略」页编辑「{chosen.name}」—— 改一处，所有引用它的机器人同时生效。
+          </p>
         </div>
-      )}
-
-      <Toggle
-        label="AI 自主选资产（关闭时：按上面的标的逐个决定仓位）"
-        checked={selfAllocating}
-        onChange={setSelfAllocating}
-      />
-
-      {selfAllocating && (
-        <div className="grid-3">
-          <NumberField label="最多持有" hint="几个资产" value={maxPositions} min={1} max={10} onChange={setMaxPositions} />
-          <NumberField
-            label="组合总仓位"
-            hint={`${pct(grossCap, 0)}，其余留现金`}
-            value={grossCap}
-            step={0.05}
-            min={0.05}
-            max={1}
-            onChange={setGrossCap}
-          />
-          <NumberField label="配置间隔" hint="每 N 轮行情" value={allocInterval} min={1} max={200} onChange={setAllocInterval} />
-        </div>
-      )}
+      ) : null}
 
       <div className="grid-3">
         <SelectField
@@ -590,15 +572,11 @@ function BotForm({
         {modelKinds.length > 0 && (
           <NumberField label="决策间隔" hint="每 N 根问一次" value={decisionInterval} min={1} max={100} onChange={setDecisionInterval} />
         )}
-        <NumberField label="快线窗口" value={fast} min={2} max={100} onChange={setFast} />
-        <NumberField label="慢线窗口" value={slow} min={3} max={400} onChange={setSlow} />
-        <NumberField label="目标仓上限" hint={pct(maxWeight, 0)} value={maxWeight} step={0.05} min={0.05} max={1} onChange={setMaxWeight} />
         <NumberField label="初始资金" value={cash} step={1000} min={100} onChange={setCash} />
         <NumberField label="最小调仓额" hint="低于不下单" value={minTrade} step={500} min={0} onChange={setMinTrade} />
         <NumberField label="回撤熔断" hint={pct(maxDD, 0)} value={maxDD} step={0.01} min={0.01} max={1} onChange={setMaxDD} />
       </div>
 
-      {fast >= slow && <Notice tone="error">快线窗口必须小于慢线窗口</Notice>}
       {symbols.length === 0 && <Notice tone="warn">请至少选择一个标的</Notice>}
       {err && <Notice tone="error">{err}</Notice>}
 

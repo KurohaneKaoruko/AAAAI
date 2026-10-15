@@ -1,7 +1,7 @@
 /**
  * 智能体决策来源：四选一，其中「混合决策」是独立设计的一条流水线。
  *
- *   纯规则     本地双均线动量，不调模型
+ *   量化交易   本地计算指标与仓位，不调模型
  *   对话模型   大模型直接给每个标的的目标仓位
  *   决策模型   System One 逐标的定档位，档位概率换算仓位
  *   混合决策   大模型分析行情 → 决策模型拿分析做仓位决策（职责分离，不投票）
@@ -23,7 +23,7 @@ interface Option {
 }
 
 const OPTIONS: Option[] = [
-  { value: "rules", label: "纯规则", desc: "双均线动量本地计算，不调用任何模型。最快、最稳、零成本。" },
+  { value: "rules", label: "量化交易", desc: "双均线动量 + 因子打分本地计算，不调用任何模型。最快、最稳、零成本。" },
   { value: "chat", label: "对话模型", desc: "大模型看行情后，直接给出每个标的的目标仓位。" },
   { value: "systemone", label: "决策模型", desc: "System One（Jev / Laya / 百炼）逐标的定档位，低延迟。" },
   {
@@ -34,7 +34,8 @@ const OPTIONS: Option[] = [
 ];
 
 export const SOURCE_ZH: Record<DecisionSource, string> = {
-  rules: "纯规则",
+  // 纯规则就是量化交易：本地算指标、定仓位，不调用任何模型
+  rules: "量化交易",
   chat: "对话模型",
   systemone: "决策模型",
   hybrid: "混合决策",

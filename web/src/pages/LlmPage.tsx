@@ -195,7 +195,7 @@ export function LlmPage({ store }: { store: AppStore }) {
           <span className="source-status-label">当前决策来源</span>
           <span className={`source-chip source-${config?.strategy.decisionSource ?? "rules"}`}>
             {config?.strategy.decisionSource === "rules"
-              ? "纯规则（动量）"
+              ? "量化交易（动量）"
               : config?.strategy.decisionSource === "chat"
                 ? "对话模型池"
                 : "决策模型池"}

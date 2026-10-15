@@ -71,3 +71,31 @@ test("src 中除 env.ts 外不再手写环境变量名", () => {
   }
   assert.deepEqual(offenders, [], "应统一通过 envKey()/readEnv() 构造环境变量名");
 });
+test("仓库内任何位置都不出现 3 个或 5 个及以上的 A 连写（含散文与注释）", () => {
+  // 上一条测试只认「A{n}I_XXX」「A{n}_AUTH_XXX」这类带下划线的标识符，
+  // 于是「5 个 A + 空格 + 中文散文」（无下划线）和 src/env.ts 的注释示例都漏网了 —— 两个真实笔误都出在这两种形态上。
+  // 这里改成：不认形态，只认「连续 3 个以上 A」这件事本身。
+  const offenders: string[] = [];
+  for (const file of collect(ROOT)) {
+    const rel = file.replace(ROOT + "/", "");
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(/A{3,}/g)) {
+      if (match[0].length !== 4) offenders.push(`${rel}: ${match[0]} (${match[0].length} 个A)`);
+    }
+  }
+  assert.deepEqual(offenders, [], "A 的连写只能是 4 个（AAAAI = Ai/Agent/Auto/Asset + Investment）");
+});
+
+test("README 与 env.ts 里的示例变量名与 envKey() 实际产物一致", () => {
+  const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+  const envSrc = readFileSync(join(ROOT, "src", "env.ts"), "utf8");
+
+  // 文档里出现的每个 AAAA… 标记，都必须正好等于 ENV_PREFIX
+  // 注意：字符串要按数组元素拼，别用 [...str]（那是把字符摊开）
+  const tokens = [readme, envSrc].join("\n").match(/\bA{4,}\w*/g) ?? [];
+  for (const token of new Set(tokens)) {
+    const head = token.match(/^A*I/)?.[0] ?? token.match(/^A+/)?.[0] ?? token;
+    assert.equal(head, ENV_PREFIX, `文档里的「${token}」应以 ${ENV_PREFIX} 开头`);
+  }
+  assert.ok(tokens.length > 0, "文档里应当存在该标记，否则这条测试没起到作用");
+});

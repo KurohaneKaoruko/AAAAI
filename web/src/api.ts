@@ -6,6 +6,7 @@ import type {
   AuthStatus,
   Bot,
   BotInput,
+  StrategyProfile,
   EvolutionView,
   NewsItem,
   NewsStatus,
@@ -150,6 +151,17 @@ export const api = {
     request<{ reverted: unknown; view: EvolutionView }>("/api/evolution/rollback", { method: "POST" }),
 
   // 交易机器人
+  strategies: () => request<{ strategies: StrategyProfile[]; defaultId: string }>("/api/strategies"),
+  createStrategy: (body: Partial<StrategyProfile>) =>
+    request<{ strategy: StrategyProfile }>("/api/strategies", { method: "POST", body: JSON.stringify(body) }),
+  updateStrategy: (id: string, body: Partial<StrategyProfile>) =>
+    request<{ strategy: StrategyProfile }>(`/api/strategies/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  duplicateStrategy: (id: string) =>
+    request<{ strategy: StrategyProfile }>(`/api/strategies/duplicate/${id}`, { method: "POST" }),
+  setDefaultStrategy: (id: string) =>
+    request<{ strategy: StrategyProfile }>(`/api/strategies/${id}/default`, { method: "POST" }),
+  deleteStrategy: (id: string) =>
+    request<{ removed: string }>(`/api/strategies/${id}`, { method: "DELETE" }),
   bots: () => request<{ bots: Bot[] }>("/api/bots"),
   createBot: (body: BotInput) => request<{ bot: Bot }>("/api/bots", { method: "POST", body: JSON.stringify(body) }),
   updateBot: (id: string, body: Partial<BotInput>) =>

@@ -7,7 +7,7 @@
  * 规则（只对 AAAAI 自己的配置项加前缀）：
  *
  * 1. 应用自有开关 —— 加前缀，避免与宿主机其它程序撞名：
- *      AAAAAI_CONFIG / AAAAAI_DATA_DIR / AAAAAI_AUTOSTART / AAAAAI_AUTH_*
+ *      AAAAI_CONFIG / AAAAI_DATA_DIR / AAAAI_AUTOSTART / AAAAI_AUTH_*
  * 2. 第三方生态变量 —— 保持标准名，绝不加前缀：
  *      OPENAI_API_KEY、BINANCE_API_KEY、BINANCE_API_SECRET、DEEPSEEK_API_KEY ...
  *    这些是各家文档与 CI 约定的名字，加了前缀就与生态脱节。

@@ -11,6 +11,7 @@ import { ConnectionManager } from "./exchanges/connectionManager.js";
 import { LlmManager } from "./llm/llmManager.js";
 import { AuthService, loadAuthConfig } from "./auth/auth.js";
 import { BotManager } from "./bots/botManager.js";
+import { StrategyStore } from "./strategies/profileStore.js";
 import { NewsService } from "./news/newsService.js";
 import { EvolutionEngine } from "./evolution/engine.js";
 import { toDigest } from "./news/types.js";
@@ -39,7 +40,22 @@ async function main(): Promise<void> {
   const llm = new LlmManager(dataDir, config.llm.strategy);
   seedLegacyLlmProfile(llm, config);
   const news = new NewsService(dataDir, config.news);
-  const bots = new BotManager(dataDir, config, connections, llm);
+  const strategies = new StrategyStore(dataDir, {
+    seed: {
+      name: "默认策略",
+      decisionSource: config.strategy.decisionSource,
+      fastWindow: config.strategy.fastWindow,
+      slowWindow: config.strategy.slowWindow,
+      maxTargetWeight: config.strategy.maxTargetWeight,
+      selfAllocating: config.strategy.selfAllocating,
+      maxPositions: config.strategy.maxPositions,
+      maxGrossExposure: config.strategy.maxGrossExposure,
+      allocationInterval: config.strategy.allocationInterval,
+      hybridInfluence: config.strategy.hybridInfluence,
+      hybridAnalysisTtlMs: config.strategy.hybridAnalysisTtlMs,
+    },
+  });
+  const bots = new BotManager(dataDir, config, connections, llm, strategies);
   const evolution = new EvolutionEngine(dataDir, config, (next) => {
     // 自我进化的结论作用在运行配置上（默认不写回配置文件，页面可一键 persist）
     controller.applyConfig({ strategy: next.strategy, risk: next.risk });
@@ -48,7 +64,7 @@ async function main(): Promise<void> {
     llm.setStrategy(next.llm.strategy);
     log.info("自我进化已更新运行配置（下次运行生效）");
   });
-  const controller = new EngineController(config, connections, watchlist, llm, news, evolution);
+  const controller = new EngineController(config, connections, watchlist, llm, news, evolution, strategies);
 
   const app = createServer(controller, {
     connections,

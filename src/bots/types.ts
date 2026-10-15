@@ -5,7 +5,13 @@ import type { DecisionSource } from "../configSchema.js";
 export type BotMode = "backtest" | "live";
 export type BotStatus = "idle" | "running" | "stopped" | "error";
 
-/** 机器人的策略参数（覆盖全局 strategy）。 */
+/**
+ * 机器人引用的策略 id（指向策略列表里的一条）。
+ * 老数据没有这个字段时由 botManager 迁移生成。
+ */
+export type BotStrategyId = string;
+
+/** 机器人的策略参数（已废弃：改由策略列表按 id 引用，此处仅为兼容旧数据保留）。 */
 export interface BotStrategy {
   fastWindow: number;
   slowWindow: number;
@@ -46,8 +52,10 @@ export interface BotConfig {
   barCount: number;
   /** 轮询间隔（毫秒，实时模式） */
   pollMs: number;
-  /** 决策来源：rules | chat | systemone | hybrid */
+  /** 决策来源：rules | chat | systemone | hybrid（与策略列表里的那条保持一致） */
   decisionSource: DecisionSource;
+  /** 引用的策略 id；新机器人必填，旧机器人在加载时自动迁移 */
+  strategyId?: string;
   /** 本机器人专用的模型实例 ID 列表（留空 = 用该类型的全部实例） */
   modelProfileIds: string[];
   /** 每 N 根 K 线问一次模型 */
@@ -126,6 +134,8 @@ export interface BotInput {
   barCount?: number;
   pollMs?: number;
   decisionSource?: DecisionSource;
+  /** 引用的策略 id（策略列表里的一条）。新建时若不提供，会按现有参数新建一条策略 */
+  strategyId?: string;
   modelProfileIds?: string[];
   decisionInterval?: number;
   strategy?: Partial<BotStrategy>;

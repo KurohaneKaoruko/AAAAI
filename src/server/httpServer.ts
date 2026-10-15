@@ -25,6 +25,7 @@ import type { BotManager } from "../bots/botManager.js";
 import type { NewsService } from "../news/newsService.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
+import type { StrategyProfileInput } from "../strategies/profileStore.js";
 import { robustness, walkForward } from "../validation/walkForward.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
@@ -302,6 +303,53 @@ export function createServer(controller: EngineController, options: ServerOption
   app.post("/api/evolution/rollback", (_req, res) => {
     const entry = evolution.rollback();
     ok(res, { reverted: entry, view: evolution.view() });
+  });
+
+  // ---------------- 策略列表 ----------------
+
+  app.get("/api/strategies", (_req, res) =>
+    ok(res, { strategies: controller.strategyList(), defaultId: controller.defaultStrategyId() }),
+  );
+
+  app.post("/api/strategies", (req, res) => {
+    try {
+      ok(res, { strategy: controller.createStrategy((req.body ?? {}) as StrategyProfileInput) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  app.post("/api/strategies/duplicate/:id", (req, res) => {
+    try {
+      ok(res, { strategy: controller.duplicateStrategy(req.params.id) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  app.put("/api/strategies/:id", (req, res) => {
+    try {
+      ok(res, { strategy: controller.updateStrategy(req.params.id, (req.body ?? {}) as Partial<StrategyProfileInput>) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  app.post("/api/strategies/:id/default", (_req, res) => {
+    try {
+      ok(res, { strategy: controller.setDefaultStrategy(_req.params.id) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  app.delete("/api/strategies/:id", (req, res) => {
+    try {
+      controller.removeStrategy(req.params.id);
+      ok(res, { removed: req.params.id });
+    } catch (e) {
+      fail(res, e);
+    }
   });
 
   // ---------------- 交易机器人（多实例并行） ----------------
