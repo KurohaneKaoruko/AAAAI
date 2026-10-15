@@ -71,6 +71,14 @@ export class ConnectionManager {
     return this.connections.find((c) => c.id === id);
   }
 
+  /**
+   * 该连接是否已配置 API Key —— 只回布尔值，不把密钥暴露给调用方。
+   * 机器人判定"能不能实盘"时需要它。
+   */
+  hasKey(id: string): boolean {
+    return Boolean(this.get(id)) && this.toView(this.connections.find((c) => c.id === id)!).hasKey;
+  }
+
   create(input: ConnectionInput): ConnectionView {
     const meta = getAdapterMeta(input.adapterId);
     if (!meta) throw new UnsupportedAdapterError(input.adapterId);
