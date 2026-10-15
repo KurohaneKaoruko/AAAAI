@@ -7,7 +7,7 @@ import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularS
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { StrategyPicker, describe } from "../components/StrategyProfiles";
-import { money, pct, time } from "../lib/format";
+import { money, pct, signed, time } from "../lib/format";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
   idle: { text: "待机", cls: "badge-idle" },
@@ -186,15 +186,19 @@ function BotCard({
         <span className="bot-name">{bot.name}</span>
         <span className={`badge ${st.cls}`}>{st.text}</span>
         <span className="chip chip-sm">{bot.mode === "live" ? "持续运行" : "回测"}</span>
+        {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
+        {bot.mode === "live" && bot.paperTrading && bot.state.status === "running" && (
+          <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
+        )}
+        {bot.mode === "live" && bot.paperTrading && bot.state.status !== "running" && (
+          <span className="chip chip-sm">模拟成交</span>
+        )}
         {/* "实盘下单中" 只在真的在跑的时候出现：停了还挂着这四个字会让人以为订单还在发 */}
         {bot.state.liveTrading && bot.state.status === "running" && (
           <span className="chip chip-sm chip-live">实盘下单中</span>
         )}
         {bot.state.liveTrading && bot.state.status !== "running" && (
           <span className="chip chip-sm chip-off">上次运行为实盘</span>
-        )}
-        {bot.mode === "live" && !bot.state.liveTrading && bot.state.status !== "running" && (
-          <span className="chip chip-sm chip-off">实时模式 · 未实盘</span>
         )}
         <span className="chip chip-sm">{bot.interval}</span>
         <div className="bot-actions">
@@ -252,6 +256,9 @@ function BotCard({
 
       {a && <AllocationBars alloc={a} />}
 
+      {/* 交易统计明细：成交流水 + 分标的盈亏。"赚不赚、哪笔赚"就在这里看 */}
+      {bot.state.trades.length > 0 && <TradeStats state={bot.state} />}
+
       {bot.state.error && <div className="bot-error">{bot.state.error}</div>}
 
       {bot.state.events.length > 0 && (
@@ -278,6 +285,64 @@ function BotCard({
 function wPct(w: number): string {
   const digits = w > 0 && w < 0.01 ? 2 : w > 0 && w < 0.1 ? 1 : 0;
   return `${(w * 100).toFixed(digits)}%`;
+}
+
+/**
+ * 交易统计明细：分标的盈亏合计 + 成交流水。
+ *
+ * 模拟成交的机器人跟真实市场干跑，统计必须完整 —— 用户要回答的问题是
+ * "这个机器人赚钱吗、靠哪个标的赚的、最近几笔是怎么决策的"。
+ */
+function TradeStats({ state }: { state: Bot["state"] }) {
+  const total = state.pnlBySymbol.reduce((a, p) => a + p.realizedPnl, 0);
+  return (
+    <details className="bot-events">
+      <summary>
+        交易统计 · 已实现 {signed(total)} · {state.trades.length} 笔成交
+      </summary>
+      {state.pnlBySymbol.length > 0 && (
+        <table className="table" style={{ marginBottom: 8 }}>
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th className="num">已实现盈亏</th>
+              <th className="num">成交笔数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.pnlBySymbol.map((p) => (
+              <tr key={p.symbol}>
+                <td className="mono">{p.symbol}</td>
+                <td className={`num mono ${p.realizedPnl > 0 ? "up" : p.realizedPnl < 0 ? "down" : "dim"}`}>
+                  {p.realizedPnl === 0 ? "—" : signed(p.realizedPnl)}
+                </td>
+                <td className="num mono">{p.fills}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="event-log" style={{ maxHeight: 200 }}>
+        {state.trades.slice(0, 60).map((t) => (
+          <div className="event-row" key={t.id}>
+            <span className="event-time mono">{time(t.timestamp)}</span>
+            <span className={`mono ${t.side === "BUY" ? "" : "event-topic"}`}>
+              {t.side === "BUY" ? "买入" : "卖出"}
+            </span>
+            <span className="mono">
+              {t.symbol} {t.quantity} @ {t.price}
+            </span>
+            {t.realizedPnl !== 0 && (
+              <span className={`mono ${t.realizedPnl > 0 ? "up" : "down"}`}>{signed(t.realizedPnl)}</span>
+            )}
+            <span className="event-summary mono dim" title={t.reason}>
+              {t.reason}
+            </span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 /** 各账号资产配置一览：横向对比谁把钱放在哪。 */
@@ -417,6 +482,8 @@ function BotForm({
   const [connectionId, setConnectionId] = useState(editing?.connectionId ?? connections[0]?.id ?? "");
   const [symbols, setSymbols] = useState<string[]>(editing?.symbols ?? []);
   const [mode, setMode] = useState<"live" | "backtest">(editing?.mode ?? "live");
+  // 实时模式的成交方式：默认模拟成交 —— 先在真实行情上干跑，确认行为再考虑实盘
+  const [paperTrading, setPaperTrading] = useState(editing?.paperTrading ?? true);
   const [decisionSource, setDecisionSource] = useState<DecisionSource>(editing?.decisionSource ?? "rules");
   const [modelIds, setModelIds] = useState<string[]>(editing?.modelProfileIds ?? []);
   const [interval, setInterval] = useState(editing?.interval ?? "1m");
@@ -454,6 +521,7 @@ function BotForm({
       connectionId,
       symbols,
       mode,
+      ...(mode === "live" ? { paperTrading } : {}),
       interval,
       barCount,
       ...(strategyId ? { strategyId } : {}),
@@ -508,10 +576,27 @@ function BotForm({
           onChange={(v) => setMode(v as "live" | "backtest")}
         />
         {mode === "live" && (
+          <SelectField
+            label="成交方式"
+            value={paperTrading ? "paper" : "real"}
+            options={[
+              { value: "paper", label: "模拟成交（推荐）：真实行情、本地撮合，零资金风险" },
+              { value: "real", label: "真实下单：订单发往交易所（需满足实盘条件）" },
+            ]}
+            onChange={(v) => setPaperTrading(v === "paper")}
+          />
+        )}
+        {mode === "live" && !paperTrading && (
           <Notice tone={executionMode === "live" ? "warn" : "error"}>
             {executionMode === "live"
-              ? "「风控」页的执行方式是真实下单：这个机器人启动后会真的向交易所发订单。且同一连接同时只允许一个实盘机器人。"
-              : "「风控」页的执行方式目前是模拟成交：这个机器人可以实时跑，但成交只发生在本地，不会下真实订单（启动时会被拒绝，需先把执行方式改成真实下单）。"}
+              ? "这个机器人启动后会真的向交易所发订单。同一连接同时只允许一个真实下单的机器人。"
+              : "「风控」页的执行方式仍是模拟成交：这个机器人不会启动（真实下单需要先把执行方式改成真实下单）。"}
+          </Notice>
+        )}
+        {mode === "live" && paperTrading && (
+          <Notice tone="info">
+            这个机器人会持续轮询真实行情并按策略模拟成交：钱不会动，但持仓、盈亏、成交记录都是真实的统计。
+            适合先跑起来观察，确认行为后再切「真实下单」。
           </Notice>
         )}
         <div className="grid-2">

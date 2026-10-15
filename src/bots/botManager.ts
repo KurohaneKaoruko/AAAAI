@@ -37,11 +37,14 @@ import type {
   BotInput,
   BotMetrics,
   BotState,
+  BotTrade,
   BotView,
 } from "./types.js";
 
 const log = getLogger("bots");
 const MAX_EVENTS_PER_BOT = 120;
+/** 成交流水最多保留多少条（新的在前）。 */
+const MAX_TRADES_PER_BOT = 200;
 /** 每个机器人保留的权益曲线点数（内存与传输都要节制）。 */
 const CURVE_POINTS = 400;
 
@@ -211,6 +214,12 @@ export class BotManager {
   private migrateToStrategyRefs(): boolean {
     let changed = false;
     for (const bot of this.bots) {
+      // paperTrading 是后来加的字段：老数据没有时按"模拟成交"补齐 ——
+      // 这个默认必须保守：把一个老机器人默认成真下单是不可接受的。
+      if (typeof bot.paperTrading !== "boolean") {
+        bot.paperTrading = true;
+        changed = true;
+      }
       if (bot.strategyId) continue;
       // decisionSource 必须一起搬过去：漏了会把「对话模型机器人」悄悄降级成量化交易
       const created = this.strategies.create({
@@ -298,6 +307,8 @@ export class BotManager {
       decisionSource: input.decisionSource ?? "rules",
       modelProfileIds: input.modelProfileIds ?? [],
       decisionInterval: input.decisionInterval ?? this.config.llm.decisionInterval,
+      // 默认模拟成交：让机器人先在真实行情上"干跑"，确认行为后再考虑实盘
+      paperTrading: input.paperTrading ?? true,
       // 策略是独立实体：机器人只存 id，参数以策略列表为准（改一处，全体引用生效）
       strategyId,
       strategy: {
@@ -338,6 +349,7 @@ export class BotManager {
       bot.connectionId = patch.connectionId;
     }
     if (patch.mode !== undefined) bot.mode = patch.mode;
+    if (patch.paperTrading !== undefined) bot.paperTrading = patch.paperTrading;
     if (patch.interval !== undefined) bot.interval = patch.interval;
     if (patch.barCount !== undefined) bot.barCount = Math.max(2, patch.barCount);
     if (patch.pollMs !== undefined) bot.pollMs = Math.max(1000, patch.pollMs);
@@ -376,13 +388,19 @@ export class BotManager {
     if (!bot.symbols.length) throw new Error(`机器人「${bot.name}」没有标的`);
 
     const adapter: ExchangeAdapter = this.connections.adapter(bot.connectionId);
-    // 选了「实时」就必须真的走实盘：条件不满足时直接拒绝启动，
-    // 而不是悄悄退回本地撮合 —— 用户以为钱打出去了，实际没动，是最糟的结局。
-    const liveTrading = this.resolveLiveTrading(bot, adapter);
-    if (bot.mode === "live" && !liveTrading) {
-      throw new Error(`机器人「${bot.name}」设为实时，但${this.liveBlockedReason(bot, adapter)}；不会启动`);
+    /**
+     * 实时模式有两种跑法，边界必须清楚：
+     * - 实盘（liveTrading=true）：paperTrading=false 且四条件齐备。任一不满足**拒绝启动**，
+     *   不悄悄降级 —— 用户以为钱打出去了实际没动，是最糟的结局。
+     * - 模拟成交（liveTrading=false）：行情照真拉，撮合在本地，零资金风险。
+     *   这是默认跑法：机器人跟着真实市场干跑，统计盈亏，验证行为。
+     */
+    const wantsReal = bot.mode === "live" && !bot.paperTrading;
+    const liveTrading = wantsReal ? this.resolveLiveTrading(bot, adapter) : false;
+    if (wantsReal && !liveTrading) {
+      throw new Error(`机器人「${bot.name}」设为真实下单，但${this.liveBlockedReason(bot, adapter)}；不会启动`);
     }
-    // 同一连接同时只允许一个实盘机器人，避免并行下真单
+    // 同一连接同时只允许一个实盘机器人，避免并行下真单（模拟成交不受限）
     if (liveTrading) this.assertLiveExclusive(bot);
 
     const runtime = this.buildRuntime(bot, adapter, this.lanesFor(bot), liveTrading);
@@ -393,17 +411,25 @@ export class BotManager {
       status: "running",
       startedAt: new Date().toISOString(),
     });
-    if (liveTrading) log.warn("机器人「%s」进入实盘：订单将真实发往交易所", bot.name);
+    if (liveTrading) {
+      log.warn("机器人「%s」进入实盘：订单将真实发往交易所", bot.name);
+    } else if (bot.mode === "live") {
+      log.info("机器人「%s」实时启动（模拟成交）：行情真实、撮合在本地，零资金风险", bot.name);
+    }
 
     try {
       if (bot.mode === "backtest") {
         await this.runOnce(bot, runtime, adapter);
+        // 回测跑完即止，这里就是终点
+        const st = this.state(id);
+        if (st.status === "running") {
+          this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
+        }
       } else {
         await this.runLive(bot, runtime, adapter);
-      }
-      const st = this.state(id);
-      if (st.status === "running") {
-        this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
+        // 实时模式：runLive 只完成预热并启动轮询器就返回，机器人**仍在运行**。
+        // 绝不能在这里标 stopped —— 轮询器还在跑，标了就是假状态，
+        // 还会让 isRunning() 误判、允许对同一个机器人叠着启动第二个轮询器。
       }
       return this.state(id);
     } catch (err) {
@@ -641,6 +667,8 @@ export class BotManager {
       allocation: this.allocationOf(bot, rt),
       equityCurve: pushPoint(this.state(bot.id).equityCurve, rt.pipeline.portfolio.equityCurve().at(-1)),
       durationMs: Date.now() - started,
+      trades: this.tradesOf(rt),
+      pnlBySymbol: this.pnlBySymbol(rt),
     });
   }
 
@@ -657,6 +685,8 @@ export class BotManager {
       metrics: this.metricsOf(bot, rt),
       allocation: this.allocationOf(bot, rt),
       equityCurve: rt.pipeline.portfolio.equityCurve().slice(-CURVE_POINTS),
+      trades: this.tradesOf(rt),
+      pnlBySymbol: this.pnlBySymbol(rt),
     });
 
     const poller = new LivePoller(adapter, rt.bus, rt.pipeline.book, {
@@ -676,6 +706,8 @@ export class BotManager {
           durationMs: Date.now() - started,
           metrics: this.metricsOf(bot, rt),
           allocation: this.allocationOf(bot, rt),
+          trades: this.tradesOf(rt),
+          pnlBySymbol: this.pnlBySymbol(rt),
         });
         // 熔断：该机器人自己的回撤越限 -> 自动停
         if (rt.pipeline.portfolio.drawdownPct >= bot.risk.maxDrawdownPct) {
@@ -725,6 +757,38 @@ export class BotManager {
       realizedPnl: Number(realized.toFixed(4)),
       totalReturn: bot.risk.initialCash > 0 ? (m.finalEquity - bot.risk.initialCash) / bot.risk.initialCash : 0,
     };
+  }
+
+  /** 成交流水（新->旧，只留尾部若干条），交易统计的明细来源。 */
+  private tradesOf(rt: Runtime): BotTrade[] {
+    return rt.pipeline.portfolio
+      .tradeHistory()
+      .slice(0, MAX_TRADES_PER_BOT)
+      .map((t) => ({
+        id: t.id,
+        timestamp: t.timestamp,
+        symbol: t.symbol,
+        side: t.side,
+        quantity: round8(t.quantity),
+        price: round8(t.price),
+        fee: round4(t.fee),
+        realizedPnl: round2(t.realizedPnl),
+        reason: t.reason,
+      }));
+  }
+
+  /** 各标的的已实现盈亏合计 + 成交笔数："哪个标的在赚钱"一眼可见。 */
+  private pnlBySymbol(rt: Runtime): { symbol: string; realizedPnl: number; fills: number }[] {
+    const bySymbol = new Map<string, { realizedPnl: number; fills: number }>();
+    for (const t of rt.pipeline.portfolio.tradeHistory()) {
+      const agg = bySymbol.get(t.symbol) ?? { realizedPnl: 0, fills: 0 };
+      agg.realizedPnl += t.realizedPnl;
+      agg.fills += 1;
+      bySymbol.set(t.symbol, agg);
+    }
+    return [...bySymbol.entries()]
+      .map(([symbol, agg]) => ({ symbol, realizedPnl: round2(agg.realizedPnl), fills: agg.fills }))
+      .sort((a, b) => b.realizedPnl - a.realizedPnl);
   }
 
   private toView(bot: BotConfig): BotView {
@@ -784,6 +848,8 @@ function freshState(id: string): BotState {
     bars: 0,
     durationMs: 0,
     events: [],
+    trades: [],
+    pnlBySymbol: [],
   };
 }
 

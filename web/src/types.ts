@@ -234,6 +234,8 @@ export interface Bot {
   strategyId?: string;
   modelProfileIds: string[];
   decisionInterval: number;
+  /** 实时模式的成交方式：true = 模拟成交（行情真实、本地撮合），false = 真实下单 */
+  paperTrading: boolean;
   strategy: {
     fastWindow: number;
     slowWindow: number;
@@ -278,7 +280,24 @@ export interface Bot {
     bars: number;
     durationMs: number;
     events: { topic: string; timestamp: string; summary: string }[];
+    /** 成交流水（新->旧，尾部若干条） */
+    trades: BotTrade[];
+    /** 各标的的已实现盈亏合计 */
+    pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
   };
+}
+
+/** 成交流水的一行。 */
+export interface BotTrade {
+  id: number;
+  timestamp: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  fee: number;
+  realizedPnl: number;
+  reason: string;
 }
 
 /** 策略列表里的一条（服务端 src/strategies/profileStore.ts 的实体）。 */
@@ -312,6 +331,8 @@ export interface BotInput {
   strategyId?: string;
   modelProfileIds?: string[];
   decisionInterval?: number;
+  /** 实时模式的成交方式：true = 模拟成交（默认），false = 真实下单 */
+  paperTrading?: boolean;
   strategy?: {
     fastWindow?: number;
     slowWindow?: number;

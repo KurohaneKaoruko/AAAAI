@@ -60,6 +60,14 @@ export interface BotConfig {
   modelProfileIds: string[];
   /** 每 N 根 K 线问一次模型 */
   decisionInterval: number;
+  /**
+   * 实时模式下的成交方式：
+   * - true ：真实下单（需满足实盘四条件，同一连接限一个）
+   * - false：模拟成交 —— 行情是真的，撮合在本地，零资金风险
+   * 这是机器人自己的开关，与「风控」页的全局执行方式相互独立：
+   * 全局说"可以真实下单"，具体哪个机器人真下单仍由它自己决定。
+   */
+  paperTrading: boolean;
   strategy: BotStrategy;
   risk: BotRisk;
   createdAt: string;
@@ -103,13 +111,31 @@ export interface BotMetrics {
   totalReturn: number;
 }
 
+/** 成交流水的一行（机器人维度的交易统计明细）。 */
+export interface BotTrade {
+  id: number;
+  timestamp: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  fee: number;
+  /** 卖出/减仓时结算的已实现盈亏；买入为 0 */
+  realizedPnl: number;
+  /** 触发该成交的决策理由（含 [llm] / systemone / fallback 标记） */
+  reason: string;
+}
+
 export interface BotState {
   id: string;
   status: BotStatus;
   /**
    * 本次运行是否真的在发真实订单。
-   * 界面上必须原样透出：用户选了「实时」却因为配置不到位在本地撮合，
-   * 如果不标出来就会以为钱已经打出去了。
+   * 三种取值要分清：
+   * - live  ：订单真实发往交易所
+   * - paper ：用真实行情、本地模拟撮合（默认，安全）
+   * - backtest：跑一次历史，跑完即停
+   * 界面必须原样透出：用户得随时知道钱有没有真的动。
    */
   liveTrading: boolean;
   /**
@@ -128,6 +154,13 @@ export interface BotState {
   durationMs: number;
   /** 最近事件（该机器人自己的） */
   events: { topic: string; timestamp: string; summary: string }[];
+  /** 成交流水（新->旧，尾部若干条）。交易统计的明细就在这里，不再依赖"另开一页查" */
+  trades: BotTrade[];
+  /**
+   * 各标的的已实现盈亏合计（按 symbol 聚合）。
+   * "哪个标的在赚钱/亏钱"是交易统计里最常被问的问题，直接算好。
+   */
+  pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
 }
 
 export interface BotView extends BotConfig {
@@ -164,6 +197,8 @@ export interface BotInput {
   strategyId?: string;
   modelProfileIds?: string[];
   decisionInterval?: number;
+  /** 实时模式的成交方式：true = 真实下单（需满足实盘条件），false = 模拟成交（默认） */
+  paperTrading?: boolean;
   strategy?: Partial<BotStrategy>;
   risk?: Partial<BotRisk>;
   enabled?: boolean;
