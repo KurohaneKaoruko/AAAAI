@@ -83,6 +83,22 @@ test("机器人：回测并行运行，资金与成交各自独立", async () =>
     // 小资金的机器人受最小调仓额限制，成交明显更少
     assert.ok(vb.totalFills < va.totalFills, `最小调仓额应减少成交: ${va.totalFills} -> ${vb.totalFills}`);
     assert.ok(Math.abs(va.finalEquity - 100_000) > 0, "A 应有持仓浮动");
+
+    // 每个机器人自带权益曲线：仪表盘画的是机器人，而不是另一次单账户引擎运行
+    for (const [id, m] of [[a.id, va], [b.id, vb]] as const) {
+      const curve = bots.state(id).equityCurve;
+      assert.ok(curve.length > 1, `机器人 ${id} 应记录权益曲线，实际 ${curve.length} 点`);
+      assert.ok(curve.length <= 400, `曲线点数应受限（上限 400），实际 ${curve.length}`);
+      // 曲线按时间单调递增（时间戳），且末点与指标里的最终权益一致
+      const times = curve.map((p) => Date.parse(p.timestamp));
+      assert.deepEqual(times, [...times].sort((x, y) => x - y), "曲线应按时间升序");
+      // 曲线按 2 位小数落盘（PortfolioManager 统一 round），指标是原值，故留 0.01 容差
+      assert.ok(
+        Math.abs(curve.at(-1)!.equity - m.finalEquity) < 0.01,
+        `曲线末点应等于最终权益：${curve.at(-1)!.equity} vs ${m.finalEquity}`,
+      );
+      assert.ok(curve.every((p) => Number.isFinite(p.equity) && p.equity > 0), "曲线点应有效");
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

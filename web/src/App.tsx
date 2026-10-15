@@ -38,7 +38,7 @@ export function App() {
   const render = () => {
     switch (page) {
       case "dashboard":
-        return <DashboardPage store={store} />;
+        return <DashboardPage store={store} onNavigate={setPage} />;
       case "bots":
         return <BotsPage store={store} />;
       case "exchanges":

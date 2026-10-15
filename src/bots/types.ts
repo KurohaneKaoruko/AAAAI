@@ -106,6 +106,12 @@ export interface BotMetrics {
 export interface BotState {
   id: string;
   status: BotStatus;
+  /**
+   * 权益曲线（仅保留尾部若干点）。
+   * 仪表盘要看的是"各个机器人跑得怎么样"，所以曲线必须来自机器人本身，
+   * 而不是另一次单账户引擎运行的结果。
+   */
+  equityCurve: { timestamp: string; equity: number }[];
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
