@@ -1,155 +1,181 @@
 /**
- * 策略列表：把「策略」做成可管理的实体。
+ * 策略列表（策略页左栏）。
  *
- * 为什么要有它：以前策略参数只活在全局配置里，机器人各自复制一份覆盖参数，
- * 于是同一套思路想在两个机器人上跑就得填两遍，改一处漏一处。
- * 现在：建一次 → 起名 → 多个机器人引用同一个 id；改一处，全体引用生效。
+ * 交互约定：
+ * - 点条目 = 选中并编辑（唯一的选择入口；不再另设「正在编辑」下拉，
+ *   两处选择并存时用户会不知道自己改的是哪一条）；
+ * - 危险操作（删除默认策略）由服务端拒绝，这里直接置灰并给出原因。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../api";
-import type { DecisionSource, StrategyProfile } from "../types";
-import { Button, Empty, Notice, SelectField, TextField } from "./ui";
+import type { StrategyProfile } from "../types";
+import { Button, Empty, Notice, SelectField } from "./ui";
 import { SOURCE_ZH } from "./DecisionSourceSwitch";
 
-export function StrategyProfiles({ store }: { store: import("../state/useAppStore").AppStore }) {
-  const [items, setItems] = useState<StrategyProfile[]>([]);
-  const [defaultId, setDefaultId] = useState<string>("");
+/** 一行字概括这条策略（下方参数说明也用它）。 */
+export function describe(s: StrategyProfile): string {
+  const parts: string[] = [];
+  if (s.decisionSource === "rules") parts.push(`量化交易 · 双均线 ${s.fastWindow}/${s.slowWindow}`);
+  else parts.push(SOURCE_ZH[s.decisionSource]);
+  if (s.selfAllocating) parts.push(`AI 选资产 ≤${s.maxPositions}`);
+  return parts.join(" · ");
+}
+
+export function StrategyList({
+  items,
+  defaultId,
+  selectedId,
+  onSelect,
+  onChanged,
+  running,
+}: {
+  items: StrategyProfile[];
+  defaultId: string;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onChanged: () => void | Promise<void>;
+  running?: boolean;
+}) {
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [rename, setRename] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
 
-  const reload = useCallback(async () => {
+  const guard = async (fn: () => Promise<unknown>) => {
+    setError(null);
     try {
-      const d = await api.strategies();
-      setItems(d.strategies);
-      setDefaultId(d.defaultId);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  /** 当前面板上选中的是哪条（默认策略始终跟着 config.strategy）。 */
-  const selected = items.find((s) => s.id === defaultId) ?? items[0];
-
-  const add = async () => {
-    const name = rename.trim();
-    if (!name) return;
-    setCreating(false);
-    try {
-      // 复制当前默认策略作为模板，改起来少填一遍
-      await api.createStrategy({ name, ...(selected ? templateOf(selected) : {}), note: "" });
-      setRename("");
-      await reload();
+      await fn();
+      await onChanged();
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
+  const add = async () => {
+    const n = name.trim();
+    if (!n) return;
+    await guard(async () => {
+      // 复制当前选中那条作为模板：新建时少填一遍参数
+      const base = items.find((i) => i.id === selectedId);
+      await api.createStrategy({
+        name: n,
+        ...(base
+          ? {
+              decisionSource: base.decisionSource,
+              fastWindow: base.fastWindow,
+              slowWindow: base.slowWindow,
+              maxTargetWeight: base.maxTargetWeight,
+              selfAllocating: base.selfAllocating,
+              maxPositions: base.maxPositions,
+              maxGrossExposure: base.maxGrossExposure,
+              allocationInterval: base.allocationInterval,
+              hybridInfluence: base.hybridInfluence,
+            }
+          : {}),
+      });
+    });
+    setAdding(false);
+    setName("");
+  };
+
   return (
     <>
-      <div className="hint-line" style={{ marginBottom: 10 }}>
-        策略是独立的一条记录：可以建多条（比如「激进趋势」「保守网格」），机器人各自引用一条。
-        修改某条策略会立刻影响所有引用它的机器人。
-      </div>
-
       <div className="strategy-list">
-        {items.map((s) => (
-          <div className={`strategy-row ${s.id === defaultId ? "is-default" : ""}`} key={s.id}>
-            <div className="strategy-main">
-              <span className="strategy-name">{s.name}</span>
-              {s.id === defaultId && <span className="badge badge-idle">默认</span>}
-              <span className="dim small mono">{SOURCE_ZH[s.decisionSource] ?? s.decisionSource}</span>
-              {s.decisionSource === "rules" && (
-                <span className="dim small">
-                  双均线 {s.fastWindow}/{s.slowWindow} · 仓位上限于 {Math.round(s.maxTargetWeight * 100)}%
-                </span>
-              )}
-              {s.selfAllocating && (
-                <span className="dim small">
-                  AI 选资产 · 最多 {s.maxPositions} 个 · 总仓位 {Math.round(s.maxGrossExposure * 100)}%
-                </span>
-              )}
-              {s.decisionSource === "hybrid" && (
-                <span className="dim small">影响力 {Math.round(s.hybridInfluence * 100)}%</span>
-              )}
-            </div>
-            <div className="strategy-actions">
-              {s.id !== defaultId && (
+        {items.map((s) => {
+          const isDefault = s.id === defaultId;
+          const on = s.id === selectedId;
+          return (
+            <div
+              key={s.id}
+              className={`strategy-card ${on ? "strategy-card-on" : ""}`}
+              onClick={() => onSelect(s.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(s.id);
+                }
+              }}
+            >
+              <div className="strategy-card-head">
+                <span className="strategy-card-name">{s.name}</span>
+                {isDefault && <span className="chip chip-sm chip-accent">默认</span>}
+              </div>
+              <div className="strategy-card-meta">{describe(s)}</div>
+              <div className="strategy-card-actions" onClick={(e) => e.stopPropagation()}>
+                {!isDefault && (
+                  <Button
+                    small
+                    variant="ghost"
+                    disabled={running}
+                    title="设为默认：单次运行与对照实验使用它"
+                    onClick={() => void guard(() => api.setDefaultStrategy(s.id))}
+                  >
+                    设为默认
+                  </Button>
+                )}
                 <Button
                   small
-                  onClick={async () => {
-                    await api.setDefaultStrategy(s.id).catch((e) => setError((e as Error).message));
-                    await reload();
+                  variant="ghost"
+                  disabled={running}
+                  onClick={() => void guard(() => api.duplicateStrategy(s.id))}
+                >
+                  复制
+                </Button>
+                <Button
+                  small
+                  variant="ghost"
+                  disabled={running}
+                  onClick={() => {
+                    const next = prompt("重命名策略", s.name);
+                    if (next?.trim()) void guard(() => api.updateStrategy(s.id, { name: next.trim() }));
                   }}
                 >
-                  设为默认
+                  重命名
                 </Button>
-              )}
-              <Button
-                small
-                onClick={async () => {
-                  await api.duplicateStrategy(s.id).catch((e) => setError((e as Error).message));
-                  await reload();
-                }}
-              >
-                复制
-              </Button>
-              <Button
-                small
-                variant="ghost"
-                onClick={async () => {
-                  const next = prompt(`重命名策略「${s.name}」`, s.name);
-                  if (next && next.trim()) {
-                    await api.updateStrategy(s.id, { name: next.trim() }).catch((e) => setError((e as Error).message));
-                    await reload();
-                  }
-                }}
-              >
-                重命名
-              </Button>
-              <Button
-                small
-                variant="danger"
-                disabled={s.id === defaultId}
-                onClick={async () => {
-                  if (!confirm(`删除策略「${s.name}」？引用它的机器人会自动改用默认策略。`)) return;
-                  await api.deleteStrategy(s.id).catch((e) => setError((e as Error).message));
-                  await reload();
-                }}
-              >
-                删除
-              </Button>
+                <Button
+                  small
+                  variant="ghost"
+                  disabled={running || isDefault || items.length <= 1}
+                  title={isDefault ? "默认策略不能删除" : items.length <= 1 ? "至少保留一条" : ""}
+                  onClick={() => {
+                    if (confirm(`删除策略「${s.name}」？引用它的机器人会自动改用默认策略。`)) {
+                      void guard(() => api.deleteStrategy(s.id));
+                    }
+                  }}
+                >
+                  删除
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
+        {items.length === 0 && <Empty>还没有策略。点下面的「新建策略」建一条。</Empty>}
       </div>
 
-      {items.length === 0 && <Empty>还没有策略。点「新建策略」建一条。</Empty>}
-
       <div className="btn-row" style={{ marginTop: 10 }}>
-        {creating ? (
+        {adding ? (
           <>
-            <TextField label="" value={rename} onChange={setRename} placeholder="策略名称，如：BTC 趋势跟踪" />
-            <Button variant="primary" small onClick={() => void add()} disabled={!rename.trim()}>
+            <input
+              autoFocus
+              value={name}
+              placeholder="策略名称，如：BTC 趋势跟踪"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void add();
+                if (e.key === "Escape") setAdding(false);
+              }}
+            />
+            <Button small variant="primary" disabled={!name.trim()} onClick={() => void add()}>
               创建
             </Button>
-            <Button small variant="ghost" onClick={() => setCreating(false)}>
+            <Button small variant="ghost" onClick={() => setAdding(false)}>
               取消
             </Button>
           </>
         ) : (
-          <Button
-            small
-            onClick={() => {
-              setCreating(true);
-              setRename("");
-            }}
-          >
+          <Button small onClick={() => setAdding(true)}>
             + 新建策略
           </Button>
         )}
@@ -163,24 +189,6 @@ export function StrategyProfiles({ store }: { store: import("../state/useAppStor
     </>
   );
 }
-
-/** 复制时只带策略参数（名字/备注另填）。 */
-function templateOf(p: StrategyProfile): Record<string, unknown> {
-  return {
-    decisionSource: p.decisionSource,
-    fastWindow: p.fastWindow,
-    slowWindow: p.slowWindow,
-    maxTargetWeight: p.maxTargetWeight,
-    selfAllocating: p.selfAllocating,
-    maxPositions: p.maxPositions,
-    maxGrossExposure: p.maxGrossExposure,
-    allocationInterval: p.allocationInterval,
-    hybridInfluence: p.hybridInfluence,
-    hybridAnalysisTtlMs: p.hybridAnalysisTtlMs,
-    note: p.note,
-  };
-}
-
 /** 策略选择器（机器人表单用）。 */
 export function StrategyPicker({
   items,
@@ -200,12 +208,4 @@ export function StrategyPicker({
       onChange={onChange}
     />
   );
-}
-
-/** 一行话概括一条策略，便于在下拉里挑。 */
-export function describe(s: StrategyProfile): string {
-  const parts: string[] = [s.name];
-  parts.push(s.decisionSource === "rules" ? `量化 ${s.fastWindow}/${s.slowWindow}` : SOURCE_ZH[s.decisionSource]);
-  if (s.selfAllocating) parts.push(`AI 选资产 ${s.maxPositions} 个`);
-  return parts.join(" · ");
 }

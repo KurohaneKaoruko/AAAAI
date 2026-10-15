@@ -344,6 +344,9 @@ code {
 .page-dashboard .grid-dash { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; }
 @media (max-width: 1180px) { .page-dashboard .grid-dash { grid-template-columns: 1fr; } }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+/* grid-3 此前被 9 处引用却没有对应规则，字段其实全都竖着排 —— 补上 */
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 
 .loading { padding: 60px; text-align: center; color: var(--text-dim); }
 
@@ -1335,3 +1338,96 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 
 .val-block { margin-top: 14px; }
 .row-best { background: var(--notice-ok-bg); }
+
+/* ============================================================
+   策略页：列表 + 编辑器两栏
+   ============================================================ */
+.page-strategy .grid-strategy {
+  display: grid;
+  grid-template-columns: 296px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .page-strategy .grid-strategy { grid-template-columns: 1fr; }
+}
+
+.strategy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* 一条策略 = 一个可点选的条目（不再另设「正在编辑」下拉，避免两处选择打架） */
+.strategy-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.strategy-card:hover { background: var(--bg-hover); }
+.strategy-card-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.strategy-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+.strategy-card-name { font-weight: 600; font-size: 13.5px; }
+.strategy-card-meta { font-size: 11.5px; color: var(--text-dim); line-height: 1.6; }
+.strategy-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.strategy-card-actions .btn { padding: 2px 8px; font-size: 11.5px; }
+
+/* 编辑器里的保存条：改动未保存时一直可见 */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  z-index: 5;
+}
+.save-bar-dirty { border-color: var(--accent); }
+.save-bar-text { font-size: 12.5px; color: var(--text-dim); }
+.save-bar-dirty .save-bar-text { color: var(--accent); }
+
+/* 折叠区：说明性内容默认收起，别把首屏撑满 */
+.collapse {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.collapse > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  list-style: none;
+  user-select: none;
+}
+.collapse > summary::-webkit-details-marker { display: none; }
+.collapse > summary::before { content: "▸ "; color: var(--text-dim); }
+.collapse[open] > summary::before { content: "▾ "; }
+.collapse[open] > summary { border-bottom: 1px solid var(--border-soft); color: var(--text); }
+.collapse-body { padding: 14px 16px; }
