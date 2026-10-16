@@ -59,8 +59,8 @@ export function BacktestPage() {
   const simulatedConnection =
     connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
   /**
-   * 自带标的的交易所（模拟交易所）：没有"选标的"这一步，
-   * 标的由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几个。
+   * 没有标的、只有自带仓位槽的交易所（模拟交易所）：没有"选标的"这一步，
+   * 用哪几个槽由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几个。
    */
   const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
   const builtin = connAdapter?.builtinSymbols ?? false;
@@ -144,11 +144,13 @@ export function BacktestPage() {
           </div>
 
           <div className="symbol-picker">
-            <div className="symbol-picker-head">回测标的{builtin ? "" : "（可多选）"}</div>
+            <div className="symbol-picker-head">
+              {builtin ? "仓位槽（交易所自带）" : "回测标的（可多选）"}
+            </div>
             {builtin ? (
               <>
                 <div className="dim small">
-                  这个交易所自带标的（模拟交易所），不用选 —— 直接开跑，它会用自己的那几个：
+                  模拟交易所没有标的，也不用选 —— 开跑时它把这些仓位槽都算进来：
                 </div>
                 <div className="chip-row">
                   {builtinSymbols.map((s) => (
@@ -327,7 +329,7 @@ export function BacktestPage() {
       {!result && !busy && (
         <Panel title="怎么用">
           <Empty>
-            选好连接与策略{builtin ? "（这个交易所自带标的，不用选）" : "与标的"}后点「开始回测」。
+            选好连接与策略{builtin ? "（这个交易所没有标的，不用选）" : "与标的"}后点「开始回测」。
             结果只在本页显示，不写机器人的任何统计 ——
             机器人只根据实时行情跑，这里专门回答「这套参数在那段历史里行不行」。
           </Empty>

@@ -29,7 +29,7 @@ import { BotManager } from "../src/bots/botManager.js";
 import { AuthService, loadAuthConfig } from "../src/auth/auth.js";
 import { testConfig } from "./helpers.js";
 
-/** 故意不等于测试锁定的默认种子（24680），否则"换路径"看不出来。 */
+/** 故意不等于测试锁定的默认种子（helpers.ts 里那个），否则"换路径"看不出来。 */
 const SEED = 4242;
 
 /** 按 index.ts 的方式接线，好让 HTTP 路由跑的是真实链路。 */
@@ -79,14 +79,14 @@ test("隔离：回测掷新路径，但不动实时机器人脚下的那份行�
   const w = await wire(dir);
   try {
     const live = liveWorld(w.connections, w.conn.id);
-    const before = await live.fetchKlines("DEMO-BTC", "1h", 40);
+    const before = await live.fetchKlines("仓位1", "1h", 40);
 
     const res = await fetch(`http://127.0.0.1:${w.port}/api/backtest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         connectionId: w.conn.id,
-        symbols: ["DEMO-BTC"],
+        symbols: ["仓位1"],
         interval: "1h",
         barCount: 200,
         strategyId: w.strategies.default().id,
@@ -97,13 +97,13 @@ test("隔离：回测掷新路径，但不动实时机器人脚下的那份行�
     const { result } = (await res.json()) as { result: { scenarioSeed: number } };
     assert.equal(result.scenarioSeed, SEED, "回测必须真的用上了指定的随机情景（否则这条用例没测到东西）");
 
-    const after = await live.fetchKlines("DEMO-BTC", "1h", 40);
+    const after = await live.fetchKlines("仓位1", "1h", 40);
     assert.deepEqual(after, before, "回测不得改动实时机器人脚下的行情：机器人看到的必须还是同一条路");
 
     // 另一边：一次性运行确实是另一条路，只是掷在了别人看不见的地方
     const oneOff = w.connections.independentAdapter(w.conn.id);
     oneOff.newScenario?.(SEED);
-    const fresh = await oneOff.fetchKlines("DEMO-BTC", "1h", 40);
+    const fresh = await oneOff.fetchKlines("仓位1", "1h", 40);
     assert.notDeepEqual(fresh, before, "一次性运行应掷出一条与实时不同的随机路径");
   } finally {
     await w.close();
@@ -116,18 +116,18 @@ test("隔离：模拟对照掷新路径，同样不动实时机器人脚下的�
   const w = await wire(dir);
   try {
     const live = liveWorld(w.connections, w.conn.id);
-    const before = await live.fetchKlines("DEMO-BTC", "1h", 40);
+    const before = await live.fetchKlines("仓位1", "1h", 40);
 
     const result = await w.controller.runSimulationComparison({
       keys: ["baseline"],
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       interval: "1h",
       bars: 200,
       scenarioSeed: SEED,
     });
     assert.equal(result.scenarioSeed, SEED, "对照必须真的用上了指定的随机情景");
 
-    const after = await live.fetchKlines("DEMO-BTC", "1h", 40);
+    const after = await live.fetchKlines("仓位1", "1h", 40);
     assert.deepEqual(after, before, "对照不得改动实时机器人脚下的行情");
   } finally {
     await w.close();

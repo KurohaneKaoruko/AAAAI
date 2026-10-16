@@ -69,15 +69,15 @@ test("WatchlistManager: 添加/去重/删除/持久化", () => {
   const dir = tmpDataDir();
   try {
     const wm = new WatchlistManager(dir);
-    wm.add({ symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: "c1" });
+    wm.add({ symbol: "仓位1", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: "c1" });
     assert.throws(
-      () => wm.add({ symbol: "DEMO-BTC", name: "x", assetClass: "crypto", currency: "USDT", connectionId: "c1" }),
+      () => wm.add({ symbol: "仓位1", name: "x", assetClass: "crypto", currency: "USDT", connectionId: "c1" }),
       /已在自选列表中/,
     );
     wm.add({ symbol: "600519", name: "茅台", assetClass: "stock", currency: "CNY", connectionId: "c1" });
     assert.equal(wm.list().length, 2);
-    assert.equal(wm.has("c1", "DEMO-BTC"), true);
-    assert.equal(wm.has("c2", "DEMO-BTC"), false, "按连接隔离");
+    assert.equal(wm.has("c1", "仓位1"), true);
+    assert.equal(wm.has("c2", "仓位1"), false, "按连接隔离");
 
     const reloaded = new WatchlistManager(dir);
     assert.equal(reloaded.list().length, 2);
@@ -95,7 +95,7 @@ test("机器人: 连接不存在 / 没选标的 时给出明确错误", () => {
     const cm = new ConnectionManager(dir);
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
     // 原来这些校验挂在单账户引擎上，引擎删除后由机器人自己把关
-    assert.throws(() => bots.create({ name: "X", connectionId: "不存在的连接", symbols: ["DEMO-BTC"] }), /连接不存在/);
+    assert.throws(() => bots.create({ name: "X", connectionId: "不存在的连接", symbols: ["仓位1"] }), /连接不存在/);
     // 模拟交易所自带标的：不传标的照样能建（这个交易所没有"挑标的"这回事）
     const conn = cm.create({ adapterId: "simulated", label: "模拟" });
     const auto = bots.create({ name: "自带标的", connectionId: conn.id, symbols: [] });
@@ -106,7 +106,7 @@ test("机器人: 连接不存在 / 没选标的 时给出明确错误", () => {
       () => bots.create({ name: "X", connectionId: real.id, symbols: [] }),
       /请至少选择一个标的/,
     );
-    assert.throws(() => bots.create({ name: "", connectionId: conn.id, symbols: ["DEMO-BTC"] }), /请填写机器人名称/);
+    assert.throws(() => bots.create({ name: "", connectionId: conn.id, symbols: ["仓位1"] }), /请填写机器人名称/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -118,9 +118,9 @@ test("机器人: 实时运行状态完整（引擎删除后，运行数据都来
     const cm = new ConnectionManager(dir);
     const conn = cm.create({ adapterId: "simulated", label: "模拟" });
     const wm = new WatchlistManager(dir);
-    wm.add({ symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
+    wm.add({ symbol: "仓位1", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
-    const bot = bots.create({ name: "实时", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
+    const bot = bots.create({ name: "实时", connectionId: conn.id, symbols: ["仓位1"], barCount: 60, pollMs: 100 });
     const st = await bots.start(bot.id);
 
     // 机器人只有实时一种跑法：预热喂指标，成交随实时 K 线产生
@@ -213,12 +213,12 @@ test("候选池行情只按候选池取，并带上是哪个连接的", async ()
     const conn = cm.create({ adapterId: "simulated", label: "模拟" });
     const watchlist = new WatchlistManager(dir);
     // 模拟连接的行情由它自己编，这里只是借它验证"按候选池取行情 + 带上连接"这条链路
-    watchlist.add({ connectionId: conn.id, symbol: "DEMO-BTC", name: "模拟品种", assetClass: "crypto", currency: "USDT" });
+    watchlist.add({ connectionId: conn.id, symbol: "仓位1", name: "模拟品种", assetClass: "crypto", currency: "USDT" });
     const controller = new EngineController(testConfig(), cm, watchlist, new LlmManager(dir));
 
     const tickers = await controller.refreshTickers();
     assert.equal(tickers.length, 1);
-    assert.equal(tickers[0]!.symbol, "DEMO-BTC");
+    assert.equal(tickers[0]!.symbol, "仓位1");
     assert.equal(tickers[0]!.connectionId, conn.id, "界面按 connectionId 分开显示");
     assert.equal(controller.snapshot().tickers.length, 1, "快照里也要带上");
   } finally {
@@ -254,7 +254,7 @@ test("自带标的的连接：机器人的标的被拉齐到自带清单（不�
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
     // 模拟交易所的标的由它自带：界面上没有"挑标的"这一步，
     // 所以老机器人存着的那套必须收敛掉，否则就是一份谁也改不到的隐藏配置
-    const sim = bots.create({ name: "老模拟机器人", connectionId: conn.id, symbols: ["DEMO-BTC"] });
+    const sim = bots.create({ name: "老模拟机器人", connectionId: conn.id, symbols: ["仓位1"] });
     // 真实交易所的机器人不该被动：那边的标的确实是用户选的
     const real = cm.create({ adapterId: "binance", label: "币安" });
     const realBot = bots.create({ name: "真实交易所机器人", connectionId: real.id, symbols: ["BTCUSDT"] });

@@ -184,10 +184,10 @@ export function BotsPage({
 }
 
 /**
- * 这台机器人的标的就完全是交易所自带的那一套（模拟交易所）？
+ * 这台机器人用的就是交易所自带的那几个仓位槽（模拟交易所）？
  *
- * 只有在"确实一样"时才说「交易所自带」：老机器人可能只用了自带清单里的两个，
- * 那时说「自带」就成了假话 —— 卡片上写的必须能在详情页对得上。
+ * 只有"确实就是那几个"时才这么叫：老机器人可能只用了其中两个，
+ * 那时写成"自带"就成了假话 —— 卡片上写的必须能在详情页对得上。
  */
 function usesOnlyBuiltinSymbols(conn: Connection | undefined, symbols: string[]): boolean {
   if (!conn?.adapter?.builtinSymbols) return false;
@@ -208,7 +208,7 @@ function BotCard({
   onOpenDetail,
 }: {
   bot: Bot;
-  /** 连接自带标的（模拟交易所）：不列标的 —— 那几个代码跟用户的选择没关系 */
+  /** 连接没有标的、只有自带仓位槽（模拟交易所）：不列标的 —— 那不是用户挑的东西 */
   builtin: boolean;
   strategies: StrategyProfile[];
   busy: boolean;
@@ -270,9 +270,13 @@ function BotCard({
 
       <div className="bot-meta">
         {builtin ? (
-          <span><em>标的</em> <b className="mono">交易所自带</b></span>
+          <span>
+            <em>仓位槽</em> <b className="mono">{bot.symbols.join(" / ")}</b>
+          </span>
         ) : (
-          <span><em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b></span>
+          <span>
+            <em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b>
+          </span>
         )}
         <span>
           <em>模型</em>{" "}
@@ -497,13 +501,15 @@ function BotForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   /**
-   * 自带标的的交易所（模拟交易所）：标的由交易所定，界面上不出现"挑标的"这一步。
-   * 服务端建机器人时也会自动补上这套，所以这里不选也照样能建。
+   * 没有标的、只有自带仓位槽的交易所（模拟交易所）：界面上不出现"挑标的"这一步。
+   * 服务端建机器人时也会自动补上这几个槽，所以这里不选也照样能建。
    */
-  const connBuiltin = connections.find((c) => c.id === connectionId)?.adapter?.builtinSymbols ?? false;
+  const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
+  const connBuiltin = connAdapter?.builtinSymbols ?? false;
+  const connBuiltinSlots = (connAdapter?.defaultSymbols ?? []).map((s) => s.symbol);
 
   useEffect(() => {
-    // 自带标的的连接不用拉"常用清单"：那几个代码不是给人挑的
+    // 自带仓位槽的连接不用拉"常用清单"：那几个槽不是给人挑的
     if (!connectionId || connBuiltin) return;
     void api.popular(connectionId, 24).then((d) => setPopular(d.symbols)).catch(() => setPopular([]));
   }, [connectionId, connBuiltin]);
@@ -606,11 +612,13 @@ function BotForm({
       </div>
 
       <div className="symbol-picker">
-        <div className="symbol-picker-head">运行标的{connBuiltin ? "" : "（可多选）"}</div>
+        <div className="symbol-picker-head">
+          {connBuiltin ? "仓位槽（交易所自带）" : "运行标的（可多选）"}
+        </div>
         {connBuiltin ? (
           <div className="dim small">
-            这个交易所自带行情与标的（模拟交易所），不用挑：开跑时直接用它的自带清单。
-            想看它用的是哪几个代码，去「策略 → 候选池」页。
+            模拟交易所没有标的：它自带四个仓位槽（{connBuiltinSlots.join(" / ")}），
+            开跑时全都在内 —— 它跟任何真实市场无关，没有「挑哪几个品种」这回事。
           </div>
         ) : (
         <div className="chip-row">

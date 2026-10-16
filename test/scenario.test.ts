@@ -44,9 +44,9 @@ function closes(bars: { close: number }[]): string {
 test("随机情景：换一个情景就是一条新路径（同一代码不再每次长一样）", async () => {
   const a = randomAdapter();
   a.newScenario(1);
-  const first = await a.fetchKlines("DEMO-BTC", "1d", 120);
+  const first = await a.fetchKlines("仓位1", "1d", 120);
   a.newScenario(2);
-  const second = await a.fetchKlines("DEMO-BTC", "1d", 120);
+  const second = await a.fetchKlines("仓位1", "1d", 120);
   assert.notEqual(closes(first), closes(second), "两条情景路径必须不同，否则测的还是同一条路的运气");
 });
 
@@ -63,12 +63,12 @@ test("随机情景：连续掷 10 次，至少 9 次路径互不相同（排除�
 test("情景内自洽：同一情景重复取数逐字节一致，取数顺序也不影响重叠部分", async () => {
   const a = randomAdapter();
   a.newScenario(7);
-  const wide = await a.fetchKlines("DEMO-ETH", "1h", 200);
-  const wideAgain = await a.fetchKlines("DEMO-ETH", "1h", 200);
+  const wide = await a.fetchKlines("仓位2", "1h", 200);
+  const wideAgain = await a.fetchKlines("仓位2", "1h", 200);
   assert.deepEqual(wide, wideAgain, "同一情景同一窗口必须逐字节一致（历史不能自己变）");
 
   // 先取长窗口再取短窗口：重叠的 50 根必须一致，否则预热段和后续成交会对不上
-  const narrow = await a.fetchKlines("DEMO-ETH", "1h", 50);
+  const narrow = await a.fetchKlines("仓位2", "1h", 50);
   assert.deepEqual(
     wide.slice(-50),
     narrow,
@@ -79,12 +79,12 @@ test("情景内自洽：同一情景重复取数逐字节一致，取数顺序�
 test("复现：同一个种子原样重现同一个结果（随机不等于无法查证）", async () => {
   const a = randomAdapter();
   a.newScenario(20260916);
-  const first = await a.fetchKlines("DEMO-BTC", "1d", 150);
+  const first = await a.fetchKlines("仓位1", "1d", 150);
   // 中间换几次情景，确认不会串味
   a.newScenario();
   a.newScenario(1);
   a.newScenario(20260916);
-  const again = await a.fetchKlines("DEMO-BTC", "1d", 150);
+  const again = await a.fetchKlines("仓位1", "1d", 150);
   assert.deepEqual(first, again, "同一种子必须能原样重现");
 });
 
@@ -95,8 +95,8 @@ test("行情特征：存在共同市场因子（标的相关性为正），否�
   for (const seed of [11, 22, 33, 44]) {
     a.newScenario(seed);
     const [btc, eth] = await Promise.all([
-      a.fetchKlines("DEMO-BTC", "1d", 150),
-      a.fetchKlines("DEMO-ETH", "1d", 150),
+      a.fetchKlines("仓位1", "1d", 150),
+      a.fetchKlines("仓位2", "1d", 150),
     ]);
     const rb = btc.slice(1).map((b, i) => Math.log(b.close / btc[i]!.close));
     const re = eth.slice(1).map((b, i) => Math.log(b.close / eth[i]!.close));
@@ -120,7 +120,7 @@ test("行情特征：存在共同市场因子（标的相关性为正），否�
 
 test("行情量级：波动率落在可信区间，价格不会在窗口内飘到离谱", async () => {
   const a = randomAdapter();
-  for (const symbol of ["600519", "DEMO-BTC"]) {
+  for (const symbol of ["600519", "仓位1"]) {
     const perBar: number[] = [];
     const spans: number[] = [];
     for (const seed of [101, 202, 303, 404]) {
@@ -146,7 +146,7 @@ test("回测：每次自动掷新路径，且把种子记进结果", async () =>
   try {
     const strategies = new StrategyStore(dir);
     const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
-    const input = { symbols: ["DEMO-BTC"], interval: "1d", barCount: 150, strategyId: profile.id };
+    const input = { symbols: ["仓位1"], interval: "1d", barCount: 150, strategyId: profile.id };
 
     const first = await runBacktest(testConfig(), randomAdapter(), profile, input);
     const second = await runBacktest(testConfig(), randomAdapter(), profile, input);
@@ -167,7 +167,7 @@ test("回测：填入种子即可原样重现整段流水（随机结果也得�
     const strategies = new StrategyStore(dir);
     const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
     const adapter = randomAdapter();
-    const input = { symbols: ["DEMO-BTC"], interval: "1d", barCount: 150, strategyId: profile.id, scenarioSeed: 424242 };
+    const input = { symbols: ["仓位1"], interval: "1d", barCount: 150, strategyId: profile.id, scenarioSeed: 424242 };
 
     const first = await runBacktest(testConfig(), adapter, profile, input);
     // 同一个适配器实例、同一根种子：必须逐笔一致
@@ -191,7 +191,7 @@ test("对照：所有参赛者共用同一条路径（换路径等于换一套�
     { id: "s-1", label: "策略一", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 3, slowWindow: 8 } },
     { id: "s-2", label: "策略二", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 8, slowWindow: 30 } },
   ];
-  const opts = { adapter, symbols: ["DEMO-BTC"], bars: 150, interval: "1d", liveTrading: false, runners };
+  const opts = { adapter, symbols: ["仓位1"], bars: 150, interval: "1d", liveTrading: false, runners };
 
   const first = await runComparison(testConfig(), opts);
   const second = await runComparison(testConfig(), opts);
@@ -217,7 +217,7 @@ test("对照：传种子可复现整场名次", async () => {
   ];
   const opts = {
     adapter,
-    symbols: ["DEMO-BTC"],
+    symbols: ["仓位1"],
     bars: 150,
     interval: "1d",
     liveTrading: false,

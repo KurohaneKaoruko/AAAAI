@@ -38,7 +38,7 @@ async function waitFor(cond: () => boolean, ms = 8000): Promise<void> {
 test("机器人：可创建多个，各自保存独立配置", () => {
   const { dir, bots, connectionId } = setup();
   try {
-    const a = bots.create({ name: "BTC 趋势", connectionId, symbols: ["DEMO-BTC"] });
+    const a = bots.create({ name: "BTC 趋势", connectionId, symbols: ["仓位1"] });
     const b = bots.create({
       name: "A股均线",
       connectionId,
@@ -77,7 +77,7 @@ test("机器人：并行运行，资金与成交各自独立", async () => {
     const b = bots.create({
       name: "B",
       connectionId,
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       pollMs: 120,
       barCount: 60,
       risk: { initialCash: 20_000, minTradeValue: 5000 },
@@ -125,7 +125,7 @@ test("机器人：各账号的资产配置互不影响（同一候选池，不�
     const a = bots.create({
       name: "A账号",
       connectionId,
-      symbols: ["600519", "DEMO-BTC"],
+      symbols: ["600519", "仓位1"],
       barCount: 200,
       strategy: { fastWindow: 3, slowWindow: 8 },
       risk: { initialCash: 100_000 },
@@ -133,7 +133,7 @@ test("机器人：各账号的资产配置互不影响（同一候选池，不�
     const b = bots.create({
       name: "B账号",
       connectionId,
-      symbols: ["600519", "DEMO-BTC"],
+      symbols: ["600519", "仓位1"],
       barCount: 200,
       strategy: { fastWindow: 8, slowWindow: 30 },
       risk: { initialCash: 30_000, maxPositionWeight: 0.5 },
@@ -177,7 +177,7 @@ test("机器人：重复启动会被拒绝，停止后状态更新", async () =>
     const bot = bots.create({
       name: "A",
       connectionId,
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       barCount: 60,
       pollMs: 100,
     });
@@ -200,14 +200,14 @@ test("机器人：重复启动会被拒绝，停止后状态更新", async () =>
 test("机器人：坏配置给出明确报错，删除后不再保留", async () => {
   const { dir, bots, connectionId } = setup();
   try {
-    assert.throws(() => bots.create({ name: "", connectionId, symbols: ["DEMO-BTC"] }), /名称/);
+    assert.throws(() => bots.create({ name: "", connectionId, symbols: ["仓位1"] }), /名称/);
     // 不校验"没选标的"：这个连接是模拟交易所，标的是它自带的（见 connections.test.ts）
     assert.throws(
-      () => bots.create({ name: "X", connectionId: "nope", symbols: ["DEMO-BTC"] }),
+      () => bots.create({ name: "X", connectionId: "nope", symbols: ["仓位1"] }),
       /连接不存在/,
     );
 
-    const bot = bots.create({ name: "X", connectionId, symbols: ["DEMO-BTC"], barCount: 40 });
+    const bot = bots.create({ name: "X", connectionId, symbols: ["仓位1"], barCount: 40 });
     await bots.start(bot.id);
     bots.remove(bot.id);
     assert.equal(bots.list().length, 0);
@@ -226,7 +226,7 @@ test("机器人：配置持久化到 bots.json，重启后仍在", async () => {
     const created = first.create({
       name: "持久化",
       connectionId: conn.id,
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       decisionSource: "chat",
       modelProfileIds: ["abc"],
     });
@@ -261,7 +261,7 @@ function liveSetup(mode: "paper" | "live") {
 test("实盘：实时模式 + 执行方式为真实下单 => 真的会发真实订单", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
-    const bot = bots.create({ name: "实盘机器人", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
+    const bot = bots.create({ name: "实盘机器人", connectionId: conn, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 30 });
     const st = await bots.start(bot.id);
     assert.equal(st.liveTrading, true, "条件齐备时应标记为实盘");
     assert.equal(bots.state(bot.id).liveTrading, true);
@@ -275,7 +275,7 @@ test("实盘：实时模式 + 执行方式为真实下单 => 真的会发真实�
 test("实盘：选了实时但执行方式仍是模拟 => 拒绝启动，而不是悄悄降级", async () => {
   const { dir, bots, conn } = liveSetup("paper");
   try {
-    const bot = bots.create({ name: "想实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
+    const bot = bots.create({ name: "想实盘", connectionId: conn, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 30 });
     await assert.rejects(
       () => bots.start(bot.id),
       /设为真实下单.*执行方式仍是模拟成交.*不会启动/,
@@ -292,8 +292,8 @@ test("实盘：同一连接同时只允许一个实盘机器人", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
     // 手动把一个机器人置为运行中（模拟"已经在实盘跑着"），避免真的并发等待
-    const first = bots.create({ name: "实盘一号", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
-    const second = bots.create({ name: "实盘二号", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", paperTrading: false, barCount: 30 });
+    const first = bots.create({ name: "实盘一号", connectionId: conn, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 30 });
+    const second = bots.create({ name: "实盘二号", connectionId: conn, symbols: ["仓位2"], mode: "live", paperTrading: false, barCount: 30 });
     bots["states"].set(first.id, { ...bots.state(first.id), status: "running", liveTrading: true });
 
     await assert.rejects(
@@ -309,8 +309,8 @@ test("实盘：同一连接同时只允许一个实盘机器人", async () => {
 test("模拟成交机器人不受实盘互斥限制，可与实盘机器人并行", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
-    const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
-    const paper = bots.create({ name: "模拟", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", paperTrading: true, barCount: 30 });
+    const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 30 });
+    const paper = bots.create({ name: "模拟", connectionId: conn, symbols: ["仓位2"], mode: "live", paperTrading: true, barCount: 30 });
     bots["states"].set(liveBot.id, { ...bots.state(liveBot.id), status: "running", liveTrading: true });
     const st = await bots.start(paper.id);
     assert.equal(st.status, "running", "模拟成交机器人不应被实盘互斥挡住；启动后保持 running");
@@ -331,8 +331,8 @@ test("实盘：不同连接之间互不干扰", async () => {
     const config = { ...testConfig(), execution: { ...testConfig().execution, mode: "live" } };
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
-    const a = bots.create({ name: "A", connectionId: c1.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
-    const b = bots.create({ name: "B", connectionId: c2.id, symbols: ["DEMO-ETH"], mode: "live", paperTrading: false, barCount: 30 });
+    const a = bots.create({ name: "A", connectionId: c1.id, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 30 });
+    const b = bots.create({ name: "B", connectionId: c2.id, symbols: ["仓位2"], mode: "live", paperTrading: false, barCount: 30 });
     bots["states"].set(a.id, { ...bots.state(a.id), status: "running", liveTrading: true });
     const st = await bots.start(b.id);
     assert.equal(st.status, "running", "不同连接可以各自实盘；实时启动后应保持 running");
@@ -371,7 +371,7 @@ test("机器人也会给自我进化留痕（否则用了机器人等于关掉�
     const bot = bots.create({
       name: "留痕机器人",
       connectionId: conn.id,
-      symbols: ["DEMO-BTC", "DEMO-ETH"],
+      symbols: ["仓位1", "仓位2"],
       barCount: 60,
       pollMs: 100,
       strategyId: strategy.id,
@@ -404,7 +404,7 @@ test("配置热更新会同步到机器人（否则实盘判定读到旧的执�
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
-    const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 20 });
+    const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["仓位1"], mode: "live", paperTrading: false, barCount: 20 });
     const next: AppConfig = { ...config, execution: { ...config.execution, mode: "live" } };
     bots.useConfig(next);
 
@@ -436,7 +436,7 @@ test("模拟成交（默认）：实时机器人用真实行情本地撮合，�
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
     // paperTrading 缺省 = true：实时 + 模拟成交，应当能启动
-    const bot = bots.create({ name: "干跑", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40 });
+    const bot = bots.create({ name: "干跑", connectionId: conn.id, symbols: ["仓位1"], mode: "live", paperTrading: true, barCount: 40 });
     const st = await bots.start(bot.id);
     assert.equal(st.liveTrading, false, "模拟成交绝不是实盘");
     assert.equal(st.status, "running", "实时机器人启动后保持 running（轮询器在跑）");
@@ -465,8 +465,8 @@ test("模拟成交：实时机器人不受实盘互斥限制，可多个并行",
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
-    const a = bots.create({ name: "干跑A", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40 });
-    const b = bots.create({ name: "干跑B", connectionId: conn.id, symbols: ["DEMO-ETH"], mode: "live", paperTrading: true, barCount: 40 });
+    const a = bots.create({ name: "干跑A", connectionId: conn.id, symbols: ["仓位1"], mode: "live", paperTrading: true, barCount: 40 });
+    const b = bots.create({ name: "干跑B", connectionId: conn.id, symbols: ["仓位2"], mode: "live", paperTrading: true, barCount: 40 });
     bots["states"].set(a.id, { ...bots.state(a.id), status: "running", liveTrading: false });
     const st = await bots.start(b.id);
     assert.equal(st.status, "running", "模拟成交机器人不应被实盘互斥挡住；启动后保持 running");
@@ -483,7 +483,7 @@ test("交易统计：成交流水与分标的盈亏来自机器人自己的成�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["DEMO-BTC", "DEMO-ETH"], barCount: 120, pollMs: 100 });
+    const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["仓位1", "仓位2"], barCount: 120, pollMs: 100 });
     const st = await bots.start(bot.id);
 
     assert.equal(st.trades.length, 0, "预热不产生成交");
@@ -527,7 +527,7 @@ test("老数据迁移：没有 paperTrading 字段的机器人补默认值 true�
         name: "老机器人",
         enabled: true,
         connectionId: conn.id,
-        symbols: ["DEMO-BTC"],
+        symbols: ["仓位1"],
         mode: "live",
         interval: "1m",
         barCount: 30,
@@ -565,7 +565,7 @@ test("实时机器人启动后必须保持 running（轮询器在跑，start 返
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
 
-    const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["DEMO-BTC"], paperTrading: true, barCount: 40, pollMs: 200 });
+    const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["仓位1"], paperTrading: true, barCount: 40, pollMs: 200 });
     await bots.start(bot.id);
     const st = bots.state(bot.id);
     assert.equal(st.status, "running", "start() 返回后实时机器人必须仍是 running");
@@ -597,7 +597,7 @@ test("运行存档：stop 后写盘，重启进程（重建 BotManager）后历�
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
-    const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 120, pollMs: 100 });
+    const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["仓位1"], barCount: 120, pollMs: 100 });
 
     await bots.start(bot.id);
     await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0);
@@ -631,7 +631,7 @@ test("运行存档汇总：多次运行求和、胜负统计只算已结束的�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 120, pollMs: 100 });
+    const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["仓位1"], barCount: 120, pollMs: 100 });
 
     // 第一轮
     await bots.start(bot.id);
@@ -668,7 +668,7 @@ test("运行存档：明细被截断时必须如实标注（不能让人以为�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 400 });
+    const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["仓位1"], barCount: 400 });
     await bots.start(bot.id);
     bots.stop(bot.id);
     const rec = bots.list()[0]!.history[0]!;
@@ -691,7 +691,7 @@ test("运行存档：机器人删除后存档一并消失（不留幽灵数据�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60 });
+    const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["仓位1"], barCount: 60 });
     bots.stop(bot.id);
     bots.remove(bot.id);
 
@@ -715,7 +715,7 @@ test("运行存档：正在运行的快照有节流，不会每次轮询都写�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "节流", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
+    const bot = bots.create({ name: "节流", connectionId: conn.id, symbols: ["仓位1"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
     await bots.start(bot.id);
     const rec0 = bots.list()[0]!.history[0]!;
     assert.equal(rec0.status, "running", "运行中的存档应是 running");
@@ -747,7 +747,7 @@ test("运行存档：上次进程遗留的 running 存档必须标为中断（�
 
     // 先建机器人拿到 id，再写一份"上次进程"留下的运行中存档
     const bots0 = new BotManager(dir, config, connections, new LlmManager(dir));
-    const id = bots0.create({ name: "被杀", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 30 }).id;
+    const id = bots0.create({ name: "被杀", connectionId: conn.id, symbols: ["仓位1"], mode: "live", paperTrading: true, barCount: 30 }).id;
     writeFileSync(
       join(dir, "bots-history.json"),
       JSON.stringify({
@@ -764,7 +764,7 @@ test("运行存档：上次进程遗留的 running 存档必须标为中断（�
             finishedAt: null,
             durationMs: 42,
             bars: 3,
-            symbols: ["DEMO-BTC"],
+            symbols: ["仓位1"],
             strategyName: "默认策略",
             metrics: null,
             equityCurve: [],
@@ -799,7 +799,7 @@ test("操作指引：把机器人的目标仓位换算成可人工照做的交�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "指引", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
+    const bot = bots.create({ name: "指引", connectionId: conn.id, symbols: ["仓位1"], barCount: 60, pollMs: 100 });
 
     await bots.start(bot.id);
     // 还没出决策时不能编造操作
@@ -844,11 +844,11 @@ test("预热的历史 K 线仍进 get_history 数据源（否则模型查不到�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "历史", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 50, pollMs: 100 });
+    const bot = bots.create({ name: "历史", connectionId: conn.id, symbols: ["仓位1"], barCount: 50, pollMs: 100 });
     await bots.start(bot.id);
 
     // 预热不进交易，但必须进 historyLog（工具的数据源）
-    const log = bots["historyLog"].get("DEMO-BTC") ?? [];
+    const log = bots["historyLog"].get("仓位1") ?? [];
     assert.ok(log.length >= 50, `预热 K 线应进 historyLog，实际 ${log.length}`);
     assert.ok(log.every((p) => typeof p.close === "number" && p.close > 0), "historyLog 记录应带有效收盘价");
     bots.stop(bot.id);
@@ -870,7 +870,7 @@ test("老数据迁移：旧的回测机器人改为实时 + 模拟成交（历�
         name: "旧回测机器人",
         enabled: true,
         connectionId: conn.id,
-        symbols: ["DEMO-BTC"],
+        symbols: ["仓位1"],
         mode: "backtest",
         interval: "1m",
         barCount: 30,
@@ -901,7 +901,7 @@ test("事件日志：实时决策要记进状态（界面的事件面板不是�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "事件", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
+    const bot = bots.create({ name: "事件", connectionId: conn.id, symbols: ["仓位1"], barCount: 60, pollMs: 100 });
 
     await bots.start(bot.id);
     // 预热不产生事件：否则用户会看到"一启动就几十条决策"
@@ -932,7 +932,7 @@ test("资产配置：权重必须自洽（持仓之和 + 现金 = 100%，市值�
     const bot = bots.create({
       name: "权重",
       connectionId: conn.id,
-      symbols: ["DEMO-BTC", "DEMO-ETH", "600519"],
+      symbols: ["仓位1", "仓位2", "600519"],
       barCount: 60,
       pollMs: 120,
       strategy: { fastWindow: 3, slowWindow: 8 },

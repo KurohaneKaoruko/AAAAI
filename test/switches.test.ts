@@ -81,10 +81,10 @@ test("开关：news.includeInAnalysis 真的控制新闻是否进 prompt", async
   const dir = tmpDir();
   try {
     const base = testConfig();
-    const items = [newsItem("DEMO-BTC", "BTC 大涨")];
+    const items = [newsItem("仓位1", "BTC 大涨")];
     const fetch = (config: AppConfig): Promise<unknown[]> => {
       const { bots } = botsWith(dir, config, items);
-      return (bots as unknown as { newsFetcher: () => (s: string[]) => Promise<unknown[]> }).newsFetcher()(["DEMO-BTC"]);
+      return (bots as unknown as { newsFetcher: () => (s: string[]) => Promise<unknown[]> }).newsFetcher()(["仓位1"]);
     };
 
     assert.equal((await fetch({ ...base, news: { ...base.news, enabled: true, includeInAnalysis: true } })).length, 1, "开启时应注入新闻");
@@ -153,7 +153,7 @@ test("开关：是否请求模型只由 decision_source 决定（rules 时一次
         ...base,
         llm: { ...base.llm, decisionInterval: 1 },
         strategy: { ...base.strategy, decisionSource: source },
-        market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] },
+        market: { ...base.market, barCount: 40, symbols: ["仓位1"] },
         risk: { ...base.risk, maxDrawdownPct: 0.9 },
       };
       const { bots, conn, strategies } = botsWith(dir, cfg, []);
@@ -166,7 +166,7 @@ test("开关：是否请求模型只由 decision_source 决定（rules 时一次
       const bot = bots.create({
         name: "T",
         connectionId: conn.id,
-        symbols: ["DEMO-BTC"],
+        symbols: ["仓位1"],
         interval: "1s",
         barCount: 40,
         pollMs: 60,
@@ -260,13 +260,13 @@ test("文案前提：改决策来源不会影响正在跑的机器人（所以�
   const dir = tmpDir();
   try {
     const base = testConfig();
-    const cfg: AppConfig = { ...base, market: { ...base.market, barCount: 40, symbols: ["DEMO-BTC"] } };
+    const cfg: AppConfig = { ...base, market: { ...base.market, barCount: 40, symbols: ["仓位1"] } };
     const { bots, conn, strategies } = botsWith(dir, cfg, []);
     const s1 = strategies.create({ name: "量化", decisionSource: "rules" });
     const bot = bots.create({
       name: "T",
       connectionId: conn.id,
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       barCount: 40,
       pollMs: 60,
       strategyId: s1.id,

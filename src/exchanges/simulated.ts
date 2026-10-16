@@ -28,11 +28,19 @@ import type {
   Ticker,
 } from "./types.js";
 
-const DEMO_SYMBOLS: SymbolInfo[] = [
-  { symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
-  { symbol: "DEMO-ETH", name: "模拟以太坊", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
-  { symbol: "600519", name: "模拟茅台", assetClass: "stock", currency: "CNY", lotSize: 100, pricePrecision: 2, qtyPrecision: 0 },
-  { symbol: "AAPL", name: "模拟苹果", assetClass: "stock", currency: "USD", lotSize: 1, pricePrecision: 2, qtyPrecision: 0 },
+/**
+ * 模拟交易所交易的是什么：四个空仓位槽。
+ *
+ * 它跟任何真实市场没关系，价格是本地现编的 —— 所以这里**没有标的**，
+ * 一个代码都不代表某个品种。用「仓位N」当键，是因为策略要按横截面分配权重
+ * （这是框架在做的事），总得有个东西承载仓位；叫它仓位槽，
+ * 是为了在任何表里看一眼就知道它不是真实标的，也没法被当成行情截图。
+ */
+const SANDBOX_SLOTS: SymbolInfo[] = [
+  { symbol: "仓位1", name: "模拟仓位 1", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
+  { symbol: "仓位2", name: "模拟仓位 2", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
+  { symbol: "仓位3", name: "模拟仓位 3", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
+  { symbol: "仓位4", name: "模拟仓位 4", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6 },
 ];
 
 /** 随机游走的快频带：周期从 4 根到 80 根（几何分布）。 */
@@ -141,7 +149,10 @@ function profileOf(symbol: string, barsPerDay: number): {
   slowAmp: number;
 } {
   const h = hashOf(symbol);
-  const isCrypto = /BTC|ETH|USDT|SOL/i.test(symbol);
+  // 仓位槽自带资产类别（它们不是行情里查出来的品种，没得可猜）；
+  // 其它代码是测试/调试时随便传进来的，按名字猜。
+  const slot = SANDBOX_SLOTS.find((s) => s.symbol === symbol);
+  const isCrypto = slot ? slot.assetClass === "crypto" : /BTC|ETH|USDT|SOL/i.test(symbol);
   // 日波动率：加密比股票大 2 倍左右
   const dailyVol = isCrypto ? 0.025 : 0.012;
   return {
@@ -167,12 +178,13 @@ export class SimulatedAdapter implements ExchangeAdapter {
     supportsTestnet: false,
     klineIntervals: ["1s", "5s", "15s", "30s", "1m", "5m", "15m", "1h", "4h", "1d"],
     keyFields: [],
-    defaultSymbols: DEMO_SYMBOLS,
+    defaultSymbols: SANDBOX_SLOTS,
     // 标的由交易所自己定：候选池里没有它要配置的东西
     builtinSymbols: true,
     notes: [
       "无需密钥",
-      "标的由模拟交易所自带（不用在候选池里挑）",
+      "没有标的：只有四个仓位槽（仓位1~仓位4），走势在本地随机生成",
+      "不用在候选池里挑：这个交易所没有「允许交易哪些标的」这回事",
       "每次历史模拟都掷一条新的随机路径（同一根 K 线不会每回都长一样）",
       "同一情景内取数自洽：同一时刻反复取必得同一根 K 线",
       "结果里带情景种子，想复现某次结果就用同一个种子重跑（配合同一时刻）",
@@ -236,8 +248,8 @@ export class SimulatedAdapter implements ExchangeAdapter {
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolInfo[]> {
     const q = query.trim().toUpperCase();
-    if (!q) return DEMO_SYMBOLS.slice(0, limit);
-    return DEMO_SYMBOLS.filter(
+    if (!q) return SANDBOX_SLOTS.slice(0, limit);
+    return SANDBOX_SLOTS.filter(
       (s) => s.symbol.toUpperCase().includes(q) || s.name.includes(query.trim()),
     ).slice(0, limit);
   }
