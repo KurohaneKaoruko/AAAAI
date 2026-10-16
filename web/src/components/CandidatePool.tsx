@@ -70,13 +70,13 @@ export function CandidatePool({ store }: { store: AppStore }) {
   }
 
   const adapter = connections.find((c) => c.id === connectionId)?.adapter;
-  // 自带标的的交易所（模拟交易所）：没有"候选池"这回事 —— 行情是它自己编的，
-  // 让人先配一套标的代码才能开跑，纯属多此一举。这里只把这件事说清楚。
+  // 没有标的、只有自带仓位槽的交易所（模拟交易所）：没有"候选池"这回事 ——
+  // 走势是它自己编的，让人先配一套标的代码才能开跑，纯属多此一举。这里只把这件事说清楚。
   if (adapter?.builtinSymbols) {
     return (
       <Panel
         title="候选池"
-        subtitle={`${adapter.name}：自带标的，不需要挑`}
+        subtitle={`${adapter.name}：没有标的，只有自带的仓位槽`}
         actions={
           <select
             className="inline-select"
@@ -95,13 +95,13 @@ export function CandidatePool({ store }: { store: AppStore }) {
         }
       >
         <Notice tone="info">
-          <b>{adapter.name}</b> 的行情是它自己生成的，标的一并自带 ——
+          <b>{adapter.name}</b> 没有标的：它自带四个仓位槽（仓位1~仓位4），走势在本地随机生成 ——
           这里没有要你配的东西，直接去机器 / 回测 / 对照页开跑就行。
           候选池只对<b>真实交易所</b>生效（那里才有「允许交易哪些标的」这回事）。
         </Notice>
         <div className="dim small" style={{ marginTop: 8 }}>
-          模拟的品种是编出来的，没有真实报价可看，所以这里连行情也不列 ——
-          结果里的持仓/成交会出现它们，代码是编的，不是真实标的。
+          这些槽跟任何真实市场无关，所以这里连行情也不列；
+          结果里的持仓/成交会出现 仓位1~仓位4 —— 那是本地编的仓位槽，不是真实标的。
         </div>
       </Panel>
     );

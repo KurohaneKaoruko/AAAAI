@@ -25,7 +25,7 @@ export function makeBars(closes: number[], symbol = "TEST"): Bar[] {
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const base = buildConfig({
     app: { name: "TEST", log_level: "error" },
-    market: { symbols: ["DEMO-BTC"], interval: "1m", bar_count: 120, poll_ms: 60_000 },
+    market: { symbols: ["仓位1"], interval: "1m", bar_count: 120, poll_ms: 60_000 },
     strategy: { name: "momentum", fast_window: 5, slow_window: 20, max_target_weight: 0.5 },
     risk: {
       initial_cash: 100_000,
@@ -52,8 +52,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
  * 它提醒我们那些用例测的是信号出现之后的链路，不测信号本身）。
  *
  * 随机性本身由 test/scenario.test.ts 单独验证（它会清掉这个变量）。
+ *
+ * 种子与下面的时刻是**配套的一对**：价格是 (情景种子, 槽名, 时刻) 的纯函数，
+ * 所以把模拟交易所的仓位槽改名（曾经叫 DEMO-*，现在叫仓位1~仓位4），
+ * 整条路径就重掷了一遍，原来那对取值里"刚好走出信号"的窗口不再成立。
+ * 动过槽名或时刻之后要重新挑一对 —— 判据是 test/bots.test.ts 与
+ * test/backtest.test.ts 双双全绿（2026-10 改槽名后用的就是这一对）。
  */
-process.env.AAAAI_SIM_SEED ??= "24680";
+process.env.AAAAI_SIM_SEED ??= "12";
 
 // 光锁种子还不够：路径是时间的函数，不锁时刻的话，换个钟点跑出来的窗口
 // 就整体平移，"刚好走出信号"变成碰运气。这里把模拟时钟钉死，测试因此
@@ -63,6 +69,9 @@ process.env.AAAAI_SIM_SEED ??= "24680";
 // 条件筛出来的（机器人用例里可得的实时数据就这么多），六种配置全部能在
 // 这 3 根里走出信号。换一组取值可能让某些用例因行情恰好没走出信号而失败 ——
 // 那说明那条用例在赌行情运气，该改用例而不是改种子。
+//
+// 反过来，回测用例要的是"这段窗口里有均线交叉"，与上面这条互相牵制：
+// 挑种子时两个文件一起跑，别只看一个。日期是 2026-10 挑的。
 process.env.AAAAI_SIM_NOW ??= String(Date.UTC(2026, 1, 23, 3, 0, 0));
 
 export function testAdapter(): ExchangeAdapter {

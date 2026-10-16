@@ -169,12 +169,12 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
       return "{}";
     },
     async allocate(_prompt, symbols) {
-      const has = symbols.includes("BTC") && symbols.includes("DEMO-ETH");
+      const has = symbols.includes("BTC") && symbols.includes("仓位2");
       return JSON.stringify({
         allocations: has
           ? pickBtc.on
-            ? { BTC: 0.5, "DEMO-ETH": 0 }
-            : { BTC: 0, "DEMO-ETH": 0.5 }
+            ? { BTC: 0.5, "仓位2": 0 }
+            : { BTC: 0, "仓位2": 0.5 }
           : { BTC: 0.3 },
         confidence: 0.9,
         reason: pickBtc.on ? "轮到买 BTC" : "轮到买 ETH",
@@ -202,7 +202,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
 
   const groups = await Promise.all([
     adapter.fetchKlines("BTC", "1m", 120),
-    adapter.fetchKlines("DEMO-ETH", "1m", 120),
+    adapter.fetchKlines("仓位2", "1m", 120),
   ]);
   const bars = mergeBarsByTime(groups);
 
@@ -224,7 +224,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
     return (pos.quantity * px) / pipeline.portfolio.equity();
   };
   const held = positions().map((p) => p.symbol);
-  assert.ok(held.includes("DEMO-ETH"), `第一阶段应持有 ETH，实际 ${held.join(",") || "空"}`);
+  assert.ok(held.includes("仓位2"), `第一阶段应持有 ETH，实际 ${held.join(",") || "空"}`);
   // 落选的 BTC 必须被清到可忽略：风控刻意不为"不足 1 个单位"的零碎调仓下单，
   // 所以这里按权重断言而不是要求精确为 0。
   assert.ok(
@@ -286,7 +286,7 @@ test("配置器：每 N 轮行情都会重新决策（回归：节流计数器�
 
   const groups = await Promise.all([
     adapter.fetchKlines("BTC", "1m", 220),
-    adapter.fetchKlines("DEMO-ETH", "1m", 220),
+    adapter.fetchKlines("仓位2", "1m", 220),
   ]);
   await streamBars(pipeline.bus, pipeline.book, mergeBarsByTime(groups));
 

@@ -140,8 +140,8 @@ test("策略列表：引用同一策略的两个机器人，改策略两边同�
     const bots = new BotManager(d, testConfig(), connections, new LlmManager(d), strategies);
 
     const shared = strategies.create({ name: "共用策略", fastWindow: 7, slowWindow: 30, maxTargetWeight: 0.6 });
-    const a = bots.create({ name: "A", connectionId: conn.id, symbols: ["DEMO-BTC"], strategyId: shared.id });
-    const b = bots.create({ name: "B", connectionId: conn.id, symbols: ["DEMO-ETH"], strategyId: shared.id });
+    const a = bots.create({ name: "A", connectionId: conn.id, symbols: ["仓位1"], strategyId: shared.id });
+    const b = bots.create({ name: "B", connectionId: conn.id, symbols: ["仓位2"], strategyId: shared.id });
     assert.equal(a.strategyId, shared.id);
     assert.equal(b.strategyId, shared.id);
 
@@ -169,7 +169,7 @@ test("策略列表：引用失效时退回默认策略，而不是让机器人�
     const bots = new BotManager(d, testConfig(), connections, new LlmManager(d), strategies);
 
     const s = strategies.create({ name: "会被删掉的", fastWindow: 9, slowWindow: 40 });
-    const bot = bots.create({ name: "A", connectionId: conn.id, symbols: ["DEMO-BTC"], strategyId: s.id });
+    const bot = bots.create({ name: "A", connectionId: conn.id, symbols: ["仓位1"], strategyId: s.id });
     strategies.remove(s.id);
 
     const resolved = bots.strategyOf(bots.get(bot.id)!);
@@ -192,7 +192,7 @@ test("策略列表：老机器人（内联参数、无 strategyId）迁移后不
         name: "老机器人",
         enabled: true,
         connectionId: conn.id,
-        symbols: ["DEMO-BTC"],
+        symbols: ["仓位1"],
         mode: "backtest",
         interval: "1m",
         barCount: 200,
@@ -249,7 +249,7 @@ test("策略列表：新建机器人未指定策略时，也会得到一条自�
     const bot = bots.create({
       name: "临时策略",
       connectionId: conn.id,
-      symbols: ["DEMO-BTC"],
+      symbols: ["仓位1"],
       decisionSource: "systemone",
       strategy: { fastWindow: 12, slowWindow: 48 },
     });
