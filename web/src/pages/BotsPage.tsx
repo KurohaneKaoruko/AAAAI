@@ -289,22 +289,22 @@ function BotCard({
 
       {a && <AllocationBars alloc={a} />}
 
-      {/* 明细（持仓/收益曲线/逐笔成交/历史/事件/操作指引）都在详情页：
-          卡片只留一眼能看完的东西，否则越堆越厚、反而什么都看不见。 */}
-      <div className="bot-detail-link">
-        <Button small onClick={() => onOpenDetail(bot.id)}>
-          查看详情
-        </Button>
-        <span className="dim small">
-          {bot.state.trades.length > 0
-            ? `${bot.state.trades.length} 笔成交 · ${bot.history.length} 次运行`
-            : `预热 ${bot.state.warmupBars} 根 · 实时 ${bot.state.bars} 根`}
-        </span>
-      </div>
-
       {bot.state.error && <div className="bot-error">{bot.state.error}</div>}
 
-      <Toggle label="参与「全部启动」" checked={bot.enabled} onChange={onToggle} />
+      {/* 底部一行：左边进详情，右边是开关 —— 两头分开，别都堆在左边 */}
+      <div className="bot-card-foot">
+        <div className="bot-detail-link">
+          <Button small onClick={() => onOpenDetail(bot.id)}>
+            查看详情
+          </Button>
+          <span className="dim small">
+            {bot.state.trades.length > 0
+              ? `${bot.state.trades.length} 笔成交 · ${bot.history.length} 次运行`
+              : `预热 ${bot.state.warmupBars} 根 · 实时 ${bot.state.bars} 根`}
+          </span>
+        </div>
+        <Toggle label="参与「全部启动」" checked={bot.enabled} onChange={onToggle} />
+      </div>
     </div>
   );
 }
