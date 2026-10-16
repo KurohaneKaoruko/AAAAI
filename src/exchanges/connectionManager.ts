@@ -127,12 +127,30 @@ export class ConnectionManager {
   adapter(id: string): ExchangeAdapter {
     const cached = this.adapters.get(id);
     if (cached) return cached;
+    const adapter = this.build(id);
+    this.adapters.set(id, adapter);
+    return adapter;
+  }
+
+  /**
+   * 建一个**独立**的适配器实例：不进缓存，用完即弃。
+   *
+   * 为什么必须分开：模拟交易所的情景种子长在适配器实例上，`newScenario()`
+   * 换的是整个价格世界。历史模拟/对照如果直接拿连接上缓存的那个实例去跑，
+   * 就会把正在实时运行的机器人脚下的行情一并换掉 —— 机器人下一根 K 线看到
+   * 的价格和上一根出现断层，凭空冒出一笔成交。一次性历史运行不该改动实时
+   * 连接的适配器状态，所以那边走这个方法。
+   */
+  independentAdapter(id: string): ExchangeAdapter {
+    return this.build(id);
+  }
+
+  private build(id: string): ExchangeAdapter {
     const connection = this.get(id);
     if (!connection) throw new Error(`连接不存在: ${id}`);
     const secret = this.secrets.get(this.key(id));
     const adapter = createAdapter(connection, secret);
     adapter.init({ ...secret, testnet: connection.testnet });
-    this.adapters.set(id, adapter);
     return adapter;
   }
 

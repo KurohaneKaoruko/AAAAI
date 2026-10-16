@@ -59,6 +59,11 @@ export function BacktestPage() {
   const simulatedConnection =
     connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
 
+  // 非法种子宁可不认也不假装在复现：这里明确说"会按随机跑"，
+  // 而不是静默丢掉输入 —— 否则用户以为在同一条路上核对，其实换了条路。
+  const seedInput = seedText.trim();
+  const seedOk = seedInput === "" || (Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0);
+
   const run = async () => {
     if (!connectionId || symbols.length === 0 || !strategyId) return;
     setBusy(true);
@@ -206,6 +211,11 @@ export function BacktestPage() {
                   "每次结果都不同才看得出策略稳不稳"
                 )}
               </span>
+              {!seedOk && (
+                <Notice tone="warn">
+                  「{seedInput}」不是合法种子（要 0 或正整数）：这次会按<b>每次随机</b>跑，不是在复现。
+                </Notice>
+              )}
             </div>
           )}
           {err && <div className="bot-error">{err}</div>}
@@ -280,7 +290,8 @@ export function BacktestPage() {
           </div>
 
           <div className="dim small" style={{ marginTop: 10 }}>
-            注意：回测成交按收盘价一次性撮合，不含滑点外的时点差异，也不含未来数据——
+            成交口径与机器人一致：信号在这根 K 线的收盘算出，成交按<b>下一根 K 线的开盘价</b>撮合，
+            已计手续费与冲击滑点，所以它用不到自己成交那一刻之后的信息（跳空低开就按低开成交，不按收盘价凑）。
             历史成绩不代表未来收益，别把它当成收益承诺。
             要验证「策略在实时行情下会怎么操作」，请去看交易机器人的「操作指引」。
           </div>

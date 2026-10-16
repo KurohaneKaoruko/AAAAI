@@ -422,7 +422,8 @@ export function createServer(controller: EngineController, options: ServerOption
         ? bots.strategyList().find((p) => p.id === body.strategyId)
         : undefined;
       if (!profile) return fail(res, new Error("策略不存在"), 400);
-      const adapter = controller.adapter(body.connectionId);
+      // 独立实例：回测会掷一条新的随机路径，不能掷到实时机器人正在用的那个实例上
+      const adapter = controller.independentAdapter(body.connectionId);
       const result = await runBacktest(
         controller.getConfig(),
         adapter,
