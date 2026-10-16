@@ -16,7 +16,16 @@ const STATUS: Record<string, { text: string; cls: string }> = {
   error: { text: "异常", cls: "badge-error" },
 };
 
-export function BotsPage({ store }: { store: AppStore }) {
+export function BotsPage({
+  store,
+  onOpenDetail,
+  initialEditId,
+}: {
+  store: AppStore;
+  onOpenDetail: (id: string) => void;
+  /** 从详情页点「编辑」进来时，直接打开这台机器人的表单 */
+  initialEditId?: string | null;
+}) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
@@ -24,6 +33,14 @@ export function BotsPage({ store }: { store: AppStore }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Bot | null>(null);
+
+  const [pendingEdit, setPendingEdit] = useState<string | null>(null);
+  // 详情页点「编辑」-> 回列表并打开该机器人的表单
+  useEffect(() => {
+    if (!initialEditId) return;
+    setPendingEdit(initialEditId);
+    setCreating(false);
+  }, [initialEditId]);
 
   const reload = useCallback(async () => {
     try {
@@ -101,15 +118,23 @@ export function BotsPage({ store }: { store: AppStore }) {
         }
       >
         {creating && <BotForm store={store} profiles={profiles} strategies={strategies} onDone={() => { setCreating(false); void reload(); }} />}
-        {editing && (
-          <BotForm
-            store={store}
-            profiles={profiles}
-            strategies={strategies}
-            editing={editing}
-            onDone={() => { setEditing(null); void reload(); }}
-          />
-        )}
+        {(() => {
+          // pendingEdit 优先：从详情页点「编辑」进来时，表单要打开那台机器人
+          const target = pendingEdit ? bots.find((b) => b.id === pendingEdit) : editing;
+          return target ? (
+            <BotForm
+              store={store}
+              profiles={profiles}
+              strategies={strategies}
+              editing={target}
+              onDone={() => {
+                setEditing(null);
+                setPendingEdit(null);
+                void reload();
+              }}
+            />
+          ) : null;
+        })()}
         {error && <Notice tone="error" onClose={() => setError(null)}>{error}</Notice>}
 
         {bots.some((b) => b.state.allocation) && <AllocationOverview bots={bots} />}
@@ -147,6 +172,7 @@ export function BotsPage({ store }: { store: AppStore }) {
                   await api.updateBot(b.id, { enabled: v });
                   void reload();
                 }}
+                onOpenDetail={onOpenDetail}
               />
             ))}
           </div>
@@ -165,6 +191,7 @@ function BotCard({
   onEdit,
   onDelete,
   onToggle,
+  onOpenDetail,
 }: {
   bot: Bot;
   strategies: StrategyProfile[];
@@ -174,6 +201,7 @@ function BotCard({
   onEdit: () => void;
   onDelete: () => void;
   onToggle: (v: boolean) => void;
+  onOpenDetail: (id: string) => void;
 }) {
   const st = STATUS[bot.state.status] ?? STATUS.idle!;
   const m = bot.state.metrics;
@@ -261,32 +289,20 @@ function BotCard({
 
       {a && <AllocationBars alloc={a} />}
 
-      {/* 操作指引：把机器人的目标仓位换算成"人可以照着手动下单"的操作。
-          模拟与实盘的唯一差别是不下单，所以这份清单就是人工模仿机器人的依据。 */}
-      {bot.state.actions.length > 0 && <ActionGuide bot={bot} />}
-
-      {/* 交易统计明细：成交流水 + 分标的盈亏。"赚不赚、哪笔赚"就在这里看 */}
-      {bot.state.trades.length > 0 && <TradeStats state={bot.state} />}
-
-      {/* 历史战绩：跨重启保留的运行存档。机器人长期是赚是赔只能靠它回答 */}
-      {bot.history.length > 0 && <RunHistory bot={bot} />}
+      {/* 明细（持仓/收益曲线/逐笔成交/历史/事件/操作指引）都在详情页：
+          卡片只留一眼能看完的东西，否则越堆越厚、反而什么都看不见。 */}
+      <div className="bot-detail-link">
+        <Button small onClick={() => onOpenDetail(bot.id)}>
+          查看详情
+        </Button>
+        <span className="dim small">
+          {bot.state.trades.length > 0
+            ? `${bot.state.trades.length} 笔成交 · ${bot.history.length} 次运行`
+            : `预热 ${bot.state.warmupBars} 根 · 实时 ${bot.state.bars} 根`}
+        </span>
+      </div>
 
       {bot.state.error && <div className="bot-error">{bot.state.error}</div>}
-
-      {bot.state.events.length > 0 && (
-        <details className="bot-events">
-          <summary>最近事件（{bot.state.events.length}）</summary>
-          <div className="event-log" style={{ maxHeight: 160 }}>
-            {[...bot.state.events].reverse().slice(0, 50).map((e, i) => (
-              <div className="event-row" key={`${e.timestamp}-${i}`}>
-                <span className="event-time mono">{time(e.timestamp)}</span>
-                <span className="event-topic">{e.topic.split(".").pop()}</span>
-                <span className="event-summary mono">{e.summary}</span>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
 
       <Toggle label="参与「全部启动」" checked={bot.enabled} onChange={onToggle} />
     </div>
@@ -299,199 +315,6 @@ function wPct(w: number): string {
   return `${(w * 100).toFixed(digits)}%`;
 }
 
-/**
- * 交易统计明细：分标的盈亏合计 + 成交流水。
- *
- * 模拟成交的机器人跟真实市场干跑，统计必须完整 —— 用户要回答的问题是
- * "这个机器人赚钱吗、靠哪个标的赚的、最近几笔是怎么决策的"。
- */
-/**
- * 历史战绩：每次运行一条（新 -> 旧，重启后仍在）。
- *
- * 口径必须说清楚：每次运行都从初始资金重新开始（不复利），
- * 所以「累计」是各次已实现盈亏之和 —— 写成"总收益率"就是在误导。
- */
-function RunHistory({ bot }: { bot: Bot }) {
-  const t = bot.totals;
-  return (
-    <details className="bot-events">
-      <summary>
-        历史战绩 · {t.runs} 次运行 · 盈利 {t.wins} / 亏损 {t.losses} · 累计已实现 {signed(t.cumulativeRealizedPnl)}
-      </summary>
-      <div className="dim small" style={{ margin: "4px 0 8px" }}>
-        每次运行都从初始资金 {money(bot.risk.initialCash, 0)} 重新开始，累计盈亏为各次已实现盈亏之和，不是复利累计。
-        汇总只计正常结束的运行；出错或中断的运行仍列在下方，不计入汇总。
-        {t.lastRunAt ? ` 最近一次：${time(t.lastRunAt)}` : ""}
-      </div>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>开始时间</th>
-            <th>方式</th>
-            <th>状态</th>
-            <th className="num">收益</th>
-            <th className="num">成交</th>
-            <th className="num">已实现盈亏</th>
-            <th className="num">时长</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bot.history.map((r) => {
-            const m = r.metrics;
-            const ret = m?.totalReturn ?? 0;
-            return (
-              <tr key={r.id}>
-                <td className="mono dim">{time(r.startedAt)}</td>
-                <td className="dim">
-                  {r.liveTrading ? "实时 · 真实下单" : "实时 · 模拟成交"}
-                </td>
-                <td>
-                  {r.status === "stopped" ? (
-                    <span className="dim">已停止</span>
-                  ) : r.status === "running" ? (
-                    <span className="chip chip-sm chip-ok">运行中</span>
-                  ) : (
-                    <span className="chip chip-sm chip-off" title={r.error ?? ""}>出错</span>
-                  )}
-                </td>
-                <td className={`num mono ${ret > 0 ? "up" : ret < 0 ? "down" : "dim"}`}>
-                  {m ? `${(ret * 100).toFixed(2)}%` : "—"}
-                </td>
-                <td className="num mono">{m ? m.totalFills : "—"}</td>
-                <td className={`num mono ${(m?.realizedPnl ?? 0) > 0 ? "up" : (m?.realizedPnl ?? 0) < 0 ? "down" : "dim"}`}>
-                  {m ? signed(m.realizedPnl) : "—"}
-                </td>
-                <td className="num mono dim">{(r.durationMs / 1000).toFixed(0)}s</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div className="dim small" style={{ marginTop: 4 }}>
-        收益口径：该次运行的期末权益 ÷ 初始资金 − 1；累计成交为各次之和。明细截断说明见「交易统计」。
-      </div>
-    </details>
-  );
-}
-
-/**
- * 操作指引：目标仓位与实时持仓的差额，换算成买卖与数量。
- *
- * 数字全部来自服务端（targets / prices / holdings），前端只做展示，不自己猜；
- * 没决策、差额在噪声内、拿不到价格，各有各的说法，不含糊过去。
- */
-function ActionGuide({ bot }: { bot: Bot }) {
-  const a = bot.state.allocation;
-  const acts = bot.state.actions.filter((x) => x.side !== "HOLD");
-  const holds = bot.state.actions.filter((x) => x.side === "HOLD" && x.note);
-  return (
-    <details className="bot-events">
-      <summary>
-        操作指引 · {acts.length > 0 ? `${acts.length} 项待操作` : "暂无需操作"}
-        {a?.decidedAt ? <span className="dim small"> · {time(a.decidedAt)}</span> : null}
-      </summary>
-      {acts.length > 0 && (
-        <table className="table" style={{ marginBottom: 6 }}>
-          <thead>
-            <tr>
-              <th>操作</th>
-              <th>标的</th>
-              <th className="num">数量</th>
-              <th className="num">参考价</th>
-              <th className="num">金额</th>
-              <th className="num">当前→目标</th>
-              <th className="num">目标持仓</th>
-            </tr>
-          </thead>
-          <tbody>
-            {acts.map((x) => (
-              <tr key={x.symbol}>
-                <td>
-                  <span className={`side-tag ${x.side === "BUY" ? "side-buy" : "side-sell"}`}>
-                    {x.side === "BUY" ? "买入" : "卖出"}
-                  </span>
-                </td>
-                <td className="mono strong">{x.symbol}</td>
-                <td className="mono num">{qty(x.quantity)}</td>
-                <td className="mono num">{money(x.price, 4)}</td>
-                <td className="mono num">{money(x.value, 2)}</td>
-                <td className="num mono dim">
-                  {wPct(x.fromWeight)} → {wPct(x.toWeight)}
-                </td>
-                <td className="num mono dim">{qty(x.targetQty)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {a?.reason && acts.length > 0 && <div className="dim small">理由：{a.reason}</div>}
-      {holds.map((x) => (
-        <div key={x.symbol} className="dim small">{x.symbol} · {x.note}</div>
-      ))}
-      {acts.length > 0 && (
-        <div className="dim small">参考价为最新价，成交以实际下单为准；买入需按交易所最小单位取整。</div>
-      )}
-    </details>
-  );
-}
-
-function TradeStats({ state }: { state: Bot["state"] }) {
-  const total = state.pnlBySymbol.reduce((a, p) => a + p.realizedPnl, 0);
-  const shown = state.trades.length;
-  const pumps = state.metrics?.totalFills ?? shown;
-  return (
-    <details className="bot-events">
-      <summary>
-        {/* 流水只留尾部若干条：必须如实说清"看到的不是全部"，否则等于骗人 */}
-        交易统计 · 已实现 {signed(total)} ·{" "}
-        {shown < pumps ? `最近 ${shown} / 共 ${pumps} 笔成交` : `${shown} 笔成交`}
-      </summary>
-      {state.pnlBySymbol.length > 0 && (
-        <table className="table" style={{ marginBottom: 8 }}>
-          <thead>
-            <tr>
-              <th>标的</th>
-              <th className="num">已实现盈亏</th>
-              <th className="num">成交笔数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.pnlBySymbol.map((p) => (
-              <tr key={p.symbol}>
-                <td className="mono">{p.symbol}</td>
-                <td className={`num mono ${p.realizedPnl > 0 ? "up" : p.realizedPnl < 0 ? "down" : "dim"}`}>
-                  {p.realizedPnl === 0 ? "—" : signed(p.realizedPnl)}
-                </td>
-                <td className="num mono">{p.fills}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <div className="event-log" style={{ maxHeight: 200 }}>
-        {state.trades.slice(0, 60).map((t) => (
-          <div className="event-row" key={t.id}>
-            <span className="event-time mono">{time(t.timestamp)}</span>
-            <span className={`mono ${t.side === "BUY" ? "" : "event-topic"}`}>
-              {t.side === "BUY" ? "买入" : "卖出"}
-            </span>
-            <span className="mono">
-              {t.symbol} {t.quantity} @ {t.price}
-            </span>
-            {t.realizedPnl !== 0 && (
-              <span className={`mono ${t.realizedPnl > 0 ? "up" : "down"}`}>{signed(t.realizedPnl)}</span>
-            )}
-            <span className="event-summary mono dim" title={t.reason}>
-              {t.reason}
-            </span>
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-/** 各账号资产配置一览：横向对比谁把钱放在哪。 */
 function AllocationOverview({ bots }: { bots: Bot[] }) {
   const rows = bots.filter((b) => b.state.allocation);
   const symbols = [...new Set(rows.flatMap((b) => b.state.allocation!.holdings.map((h) => h.symbol)))];
