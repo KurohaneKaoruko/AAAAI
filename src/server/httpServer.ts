@@ -22,6 +22,7 @@ import { listAdapterMetas as _unused } from "../exchanges/registry.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { AuthService } from "../auth/auth.js";
 import type { BotManager } from "../bots/botManager.js";
+import { runBacktest } from "../backtest/runner.js";
 import type { NewsService } from "../news/newsService.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
@@ -391,6 +392,52 @@ export function createServer(controller: EngineController, options: ServerOption
   app.post("/api/bots/stop-all", (_req, res) => {
     bots.stopAll();
     ok(res, { bots: bots.list() });
+  });
+
+  // ---------------- 历史模拟（回测：跑一段历史，不属于任何机器人） ----------------
+
+  /**
+   * 一次性回测。与机器人的分工：
+   * 机器人是实时实体（决策/成交/统计都来自实时行情）；
+   * 这里专门回放历史来验证策略参数，成交当然一次性全出 —— 这就是它该做的事。
+   */
+  app.post("/api/backtest", async (req, res) => {
+    const body = (req.body ?? {}) as {
+      connectionId?: string;
+      symbols?: string[];
+      interval?: string;
+      barCount?: number;
+      strategyId?: string;
+      initialCash?: number;
+      maxDrawdownPct?: number;
+      minTradeValue?: number;
+    };
+    if (!body.connectionId || !Array.isArray(body.symbols) || body.symbols.length === 0) {
+      return fail(res, new Error("缺少 connectionId 或 symbols"), 400);
+    }
+    try {
+      const profile = body.strategyId
+        ? bots.strategyList().find((p) => p.id === body.strategyId)
+        : undefined;
+      if (!profile) return fail(res, new Error("策略不存在"), 400);
+      const result = await runBacktest(
+        controller.getConfig(),
+        controller.adapter(body.connectionId),
+        profile,
+        {
+          symbols: body.symbols,
+          interval: body.interval ?? "1d",
+          barCount: Math.max(20, Math.min(1000, Math.floor(body.barCount ?? 200))),
+          strategyId: profile.id,
+          ...(body.initialCash !== undefined ? { initialCash: body.initialCash } : {}),
+          ...(body.maxDrawdownPct !== undefined ? { maxDrawdownPct: body.maxDrawdownPct } : {}),
+          ...(body.minTradeValue !== undefined ? { minTradeValue: body.minTradeValue } : {}),
+        },
+      );
+      ok(res, { result });
+    } catch (err) {
+      fail(res, err);
+    }
   });
 
   /** 模拟对照的参赛者清单（机器人 / 策略 / 模型 / 基线，含不可用原因） */

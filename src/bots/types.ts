@@ -2,7 +2,12 @@
 
 import type { DecisionSource } from "../configSchema.js";
 
-export type BotMode = "backtest" | "live";
+/**
+ * 机器人的运行方式。
+ * 只有实时一种：机器人是实时实体 —— 决策来自实时行情，统计来自实时操作。
+ * 历史数据模拟（回放验证）不属于机器人，在独立的「回测」页做。
+ */
+export type BotMode = "live";
 export type BotStatus = "idle" | "running" | "stopped" | "error";
 
 /**
@@ -97,6 +102,18 @@ export interface BotAllocation {
   holdings: BotHolding[];
   /** 持仓数 / 候选数 */
   heldCount: number;
+  /**
+   * 最新目标权重（symbol -> 0~1，未出现 = 0）。
+   * 来自最新一次决策（AI 配置或信号的目标权重）—— 有了它才能算出
+   * "还要买卖多少才到位"，也就是人工模仿需要的操作指引。
+   */
+  targets: Record<string, number>;
+  /** 最新决策时间（无决策时为 null） */
+  decidedAt: string | null;
+  /** 决策理由（最新一次） */
+  reason: string;
+  /** 各标的的最新价（来自行情；未出现价的标的无法给出指引） */
+  prices: Record<string, number>;
 }
 
 export interface BotMetrics {
@@ -151,6 +168,12 @@ export interface BotState {
   /** 当前资产配置（各标的权重 + 现金），随运行实时更新 */
   allocation: BotAllocation | null;
   bars: number;
+  /**
+   * 预载入的历史 K 线数（仅用于喂指标，不产生任何成交）。
+   * 界面上要和 bars 分开说："预热 N 根 · 实时 M 根"，否则用户会问
+   * "为什么启动就处理了 120 根却一单没成"。
+   */
+  warmupBars: number;
   durationMs: number;
   /** 最近事件（该机器人自己的） */
   events: { topic: string; timestamp: string; summary: string }[];
@@ -161,6 +184,40 @@ export interface BotState {
    * "哪个标的在赚钱/亏钱"是交易统计里最常被问的问题，直接算好。
    */
   pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
+  /**
+   * 当前仓位调整指引（供人工对照实盘模仿）。
+   *
+   * 模拟盘与实盘的唯一差别就是不下单：决策、信号、目标仓位全部一致。
+   * 于是"下一步该做什么"完全可以算出来交给人 —— 不敢全权交给机器人时，
+   * 照着这份清单在自己的交易所 APP 里手动下单即可。
+   */
+  actions: BotAction[];
+}
+
+/** 一条仓位调整指引：把机器人的目标仓位换算成"人可以照做"的操作。 */
+export interface BotAction {
+  symbol: string;
+  /** BUY = 加仓/建仓，SELL = 减仓/清仓，HOLD = 无需操作 */
+  side: "BUY" | "SELL" | "HOLD";
+  /** 建议数量（按参考价换算） */
+  quantity: number;
+  /** 参考价（行情最新价） */
+  price: number;
+  /** 涉及金额（quantity * price） */
+  value: number;
+  /** 当前权重 -> 目标权重 */
+  fromWeight: number;
+  toWeight: number;
+  /** 当前持仓数量 */
+  holdingQty: number;
+  /** 目标对应的持仓数量（可达时） */
+  targetQty: number;
+  /** 决策理由（来自信号/配置） */
+  reason: string;
+  /** 该指引依据的决策时间 */
+  at: string;
+  /** 为什么没给操作（如差额小于最小调仓额、价格缺失等） */
+  note?: string;
 }
 
 /**

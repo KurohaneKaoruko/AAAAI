@@ -31,6 +31,7 @@ import type { EvolutionEngine } from "../evolution/engine.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type {
+  BotAction,
   BotAllocation,
   BotConfig,
   BotHolding,
@@ -72,6 +73,13 @@ export class BotManager {
   private states = new Map<string, BotState>();
   private events = new Map<string, { topic: string; timestamp: string; summary: string }[]>();
   private runtimes = new Map<string, Runtime>();
+  /** 预热中的机器人：预热只喂指标，事件/决策一律不记、不成交 */
+  private readonly warmingUp = new Set<string>();
+  /** 最新决策目标（symbol -> 权重），操作指引的依据 */
+  private readonly latestTargets = new Map<
+    string,
+    { weights: Record<string, number>; reason: string; at: string }
+  >();
   /**
    * 各标的的带时间戳 K 线（get_history 工具的数据源）。
    * 并行机器人看的是同一段行情，所以共用一份，不必每个机器人各存一份。
@@ -242,6 +250,15 @@ export class BotManager {
         bot.paperTrading = true;
         changed = true;
       }
+      // 机器人只做实时：旧的"回测机器人"改为实时 + 模拟成交。
+      // 它本来就只在本地撮合（回测从不发真实订单），迁移不改变资金行为，
+      // 只是不再让它冒充"跑历史的机器人"。
+      if (bot.mode !== "live") {
+        bot.mode = "live";
+        bot.paperTrading = true;
+        changed = true;
+        log.info("机器人「%s」原为回测模式：已改为实时 + 模拟成交（历史模拟请用「回测」页）", bot.name);
+      }
       if (bot.strategyId) continue;
       // decisionSource 必须一起搬过去：漏了会把「对话模型机器人」悄悄降级成量化交易
       const created = this.strategies.create({
@@ -377,8 +394,12 @@ export class BotManager {
   private endRun(bot: BotConfig, status: "stopped" | "error", error: string | null = null): void {
     const record = this.activeRun.get(bot.id);
     if (!record) return;
-    this.activeRun.delete(bot.id);
+    // 顺序要紧：先把最终快照写进去，再摘掉 activeRun。
+    // 反过来（先删后 checkpoint）会被 checkpointRun 的守卫挡掉，
+    // 结果是存档永远停在预热那一刻 —— 战绩丢了，界面却显示"已停止"。
     this.checkpointRun(bot, true);
+    this.activeRun.delete(bot.id);
+    this.runCheckpointAt.delete(bot.id);
     record.status = status;
     record.error = error;
     record.finishedAt = new Date().toISOString();
@@ -553,8 +574,20 @@ export class BotManager {
 
   // ---------------- 运行 ----------------
 
+  /**
+   * 当前状态快照。
+   *
+   * 事件流单独存在 this.events（持续追加），不塞进状态对象 ——
+   * 否则每根 K 线都要复制一次事件列表。这里在读取时合成，
+   * 并且按「新的在前」返回（界面的事件日志就是按这个顺序渲染的）。
+   */
   state(id: string): BotState {
-    return this.states.get(id) ?? freshState(id);
+    const st = this.states.get(id) ?? freshState(id);
+    const log = this.events.get(id);
+    if (!log || log.length === 0) return st;
+    // 按时间倒序（新的在前）：事件的到达顺序与 K 线时刻未必一致
+    // （同一根 K 线里多个事件、拒单回溯等），界面按这个顺序渲染。
+    return { ...st, events: [...log].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)) };
   }
 
   isRunning(id: string): boolean {
@@ -600,20 +633,12 @@ export class BotManager {
     this.beginRun(bot, liveTrading);
 
     try {
-      if (bot.mode === "backtest") {
-        await this.runOnce(bot, runtime, adapter);
-        // 回测跑完即止，这里就是终点
-        const st = this.state(id);
-        if (st.status === "running") {
-          this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
-        }
-        this.endRun(bot, "stopped");
-      } else {
-        await this.runLive(bot, runtime, adapter);
-        // 实时模式：runLive 只完成预热并启动轮询器就返回，机器人**仍在运行**。
-        // 绝不能在这里标 stopped —— 轮询器还在跑，标了就是假状态，
-        // 还会让 isRunning() 误判、允许对同一个机器人叠着启动第二个轮询器。
-      }
+      // 机器人只有实时一种跑法：决策来自实时行情，成交随实时 K 线产生。
+      // 历史数据模拟（跑一段历史看策略表现）不属于机器人，在「回测」页做。
+      await this.runLive(bot, runtime, adapter);
+      // runLive 预热完、启动轮询器就返回，机器人**仍在运行**。
+      // 绝不能在这里标 stopped —— 轮询器还在跑，标了就是假状态，
+      // 还会让 isRunning() 误判、允许对同一个机器人叠着启动第二个轮询器。
       return this.state(id);
     } catch (err) {
       this.states.set(id, {
@@ -814,6 +839,38 @@ export class BotManager {
     // 事件仅保留该机器人自己的
     const push = (event: Event): void => {
       if (event.topic === Topic.BAR || event.topic === Topic.MARKET_VIEW) return;
+      // 预热期间的事件一律不记：那是历史回放触发的决策，
+      // 记进事件日志等于声称"机器人一启动就做了这么多决策"。
+      if (this.warmingUp.has(bot.id)) return;
+      // 捕获最新目标权重：人工模仿用的操作指引就是由它算出来的
+      if (event.topic === Topic.ALLOCATION) {
+        const a = event.payload as unknown as {
+          weights: Record<string, number>;
+          reason: string;
+          timestamp: Date | string;
+        };
+        this.latestTargets.set(bot.id, {
+          weights: a.weights ?? {},
+          reason: a.reason ?? "",
+          at: new Date(a.timestamp ?? event.timestamp).toISOString(),
+        });
+      }
+      if (event.topic === Topic.SIGNAL) {
+        const s = event.payload as unknown as {
+          symbol: string;
+          targetWeight: number;
+          reason: string;
+          timestamp: Date | string;
+        };
+        const prev = this.latestTargets.get(bot.id);
+        const weights = { ...(prev?.weights ?? {}) };
+        weights[s.symbol] = s.targetWeight;
+        this.latestTargets.set(bot.id, {
+          weights,
+          reason: s.reason ?? prev?.reason ?? "",
+          at: new Date(s.timestamp ?? event.timestamp).toISOString(),
+        });
+      }
       const list = this.events.get(bot.id) ?? [];
       list.push({
         topic: event.topic,
@@ -830,51 +887,44 @@ export class BotManager {
     return runtime;
   }
 
-  private async runOnce(bot: BotConfig, rt: Runtime, adapter: ExchangeAdapter): Promise<void> {
+  private async runLive(bot: BotConfig, rt: Runtime, adapter: ExchangeAdapter): Promise<void> {
     const started = Date.now();
-    const groups = await Promise.all(
-      bot.symbols.map((s) => adapter.fetchKlines(s, bot.interval, bot.barCount)),
+    /**
+     * 预热：把历史 K 线喂进各 Agent 的缓冲区，但**不决策、不成交**。
+     *
+     * 这台机器人的交易统计必须来自它实时接到的每一根新 K 线。
+     * 历史上这里的做法是把整段历史直接灌进流水线，启动瞬间就产生几十笔
+     * "历史成交" —— 那是回放，不是这台机器人在实时的作为；
+     * 用它统计盈亏、甚至照着人工模仿，模仿的是一段与实时无关的回放。
+     */
+    const warmBars = mergeBarsByTime(
+      await Promise.all(bot.symbols.map((s) => adapter.fetchKlines(s, bot.interval, bot.barCount))),
     );
-    const bars = mergeBarsByTime(groups);
-    for (const bar of bars) {
-      if (rt.stopRequested) break;
-      this.trackHistory(bar);
-      await feed(rt.pipeline, [bar]);
-      const st = this.state(bot.id);
-      this.states.set(bot.id, {
-        ...st,
-        bars: st.bars + 1,
-        durationMs: Date.now() - started,
-        equityCurve: pushPoint(st.equityCurve, rt.pipeline.portfolio.equityCurve().at(-1)),
-      });
+    // 历史 K 线照样进 historyLog（get_history 工具的数据源）——
+    // 只是不决策、不成交。工具看到的是真实行情，与预热是否成交无关。
+    for (const bar of warmBars) this.trackHistory(bar);
+    this.warmingUp.add(bot.id);
+    rt.pipeline.primeMode = true;
+    try {
+      await feed(rt.pipeline, warmBars);
+    } finally {
+      rt.pipeline.primeMode = false;
+      this.warmingUp.delete(bot.id);
+    }
+    const warmTrades = this.tradesOf(rt).length;
+    if (warmTrades > 0) {
+      // 预热不该产生任何成交；真出现了说明闸门漏了，必须吵醒而不是悄悄放过
+      log.error("机器人「%s」预热期间产生 %d 笔成交（不应发生）", bot.name, warmTrades);
     }
     this.states.set(bot.id, {
       ...this.state(bot.id),
+      bars: 0,
+      warmupBars: warmBars.length,
       metrics: this.metricsOf(bot, rt),
       allocation: this.allocationOf(bot, rt),
-      equityCurve: pushPoint(this.state(bot.id).equityCurve, rt.pipeline.portfolio.equityCurve().at(-1)),
-      durationMs: Date.now() - started,
-      trades: this.tradesOf(rt),
-      pnlBySymbol: this.pnlBySymbol(rt),
-    });
-    this.checkpointRun(bot, true);
-  }
-
-  private async runLive(bot: BotConfig, rt: Runtime, adapter: ExchangeAdapter): Promise<void> {
-    const started = Date.now();
-    // 预热
-    const warm = await Promise.all(
-      bot.symbols.map((s) => adapter.fetchKlines(s, bot.interval, bot.barCount)),
-    );
-    await feed(rt.pipeline, mergeBarsByTime(warm));
-    this.states.set(bot.id, {
-      ...this.state(bot.id),
-      bars: warm.length,
-      metrics: this.metricsOf(bot, rt),
-      allocation: this.allocationOf(bot, rt),
-      equityCurve: rt.pipeline.portfolio.equityCurve().slice(-CURVE_POINTS),
-      trades: this.tradesOf(rt),
-      pnlBySymbol: this.pnlBySymbol(rt),
+      equityCurve: [],
+      trades: [],
+      pnlBySymbol: [],
     });
     this.checkpointRun(bot, true);
 
@@ -887,7 +937,9 @@ export class BotManager {
     poller.start((bars) => {
       void (async () => {
         if (rt.stopRequested) return;
+        for (const bar of bars) this.trackHistory(bar);
         await feed(rt.pipeline, bars);
+        if (rt.stopRequested) return; // 再检一次：stop 可能在 feed 期间被调用
         const st = this.state(bot.id);
         this.states.set(bot.id, {
           ...st,
@@ -895,8 +947,10 @@ export class BotManager {
           durationMs: Date.now() - started,
           metrics: this.metricsOf(bot, rt),
           allocation: this.allocationOf(bot, rt),
+          equityCurve: rt.pipeline.portfolio.equityCurve().slice(-CURVE_POINTS),
           trades: this.tradesOf(rt),
           pnlBySymbol: this.pnlBySymbol(rt),
+          actions: this.actionsOf(bot, rt),
         });
         this.checkpointRun(bot);
         // 熔断：该机器人自己的回撤越限 -> 自动停
@@ -929,6 +983,13 @@ export class BotManager {
         };
       })
       .sort((a, b) => b.marketValue - a.marketValue);
+    const target = this.latestTargets.get(bot.id);
+    // 最新价表：候选池里的标的都要有价，否则操作指引无从换算
+    const prices: Record<string, number> = {};
+    for (const symbol of new Set([...bot.symbols, ...holdings.map((h) => h.symbol)])) {
+      const price = rt.pipeline.book.last(symbol);
+      if (price !== undefined) prices[symbol] = round8(price);
+    }
     return {
       timestamp: new Date().toISOString(),
       equity: round2(equity),
@@ -936,7 +997,99 @@ export class BotManager {
       cashWeight: equity > 0 ? round4(cash / equity) : 1,
       holdings,
       heldCount: holdings.length,
+      targets: target?.weights ?? {},
+      decidedAt: target?.at ?? null,
+      reason: target?.reason ?? "",
+      prices,
     };
+  }
+
+  /**
+   * 仓位调整指引：把机器人的目标仓位换算成"人可以照着手动下单"的操作。
+   *
+   * 这是模拟盘相对实盘唯一差别（不下单）的直接产物：既然决策与实盘一致，
+   * "还差多少才到位"就能精确算出来。不敢全权交给机器人、或交易所不支持
+   * API 交易时，照着这份清单在自己的交易软件里操作即可。
+   *
+   * 诚实原则：
+   * - 没有目标权重（还没出决策）时不下结论，明确说"暂无决策"；
+   * - 差额小于最小调仓额的不给操作（机器人自己也不会动）；
+   * - 拿不到价格的标的说明原因，不脑补数量。
+   */
+  private actionsOf(bot: BotConfig, rt: Runtime): BotAction[] {
+    const target = this.latestTargets.get(bot.id);
+    const alloc = this.allocationOf(bot, rt);
+    if (!target) return [];
+    const equity = alloc.equity;
+    if (!(equity > 0)) return [];
+    const bySymbol = new Map(alloc.holdings.map((h) => [h.symbol, h]));
+    const symbols = new Set([...Object.keys(target.weights), ...bySymbol.keys()]);
+    const actions: BotAction[] = [];
+    for (const symbol of symbols) {
+      const price = alloc.prices[symbol];
+      const holding = bySymbol.get(symbol);
+      const currentWeight = holding?.weight ?? 0;
+      const targetWeight = Math.max(0, Math.min(1, target.weights[symbol] ?? 0));
+      const holdingQty = holding?.quantity ?? 0;
+      // 目标持仓：目标权重对应的股数（供人对照"买到多少算到位"）
+      const targetQty = price ? (targetWeight * equity) / price : 0;
+      if (price === undefined) {
+        actions.push({
+          symbol,
+          side: "HOLD",
+          quantity: 0,
+          price: 0,
+          value: 0,
+          fromWeight: currentWeight,
+          toWeight: targetWeight,
+          holdingQty,
+          targetQty: 0,
+          reason: target.reason,
+          at: target.at,
+          note: "暂无行情价，无法换算数量",
+        });
+        continue;
+      }
+      const deltaValue = (targetWeight - currentWeight) * equity;
+      const quantity = Math.abs(deltaValue) / price;
+      const minTrade = bot.risk.minTradeValue;
+      if (Math.abs(deltaValue) < minTrade || quantity <= 0) {
+        // 差额在噪声内：机器人自己也不会调，指引就不该怂恿人去动
+        actions.push({
+          symbol,
+          side: "HOLD",
+          quantity: 0,
+          price: round8(price),
+          value: 0,
+          fromWeight: currentWeight,
+          toWeight: targetWeight,
+          holdingQty,
+          targetQty: round8(targetQty),
+          reason: target.reason,
+          at: target.at,
+          note: "差额小于最小调仓额，无需操作",
+        });
+        continue;
+      }
+      actions.push({
+        symbol,
+        side: deltaValue > 0 ? "BUY" : "SELL",
+        quantity: round8(quantity),
+        price: round8(price),
+        value: round2(Math.abs(deltaValue)),
+        fromWeight: currentWeight,
+        toWeight: targetWeight,
+        holdingQty,
+        targetQty: round8(targetQty),
+        reason: target.reason,
+        at: target.at,
+      });
+    }
+    // 有操作的排前面，按金额从大到小
+    return actions.sort((a, b) => {
+      if ((a.side === "HOLD") !== (b.side === "HOLD")) return a.side === "HOLD" ? 1 : -1;
+      return b.value - a.value;
+    });
   }
 
   private metricsOf(bot: BotConfig, rt: Runtime): BotMetrics {
@@ -1021,16 +1174,6 @@ function round8(v: number): number {
   return Number(v.toFixed(8));
 }
 
-/** 追加一个权益点并裁掉超出部分；point 为空（还没成交）时不记。 */
-function pushPoint(
-  curve: { timestamp: string; equity: number }[],
-  point?: { timestamp: string; equity: number },
-): { timestamp: string; equity: number }[] {
-  if (!point) return curve;
-  const next = [...curve, point];
-  return next.length > CURVE_POINTS ? next.slice(next.length - CURVE_POINTS) : next;
-}
-
 function freshState(id: string): BotState {
   return {
     id,
@@ -1043,10 +1186,12 @@ function freshState(id: string): BotState {
     allocation: null,
     equityCurve: [],
     bars: 0,
+    warmupBars: 0,
     durationMs: 0,
     events: [],
     trades: [],
     pnlBySymbol: [],
+    actions: [],
   };
 }
 
@@ -1070,7 +1215,22 @@ function summarize(event: Event): string {
     case Topic.ORDER_REJECTED:
       return `拒单 ${(p as { symbol?: string })?.symbol ?? ""}`;
     default:
-      return "";
+      // 没专门写摘要的事件也要看得懂：返回空串会在事件日志里留下空白行，
+      // 用户看到"有事件但什么都没写"，只会以为是坏了。
+      return describePayload(event.topic, p);
   }
+}
+
+/** 兜底摘要：主题 + 几个基本类型字段（数量/字符串/布尔），够看懂发生了什么。 */
+function describePayload(topic: string, p: Record<string, unknown> | undefined): string {
+  const fields = Object.entries(p ?? {})
+    .filter(([, v]) => typeof v === "number" || typeof v === "string" || typeof v === "boolean")
+    .slice(0, 3)
+    .map(([k, v]) => {
+      const text = typeof v === "number" ? String(Number(v.toFixed(4))) : String(v);
+      return `${k}=${text.slice(0, 24)}`;
+    })
+    .join(" ");
+  return fields ? `${topic} ${fields}` : topic;
 }
 

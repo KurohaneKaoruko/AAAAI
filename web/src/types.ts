@@ -185,7 +185,8 @@ export interface Participant {
   unavailable?: string;
 }
 
-export type BotMode = "backtest" | "live";
+/** 机器人只有实时一种：历史模拟（回放）在独立的「回测」页，不属于机器人。 */
+export type BotMode = "live";
 export type BotStatus = "idle" | "running" | "stopped" | "error";
 
 export interface BotHolding {
@@ -206,6 +207,56 @@ export interface BotAllocation {
   cashWeight: number;
   holdings: BotHolding[];
   heldCount: number;
+  /** 最新目标权重（symbol -> 0~1，未出现 = 0） */
+  targets: Record<string, number>;
+  /** 最新决策时间（无决策为 null） */
+  decidedAt: string | null;
+  /** 最新决策理由 */
+  reason: string;
+  /** 各标的最新价（行情） */
+  prices: Record<string, number>;
+}
+
+/** 一条仓位调整指引：把机器人的目标仓位换算成"人可以照做"的操作。 */
+export interface BotAction {
+  symbol: string;
+  /** BUY 加仓/建仓 · SELL 减仓/清仓 · HOLD 无需操作 */
+  side: "BUY" | "SELL" | "HOLD";
+  quantity: number;
+  price: number;
+  value: number;
+  fromWeight: number;
+  toWeight: number;
+  holdingQty: number;
+  targetQty: number;
+  reason: string;
+  at: string;
+  note?: string;
+}
+
+/** 一次历史模拟（回测）的结果。成交一次性全出——它就是要把整段历史跑完。 */
+export interface BacktestResult {
+  symbols: string[];
+  interval: string;
+  barCount: number;
+  bars: number;
+  durationMs: number;
+  strategyId: string;
+  strategyName: string;
+  decisionSource: string;
+  metrics: {
+    finalEquity: number;
+    cash: number;
+    openPositions: number;
+    totalFills: number;
+    maxDrawdownPct: number;
+    realizedPnl: number;
+    equityPoints: number;
+    totalReturn: number;
+  };
+  equityCurve: EquityPoint[];
+  trades: TradeRecord[];
+  pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
 }
 
 export interface BotMetrics {
@@ -225,7 +276,8 @@ export interface Bot {
   enabled: boolean;
   connectionId: string;
   symbols: string[];
-  mode: BotMode;
+  /** 机器人只有实时一种：决策/成交/统计都来自实时行情。历史模拟在「回测」页。 */
+  mode: "live";
   interval: string;
   barCount: number;
   pollMs: number;
@@ -278,12 +330,16 @@ export interface Bot {
     /** 当前资产配置（各标的权重 + 现金） */
     allocation: BotAllocation | null;
     bars: number;
+    /** 预热载入的历史 K 线数（只喂指标，不产生成交） */
+    warmupBars: number;
     durationMs: number;
     events: { topic: string; timestamp: string; summary: string }[];
     /** 成交流水（新->旧，尾部若干条） */
     trades: BotTrade[];
     /** 各标的的已实现盈亏合计 */
     pnlBySymbol: { symbol: string; realizedPnl: number; fills: number }[];
+    /** 仓位调整指引（供人工对照实盘模仿；没有决策时为空） */
+    actions: BotAction[];
   };
   /** 历史运行存档（新 -> 旧，跨重启保留） */
   history: BotRunRecord[];
@@ -371,7 +427,6 @@ export interface BotInput {
   name: string;
   connectionId: string;
   symbols: string[];
-  mode?: BotMode;
   interval?: string;
   barCount?: number;
   pollMs?: number;

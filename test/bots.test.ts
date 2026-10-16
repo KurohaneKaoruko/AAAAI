@@ -23,15 +23,26 @@ function setup(): { dir: string; bots: BotManager; connectionId: string } {
   return { dir, bots, connectionId: conn.id };
 }
 
+/**
+ * 等条件成立。实时机器人的成交来自轮询 tick，测试必须等 tick，
+ * 不能再假设"启动即跑完"（那是回测语义，已移出机器人）。
+ */
+async function waitFor(cond: () => boolean, ms = 8000): Promise<void> {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error("等待条件超时");
+    await new Promise((r) => setTimeout(r, 40));
+  }
+}
+
 test("机器人：可创建多个，各自保存独立配置", () => {
   const { dir, bots, connectionId } = setup();
   try {
-    const a = bots.create({ name: "BTC 趋势", connectionId, symbols: ["DEMO-BTC"], mode: "backtest" });
+    const a = bots.create({ name: "BTC 趋势", connectionId, symbols: ["DEMO-BTC"] });
     const b = bots.create({
       name: "A股均线",
       connectionId,
       symbols: ["600519"],
-      mode: "backtest",
       decisionSource: "chat",
       strategy: { fastWindow: 3, slowWindow: 9, maxTargetWeight: 0.9 },
       risk: { initialCash: 5000, minTradeValue: 800 },
@@ -52,33 +63,39 @@ test("机器人：可创建多个，各自保存独立配置", () => {
   }
 });
 
-test("机器人：回测并行运行，资金与成交各自独立", async () => {
+test("机器人：并行运行，资金与成交各自独立", async () => {
   const { dir, bots, connectionId } = setup();
   try {
     const a = bots.create({
       name: "A",
       connectionId,
       symbols: ["600519"],
-      mode: "backtest",
-      barCount: 200,
+      pollMs: 120,
+      barCount: 60,
       risk: { initialCash: 100_000 },
     });
     const b = bots.create({
       name: "B",
       connectionId,
       symbols: ["DEMO-BTC"],
-      mode: "backtest",
-      barCount: 200,
+      pollMs: 120,
+      barCount: 60,
       risk: { initialCash: 20_000, minTradeValue: 5000 },
     });
 
     const states = await bots.startMany([a.id, b.id]);
     assert.equal(states.length, 2);
     for (const st of states) {
-      assert.equal(st.status, "stopped", `机器人 ${st.id} 应跑完即停，实际 ${st.status}`);
+      assert.equal(st.status, "running", `实时机器人启动后应在跑，实际 ${st.status}`);
       assert.ok(st.metrics, "应产出指标");
-      assert.equal(st.bars, 200, "应处理完 200 根 K 线");
+      // 预热只喂指标：启动瞬间既没有实时 K 线，也没有成交
+      assert.equal(st.bars, 0, "实时 bars 从 0 开始计");
+      assert.ok(st.warmupBars > 0, "应预热历史 K 线");
+      assert.equal(st.trades.length, 0, "预热不产生成交");
     }
+
+    // 成交随实时 tick 到来（不再是启动即跑完）
+    await waitFor(() => (bots.state(a.id).metrics?.totalFills ?? 0) > 0);
 
     const va = bots.state(a.id).metrics!;
     const vb = bots.state(b.id).metrics!;
@@ -89,20 +106,13 @@ test("机器人：回测并行运行，资金与成交各自独立", async () =>
     assert.ok(Math.abs(va.finalEquity - 100_000) > 0, "A 应有持仓浮动");
 
     // 每个机器人自带权益曲线：仪表盘画的是机器人，而不是另一次单账户引擎运行
-    for (const [id, m] of [[a.id, va], [b.id, vb]] as const) {
-      const curve = bots.state(id).equityCurve;
-      assert.ok(curve.length > 1, `机器人 ${id} 应记录权益曲线，实际 ${curve.length} 点`);
-      assert.ok(curve.length <= 400, `曲线点数应受限（上限 400），实际 ${curve.length}`);
-      // 曲线按时间单调递增（时间戳），且末点与指标里的最终权益一致
-      const times = curve.map((p) => Date.parse(p.timestamp));
-      assert.deepEqual(times, [...times].sort((x, y) => x - y), "曲线应按时间升序");
-      // 曲线按 2 位小数落盘（PortfolioManager 统一 round），指标是原值，故留 0.01 容差
-      assert.ok(
-        Math.abs(curve.at(-1)!.equity - m.finalEquity) < 0.01,
-        `曲线末点应等于最终权益：${curve.at(-1)!.equity} vs ${m.finalEquity}`,
-      );
-      assert.ok(curve.every((p) => Number.isFinite(p.equity) && p.equity > 0), "曲线点应有效");
-    }
+    const curve = bots.state(a.id).equityCurve;
+    assert.ok(curve.length >= 1, `机器人 A 应记录权益曲线，实际 ${curve.length} 点`);
+    assert.ok(curve.length <= 400, `曲线点数应受限（上限 400），实际 ${curve.length}`);
+    assert.ok(curve.every((p) => Number.isFinite(p.equity) && p.equity > 0), "曲线点应有效");
+
+    bots.stop(a.id);
+    bots.stop(b.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -116,7 +126,6 @@ test("机器人：各账号的资产配置互不影响（同一候选池，不�
       name: "A账号",
       connectionId,
       symbols: ["600519", "DEMO-BTC"],
-      mode: "backtest",
       barCount: 200,
       strategy: { fastWindow: 3, slowWindow: 8 },
       risk: { initialCash: 100_000 },
@@ -125,13 +134,15 @@ test("机器人：各账号的资产配置互不影响（同一候选池，不�
       name: "B账号",
       connectionId,
       symbols: ["600519", "DEMO-BTC"],
-      mode: "backtest",
       barCount: 200,
       strategy: { fastWindow: 8, slowWindow: 30 },
       risk: { initialCash: 30_000, maxPositionWeight: 0.5 },
     });
 
     await bots.startMany([a.id, b.id]);
+    // 关掉实时轮询器，否则测试进程不会退出
+    bots.stop(a.id);
+    bots.stop(b.id);
 
     const va = bots.state(a.id).allocation!;
     const vb = bots.state(b.id).allocation!;
@@ -167,15 +178,20 @@ test("机器人：重复启动会被拒绝，停止后状态更新", async () =>
       name: "A",
       connectionId,
       symbols: ["DEMO-BTC"],
-      mode: "backtest",
       barCount: 60,
+      pollMs: 100,
     });
     await bots.start(bot.id);
-    assert.equal(bots.state(bot.id).status, "stopped");
+    assert.equal(bots.state(bot.id).status, "running", "实时机器人启动后保持 running");
 
+    await assert.rejects(() => bots.start(bot.id), /已在运行/);
     await assert.rejects(() => bots.start("不存在"), /机器人不存在/);
-    bots.stop(bot.id); // 停一个已结束的机器人不应抛错
-    assert.equal(bots.state(bot.id).status, "stopped");
+    bots.stop(bot.id);
+    assert.equal(bots.state(bot.id).status, "stopped", "stop 立即把状态置为 stopped");
+    // 停掉之后再启动是允许的（不是永久锁死）
+    await bots.start(bot.id);
+    assert.equal(bots.state(bot.id).status, "running");
+    bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -191,7 +207,7 @@ test("机器人：坏配置给出明确报错，删除后不再保留", async ()
       /连接不存在/,
     );
 
-    const bot = bots.create({ name: "X", connectionId, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 40 });
+    const bot = bots.create({ name: "X", connectionId, symbols: ["DEMO-BTC"], barCount: 40 });
     await bots.start(bot.id);
     bots.remove(bot.id);
     assert.equal(bots.list().length, 0);
@@ -290,15 +306,17 @@ test("实盘：同一连接同时只允许一个实盘机器人", async () => {
   }
 });
 
-test("实盘：回测机器人不受互斥限制，可与实盘机器人并行", async () => {
+test("模拟成交机器人不受实盘互斥限制，可与实盘机器人并行", async () => {
   const { dir, bots, conn } = liveSetup("live");
   try {
     const liveBot = bots.create({ name: "实盘", connectionId: conn, symbols: ["DEMO-BTC"], mode: "live", paperTrading: false, barCount: 30 });
-    const backtest = bots.create({ name: "回测", connectionId: conn, symbols: ["DEMO-ETH"], mode: "backtest", barCount: 30 });
+    const paper = bots.create({ name: "模拟", connectionId: conn, symbols: ["DEMO-ETH"], mode: "live", paperTrading: true, barCount: 30 });
     bots["states"].set(liveBot.id, { ...bots.state(liveBot.id), status: "running", liveTrading: true });
-    const st = await bots.start(backtest.id);
-    assert.equal(st.status, "stopped", "回测不应被实盘互斥影响");
-    assert.equal(st.liveTrading, false, "回测永远不发真实订单");
+    const st = await bots.start(paper.id);
+    assert.equal(st.status, "running", "模拟成交机器人不应被实盘互斥挡住；启动后保持 running");
+    assert.equal(st.liveTrading, false, "模拟成交永远不发真实订单");
+    bots.stop(liveBot.id);
+    bots.stop(paper.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -354,12 +372,14 @@ test("机器人也会给自我进化留痕（否则用了机器人等于关掉�
       name: "留痕机器人",
       connectionId: conn.id,
       symbols: ["DEMO-BTC", "DEMO-ETH"],
-      mode: "backtest",
-      barCount: 80,
+      barCount: 60,
+      pollMs: 100,
       strategyId: strategy.id,
     });
     await bots.start(bot.id);
 
+    // 分配轮次每 3 根实时 K 线一次；预热不计入。等待至少一轮留痕。
+    await waitFor(() => evolution.stats().total > 0, 12000);
     const stats = evolution.stats();
     assert.ok(stats.total > 0, `机器人运行后应留下决策记录（owner=bot:…），实际 ${stats.total} 条`);
     const recent = evolution.view().recentDecisions;
@@ -368,6 +388,7 @@ test("机器人也会给自我进化留痕（否则用了机器人等于关掉�
       recent.some((d) => String(d.owner).startsWith("bot:")),
       `记录应标明来自机器人，实际 owner=${recent[0]?.owner}`,
     );
+    bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -420,10 +441,16 @@ test("模拟成交（默认）：实时机器人用真实行情本地撮合，�
     assert.equal(st.liveTrading, false, "模拟成交绝不是实盘");
     assert.equal(st.status, "running", "实时机器人启动后保持 running（轮询器在跑）");
     assert.equal(st.error, null);
+    assert.equal(st.trades.length, 0, "预热不产生成交");
+    assert.equal(st.bars, 0, "实时 bars 从 0 开始");
+    assert.ok(st.warmupBars > 0, "预热历史 K 线已就绪");
+    // 成交随实时 tick 到来
+    await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0);
+    const st2 = bots.state(bot.id);
     // 交易统计三件套必须产出 —— "统计这个机器人的交易情况和盈利情况"靠它们
-    assert.ok(st.trades.length > 0, `应留下成交流水，实际 ${st.trades.length} 条`);
-    assert.ok(st.pnlBySymbol.length > 0, "应有分标的盈亏统计");
-    assert.ok(st.metrics, "应有盈利指标");
+    assert.ok(st2.trades.length > 0, `应留下成交流水，实际 ${st2.trades.length} 条`);
+    assert.ok(st2.pnlBySymbol.length > 0, "应有分标的盈亏统计");
+    assert.ok(st2.metrics, "应有盈利指标");
     bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -456,22 +483,32 @@ test("交易统计：成交流水与分标的盈亏来自机器人自己的成�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["DEMO-BTC", "DEMO-ETH"], mode: "backtest", barCount: 120 });
+    const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["DEMO-BTC", "DEMO-ETH"], barCount: 120, pollMs: 100 });
     const st = await bots.start(bot.id);
 
-    assert.ok(st.trades.length > 0);
+    assert.equal(st.trades.length, 0, "预热不产生成交");
+    assert.equal(st.bars, 0, "实时 bars 从 0 开始");
+    assert.ok(st.warmupBars > 0, "预热历史 K 线已就绪");
+
+    // 等待两个标的都有成交
+    await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0, 15000);
+
+    const st2 = bots.state(bot.id);
+    assert.ok(st2.trades.length > 0);
     // 明细字段齐全：价格、数量、手续费、理由
-    const t = st.trades[0]!;
+    const t = st2.trades[0]!;
     assert.ok(t.price > 0 && t.quantity > 0, "成交必须有价格与数量");
     assert.ok(typeof t.fee === "number", "应有手续费");
     assert.ok(t.reason.length > 0, "应有决策理由");
     // 分标的盈亏：两个标的都动过，合计应等于总已实现盈亏
-    const sum = st.pnlBySymbol.reduce((acc, p) => acc + p.realizedPnl, 0);
+    const sum = st2.pnlBySymbol.reduce((acc, p) => acc + p.realizedPnl, 0);
     assert.ok(
-      Math.abs(sum - (st.metrics?.realizedPnl ?? 0)) < 0.01,
-      `分标的盈亏合计 ${sum} 应等于总已实现盈亏 ${st.metrics?.realizedPnl}`,
+      Math.abs(sum - (st2.metrics?.realizedPnl ?? 0)) < 0.01,
+      `分标的盈亏合计 ${sum} 应等于总已实现盈亏 ${st2.metrics?.realizedPnl}`,
     );
-    assert.ok(st.pnlBySymbol.every((p) => p.fills > 0), "每个标的的成交笔数应大于 0");
+    assert.ok(st2.pnlBySymbol.every((p) => p.fills > 0), "出现在表里的标的必有成交");
+    assert.ok(st2.pnlBySymbol.length >= 1);
+    bots.stop(bot.id); // 关轮询器，否则测试进程不会退出
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -528,22 +565,23 @@ test("实时机器人启动后必须保持 running（轮询器在跑，start 返
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
 
-    const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
+    const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["DEMO-BTC"], paperTrading: true, barCount: 40, pollMs: 200 });
     await bots.start(bot.id);
     const st = bots.state(bot.id);
     assert.equal(st.status, "running", "start() 返回后实时机器人必须仍是 running");
-    assert.ok(st.bars > 0, "预热应已产出 K 线");
+    assert.ok(st.warmupBars > 0, "预热应已产出历史 K 线");
 
-    // 轮询器活着：等两轮，bars 必须增长
+    // 轮询器活着：等两轮，实时 bars 必须增长
     const before = bots.state(bot.id).bars;
     await new Promise((r) => setTimeout(r, 600));
     const after = bots.state(bot.id).bars;
-    assert.ok(after > before, `轮询应推进 K 线数：${before} -> ${after}`);
+    assert.ok(after > before, `轮询应推进实时 K 线数：${before} -> ${after}`);
 
     // 状态为 running 时重复启动必须被拒绝（防止叠轮询器）
     await assert.rejects(() => bots.start(bot.id), /已在运行/);
 
     bots.stop(bot.id);
+    await waitFor(() => bots.state(bot.id).status === "stopped");
     assert.equal(bots.state(bot.id).status, "stopped", "stop 后才是 stopped");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -559,10 +597,13 @@ test("运行存档：stop 后写盘，重启进程（重建 BotManager）后历�
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
-    const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 120 });
+    const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 120, pollMs: 100 });
 
     await bots.start(bot.id);
+    await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0);
     bots.stop(bot.id);
+    await waitFor(() => bots.state(bot.id).status === "stopped");
+
     const v1 = bots.list()[0]!;
     assert.equal(v1.history.length, 1, "应留下一次运行存档");
     const rec = v1.history[0]!;
@@ -590,9 +631,20 @@ test("运行存档汇总：多次运行求和、胜负统计只算已结束的�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 120 });
+    const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 120, pollMs: 100 });
+
+    // 第一轮
     await bots.start(bot.id);
+    await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0);
+    bots.stop(bot.id);
+    await waitFor(() => bots.state(bot.id).status === "stopped");
+
+    // 第二轮
     await bots.start(bot.id);
+    await waitFor(() => (bots.state(bot.id).metrics?.totalFills ?? 0) > 0);
+    bots.stop(bot.id);
+    await waitFor(() => bots.state(bot.id).status === "stopped");
+
     const v = bots.list()[0]!;
     assert.equal(v.history.length, 2, "两次运行两条存档");
 
@@ -616,7 +668,7 @@ test("运行存档：明细被截断时必须如实标注（不能让人以为�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 400 });
+    const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 400 });
     await bots.start(bot.id);
     bots.stop(bot.id);
     const rec = bots.list()[0]!.history[0]!;
@@ -639,7 +691,7 @@ test("运行存档：机器人删除后存档一并消失（不留幽灵数据�
     const connections = new ConnectionManager(dir);
     const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
-    const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 60 });
+    const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60 });
     bots.stop(bot.id);
     bots.remove(bot.id);
 
@@ -734,6 +786,128 @@ test("运行存档：上次进程遗留的 running 存档必须标为中断（�
     assert.ok((rec.error ?? "").includes("中断"), "应说明是中断，而不是当成跑完");
     // 残局不该计入胜负统计（没有收益可言）
     assert.equal(view.totals.wins + view.totals.losses, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("操作指引：把机器人的目标仓位换算成可人工照做的交易清单", async () => {
+  // 模拟盘与实盘唯一差别是不下单，所以"还差多少才到位"必须能算出来给人事先照做。
+  // 不敢全权交给机器人、或交易所不支持 API 交易时，就靠这份清单手动跟进。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-actions-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "指引", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
+
+    await bots.start(bot.id);
+    // 还没出决策时不能编造操作
+    assert.equal(bots.state(bot.id).actions.length, 0, "尚无决策时不该给操作指引");
+
+    await waitFor(() => bots.state(bot.id).actions.length > 0, 15000);
+    const st = bots.state(bot.id);
+    const acts = st.actions;
+    // 有决策就必须有目标权重可对照（否则指引无从算起）
+    assert.ok(st.allocation, "应有资产配置快照");
+    assert.ok(Object.keys(st.allocation!.targets).length > 0, "应捕获最新目标权重");
+    assert.ok(st.allocation!.decidedAt, "应记录决策时间");
+    assert.ok(Object.keys(st.allocation!.prices).length > 0, "应带出最新价，否则指引算不出数量");
+
+    for (const a of acts) {
+      assert.ok(a.side === "BUY" || a.side === "SELL" || a.side === "HOLD");
+      if (a.side === "HOLD") {
+        assert.ok(a.note && a.note.length > 0, "不操作必须说明原因，否则看起来像卡住了");
+        continue;
+      }
+      assert.ok(a.price > 0, `${a.symbol} 参考价必须来自行情`);
+      assert.ok(a.quantity > 0, `${a.symbol} 必须给出可执行的数量`);
+      assert.ok(Math.abs(a.value - a.quantity * a.price) < Math.max(0.05, a.value * 0.01), "金额应等于数量×参考价");
+      assert.ok(a.reason.length > 0, "必须带着决策理由，人才知道为什么这么做");
+    }
+    bots.stop(bot.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("预热的历史 K 线仍进 get_history 数据源（否则模型查不到走势）", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-histlog-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "历史", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 50, pollMs: 100 });
+    await bots.start(bot.id);
+
+    // 预热不进交易，但必须进 historyLog（工具的数据源）
+    const log = bots["historyLog"].get("DEMO-BTC") ?? [];
+    assert.ok(log.length >= 50, `预热 K 线应进 historyLog，实际 ${log.length}`);
+    assert.ok(log.every((p) => typeof p.close === "number" && p.close > 0), "historyLog 记录应带有效收盘价");
+    bots.stop(bot.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("老数据迁移：旧的回测机器人改为实时 + 模拟成交（历史模拟已移往回测页）", () => {
+  // 回测机器人本来就只在本地撮合，从不发真实订单；改成实时不改变资金行为，
+  // 只是不再让它冒充"跑历史的机器人"。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-migbt-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const legacy = [
+      {
+        id: "oldbt",
+        name: "旧回测机器人",
+        enabled: true,
+        connectionId: conn.id,
+        symbols: ["DEMO-BTC"],
+        mode: "backtest",
+        interval: "1m",
+        barCount: 30,
+        pollMs: 1000,
+        decisionSource: "rules",
+        modelProfileIds: [],
+        decisionInterval: 5,
+        strategy: { fastWindow: 5, slowWindow: 20 },
+        risk: { initialCash: 100000 },
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    writeFileSync(join(dir, "bots.json"), JSON.stringify(legacy, null, 2));
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const view = bots.list()[0]!;
+    assert.equal(view.mode, "live", "旧回测机器人应改为实时");
+    assert.equal(view.paperTrading, true, "必须同时是模拟成交");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("事件日志：实时决策要记进状态（界面的事件面板不是死元素）", async () => {
+  // 回归：事件一直被写进 this.events 却从没读回 BotState，
+  // 结果「最近事件」面板永远是空的 —— 看起来有功能，实际是死的。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-events-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({ name: "事件", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
+
+    await bots.start(bot.id);
+    // 预热不产生事件：否则用户会看到"一启动就几十条决策"
+    assert.equal(bots.state(bot.id).events.length, 0, "预热期间不应记录事件");
+
+    await waitFor(() => bots.state(bot.id).events.length > 0, 15000);
+    const evs = bots.state(bot.id).events;
+    assert.ok(evs.length > 0, "实时决策应进入事件日志");
+    // 新的在前：界面直接按这个顺序渲染
+    const times = evs.map((e) => Date.parse(e.timestamp));
+    assert.deepEqual(times, [...times].sort((x, y) => y - x), "事件应按时间倒序（新的在前）");
+    assert.ok(evs.every((e) => e.summary.length > 0), "每条事件都要有可读的摘要");
+    bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

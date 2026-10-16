@@ -7,7 +7,7 @@ import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularS
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { StrategyPicker, describe } from "../components/StrategyProfiles";
-import { money, pct, signed, time } from "../lib/format";
+import { money, pct, qty, signed, time } from "../lib/format";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
   idle: { text: "待机", cls: "badge-idle" },
@@ -185,12 +185,12 @@ function BotCard({
       <div className="bot-card-head">
         <span className="bot-name">{bot.name}</span>
         <span className={`badge ${st.cls}`}>{st.text}</span>
-        <span className="chip chip-sm">{bot.mode === "live" ? "持续运行" : "回测"}</span>
+        <span className="chip chip-sm">持续运行</span>
         {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
-        {bot.mode === "live" && bot.paperTrading && bot.state.status === "running" && (
+        {bot.paperTrading && bot.state.status === "running" && (
           <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
         )}
-        {bot.mode === "live" && bot.paperTrading && bot.state.status !== "running" && (
+        {bot.paperTrading && bot.state.status !== "running" && (
           <span className="chip chip-sm">模拟成交</span>
         )}
         {/* "实盘下单中" 只在真的在跑的时候出现：停了还挂着这四个字会让人以为订单还在发 */}
@@ -247,14 +247,23 @@ function BotCard({
           <span>回撤 <b className="mono">{pct(m.maxDrawdownPct)}</b></span>
           <span>持仓 <b className="mono">{m.openPositions}</b></span>
           <span className="dim">
-            {bot.state.bars} 根 · {(bot.state.durationMs / 1000).toFixed(1)}s
+            {/* 实时 K 线与预热历史分开数：合在一起会让人以为启动就处理了一大段行情 */}
+            实时 {bot.state.bars} 根 · 预热 {bot.state.warmupBars} 根 ·{" "}
+            {(bot.state.durationMs / 1000).toFixed(0)}s
           </span>
         </div>
       ) : (
-        <div className="bot-stats dim small">尚未产生数据 —— 点「启动」开始</div>
+        <div className="bot-stats dim small">
+          尚未产生数据 —— 点「启动」开始（启动后先预热 {bot.barCount} 根历史 K
+          线用于指标，成交从下一根实时 K 线开始）
+        </div>
       )}
 
       {a && <AllocationBars alloc={a} />}
+
+      {/* 操作指引：把机器人的目标仓位换算成"人可以照着手动下单"的操作。
+          模拟与实盘的唯一差别是不下单，所以这份清单就是人工模仿机器人的依据。 */}
+      {bot.state.actions.length > 0 && <ActionGuide bot={bot} />}
 
       {/* 交易统计明细：成交流水 + 分标的盈亏。"赚不赚、哪笔赚"就在这里看 */}
       {bot.state.trades.length > 0 && <TradeStats state={bot.state} />}
@@ -334,7 +343,7 @@ function RunHistory({ bot }: { bot: Bot }) {
               <tr key={r.id}>
                 <td className="mono dim">{time(r.startedAt)}</td>
                 <td className="dim">
-                  {r.mode === "backtest" ? "回测" : r.liveTrading ? "实时 · 真实下单" : "实时 · 模拟成交"}
+                  {r.liveTrading ? "实时 · 真实下单" : "实时 · 模拟成交"}
                 </td>
                 <td>
                   {r.status === "stopped" ? (
@@ -360,6 +369,86 @@ function RunHistory({ bot }: { bot: Bot }) {
       </table>
       <div className="dim small" style={{ marginTop: 4 }}>
         收益口径：该次运行的期末权益 ÷ 初始资金 − 1；累计成交为各次之和。明细截断说明见「交易统计」。
+      </div>
+    </details>
+  );
+}
+
+/**
+ * 操作指引：机器人下一步该做什么，换算成"人可以照做"的操作。
+ *
+ * 为什么需要：模拟盘与实盘的唯一差别就是不下单 —— 决策、信号、目标仓位完全一致。
+ * 于是"还差多少才到位"能精确算出来。不敢全权交给机器人、或交易所不支持 API 交易时，
+ * 照着这份清单在自己的交易软件里手动下单，就是在复现这台机器人的操作。
+ *
+ * 诚实原则：目标权重没出来就说没有决策；差额小于最小调仓额就说无需操作；
+ * 拿不到价格就说无法换算。数字全部来自服务端（prices/targets/holdings），
+ * 前端只做展示，不自己猜。
+ */
+function ActionGuide({ bot }: { bot: Bot }) {
+  const a = bot.state.allocation;
+  const acts = bot.state.actions.filter((x) => x.side !== "HOLD");
+  return (
+    <details className="bot-events">
+      <summary>
+        操作指引（供人工模仿） · {acts.length > 0 ? `${acts.length} 项待操作` : "暂无需操作"}
+      </summary>
+      <div className="dim small" style={{ margin: "4px 0 8px" }}>
+        机器人的目标仓位与实时持仓的差额。照着在自己的交易所下单，即可复现它的操作 ——
+        模拟盘与实盘的唯一差别就是不下单。
+        {a?.decidedAt ? ` 决策时间：${time(a.decidedAt)}` : ""}
+        {a?.reason ? ` · 理由：${a.reason}` : ""}
+      </div>
+      {acts.length === 0 ? (
+        <div className="dim small" style={{ marginBottom: 6 }}>
+          当前持仓与目标一致（或差额小于最小调仓额 {money(bot.risk.minTradeValue, 0)}），无需操作。
+        </div>
+      ) : (
+        <table className="table" style={{ marginBottom: 6 }}>
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>标的</th>
+              <th className="num">数量</th>
+              <th className="num">参考价</th>
+              <th className="num">金额</th>
+              <th className="num">当前→目标权重</th>
+              <th className="num">目标持仓</th>
+            </tr>
+          </thead>
+          <tbody>
+            {acts.map((x) => (
+              <tr key={x.symbol}>
+                <td>
+                  <span className={`side-tag ${x.side === "BUY" ? "side-buy" : "side-sell"}`}>
+                    {x.side === "BUY" ? "买入" : "卖出"}
+                  </span>
+                </td>
+                <td className="mono strong">{x.symbol}</td>
+                <td className="mono num">{qty(x.quantity)}</td>
+                <td className="mono num">{money(x.price, 4)}</td>
+                <td className="mono num">{money(x.value, 2)}</td>
+                <td className="num mono dim">
+                  {wPct(x.fromWeight)} → {wPct(x.toWeight)}
+                </td>
+                <td className="num mono dim">{qty(x.targetQty)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {/* 没说出口的原因也要列出来，避免"看起来没操作"被误解成"卡住了" */}
+      {bot.state.actions.filter((x) => x.side === "HOLD" && x.note).length > 0 && (
+        <div className="dim small" style={{ marginBottom: 4 }}>
+          {bot.state.actions
+            .filter((x) => x.side === "HOLD" && x.note)
+            .map((x) => `${x.symbol}：${x.note}`)
+            .join("；")}
+        </div>
+      )}
+      <div className="dim small">
+        参考价为行情最新价；实际成交价以你下单时为准。数量按参考价折算，
+        买入可能受交易所最小交易单位（如 A 股 100 股一手）限制，需自行取整。
       </div>
     </details>
   );
@@ -557,7 +646,6 @@ function BotForm({
   const [strategyId, setStrategyId] = useState(editing?.strategyId ?? strategies[0]?.id ?? "");
   const [connectionId, setConnectionId] = useState(editing?.connectionId ?? connections[0]?.id ?? "");
   const [symbols, setSymbols] = useState<string[]>(editing?.symbols ?? []);
-  const [mode, setMode] = useState<"live" | "backtest">(editing?.mode ?? "live");
   // 实时模式的成交方式：默认模拟成交 —— 先在真实行情上干跑，确认行为再考虑实盘
   const [paperTrading, setPaperTrading] = useState(editing?.paperTrading ?? true);
   const [decisionSource, setDecisionSource] = useState<DecisionSource>(editing?.decisionSource ?? "rules");
@@ -596,8 +684,7 @@ function BotForm({
       name,
       connectionId,
       symbols,
-      mode,
-      ...(mode === "live" ? { paperTrading } : {}),
+      paperTrading,
       interval,
       barCount,
       ...(strategyId ? { strategyId } : {}),
@@ -643,36 +730,27 @@ function BotForm({
           }}
         />
         <SelectField
-          label="运行模式"
-          value={mode}
+          label="成交方式"
+          value={paperTrading ? "paper" : "real"}
           options={[
-            { value: "live", label: "实时（持续轮询行情）" },
-            { value: "backtest", label: "回测（跑一次历史）" },
+            { value: "paper", label: "模拟成交（推荐）：真实行情、本地撮合，零资金风险" },
+            { value: "real", label: "真实下单：订单发往交易所（需满足实盘条件）" },
           ]}
-          onChange={(v) => setMode(v as "live" | "backtest")}
+          onChange={(v) => setPaperTrading(v === "paper")}
         />
-        {mode === "live" && (
-          <SelectField
-            label="成交方式"
-            value={paperTrading ? "paper" : "real"}
-            options={[
-              { value: "paper", label: "模拟成交（推荐）：真实行情、本地撮合，零资金风险" },
-              { value: "real", label: "真实下单：订单发往交易所（需满足实盘条件）" },
-            ]}
-            onChange={(v) => setPaperTrading(v === "paper")}
-          />
-        )}
-        {mode === "live" && !paperTrading && (
+        {!paperTrading && (
           <Notice tone={executionMode === "live" ? "warn" : "error"}>
             {executionMode === "live"
               ? "这个机器人启动后会真的向交易所发订单。同一连接同时只允许一个真实下单的机器人。"
               : "「风控」页的执行方式仍是模拟成交：这个机器人不会启动（真实下单需要先把执行方式改成真实下单）。"}
           </Notice>
         )}
-        {mode === "live" && paperTrading && (
+        {paperTrading && (
           <Notice tone="info">
-            这个机器人会持续轮询真实行情并按策略模拟成交：钱不会动，但持仓、盈亏、成交记录都是真实的统计。
-            适合先跑起来观察，确认行为后再切「真实下单」。
+            这个机器人会持续轮询真实行情并按策略模拟成交：钱不会动，但持仓、盈亏、成交记录都是它的实时操作统计。
+            启动时先用 {barCount} 根历史 K 线喂指标（不成交），之后每来一根新 K 线才可能产生成交。
+            卡片里的「操作指引」会实时列出它下一步想做的交易 —— 照着在自己的交易所手动下单，
+            就是在复现它的操作。
           </Notice>
         )}
         <div className="grid-2">
@@ -756,7 +834,7 @@ function BotForm({
           options={intervals.map((i) => ({ value: i, label: i }))}
           onChange={setInterval}
         />
-        <NumberField label={mode === "live" ? "预热 K 线" : "回测 K 线"} value={barCount} step={20} min={20} max={1000} onChange={setBarCount} />
+        <NumberField label="预热 K 线" value={barCount} step={20} min={20} max={1000} onChange={setBarCount} />
         {modelKinds.length > 0 && (
           <NumberField label="决策间隔" hint="每 N 根问一次" value={decisionInterval} min={1} max={100} onChange={setDecisionInterval} />
         )}
