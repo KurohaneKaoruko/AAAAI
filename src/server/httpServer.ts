@@ -414,14 +414,17 @@ export function createServer(controller: EngineController, options: ServerOption
       /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 每次掷新路径） */
       scenarioSeed?: number;
     };
-    if (!body.connectionId || !Array.isArray(body.symbols) || body.symbols.length === 0) {
-      return fail(res, new Error("缺少 connectionId 或 symbols"), 400);
-    }
+    if (!body.connectionId) return fail(res, new Error("缺少 connectionId"), 400);
     try {
       const profile = body.strategyId
         ? bots.strategyList().find((p) => p.id === body.strategyId)
         : undefined;
       if (!profile) return fail(res, new Error("策略不存在"), 400);
+      // 没给标的就按该连接解析：自带标的的交易所（模拟交易所）本来就没有"选标的"这一步
+      const symbols =
+        Array.isArray(body.symbols) && body.symbols.length > 0
+          ? body.symbols
+          : controller.resolveRunTarget(body.connectionId).symbols;
       // 独立实例：回测会掷一条新的随机路径，不能掷到实时机器人正在用的那个实例上
       const adapter = controller.independentAdapter(body.connectionId);
       const result = await runBacktest(
@@ -429,7 +432,7 @@ export function createServer(controller: EngineController, options: ServerOption
         adapter,
         profile,
         {
-          symbols: body.symbols,
+          symbols,
           interval: body.interval ?? "1d",
           barCount: Math.max(20, Math.min(1000, Math.floor(body.barCount ?? 200))),
           strategyId: profile.id,

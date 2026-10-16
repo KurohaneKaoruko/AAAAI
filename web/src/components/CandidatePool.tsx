@@ -60,6 +60,51 @@ export function CandidatePool({ store }: { store: AppStore }) {
   }
 
   const adapter = connections.find((c) => c.id === connectionId)?.adapter;
+  // 自带标的的交易所（模拟交易所）：没有"候选池"这回事 —— 行情是它自己编的，
+  // 让人先配一套标的代码才能开跑，纯属多此一举。这里只把这件事说清楚。
+  if (adapter?.builtinSymbols) {
+    const builtin = adapter.defaultSymbols ?? [];
+    return (
+      <Panel
+        title="候选池"
+        subtitle={`${adapter.name}：自带标的，不需要挑`}
+        actions={
+          <select
+            className="inline-select"
+            value={connectionId}
+            onChange={(e) => {
+              setConnectionId(e.target.value);
+              setResults([]);
+            }}
+          >
+            {connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        }
+      >
+        <Notice tone="info">
+          <b>{adapter.name}</b> 的行情是它自己生成的，标的一并自带 ——
+          这里没有要你配的东西，直接去机器 / 回测 / 对照页开跑就行。
+          候选池只对<b>真实交易所</b>生效（那里才有「允许交易哪些标的」这回事）。
+        </Notice>
+        <div className="hint-line">自带的模拟品种：</div>
+        <div className="chip-row">
+          {builtin.map((s) => (
+            <span key={s.symbol} className="chip chip-sm mono" title={s.name}>
+              {s.symbol}
+            </span>
+          ))}
+        </div>
+        <div className="dim small" style={{ marginTop: 8 }}>
+          结果里的持仓/成交只会出现这几个代码（它们是编出来的，不是真实行情）。
+        </div>
+      </Panel>
+    );
+  }
+
   const isAdded = (symbol: string) =>
     watchlist.some((w) => w.connectionId === connectionId && w.symbol === symbol);
 

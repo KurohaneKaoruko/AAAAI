@@ -219,3 +219,22 @@ test("常用标的：股票源覆盖 A股与美股两类代码", async () => {
   assert.ok(byId.get("okx")!.defaultSymbols!.some((s) => s.symbol.includes("-")));
   assert.ok(byId.get("gate")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
 });
+
+test("标的由交易所自带：只有模拟交易所是这种（界面据此不再要求挑标的）", async () => {
+  const { listAdapterMetas } = await import("../src/exchanges/registry.js");
+  const metas = listAdapterMetas();
+  const builtin = metas.filter((m) => m.builtinSymbols);
+  assert.deepEqual(
+    builtin.map((m) => m.id),
+    ["simulated"],
+    "自带标的 = 用户不需要挑的连接，目前只有模拟交易所",
+  );
+  // 标了自带就必须真有一套清单，否则"自带"就是空话
+  for (const m of builtin) {
+    assert.ok((m.defaultSymbols ?? []).length > 0, `${m.id} 标了自带标的却没有清单`);
+  }
+  // 真实交易所反过来：没有自带标的，必须由用户在候选池里选
+  for (const m of metas.filter((x) => !x.builtinSymbols)) {
+    assert.equal(m.builtinSymbols ?? false, false);
+  }
+});

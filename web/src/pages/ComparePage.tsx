@@ -203,7 +203,11 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             )}
           </div>
           <div className="field">
-            <span className="field-label">对照标的（来自候选池，服务端按连接解析）</span>
+            <span className="field-label">
+              {runTarget?.symbolsBuiltIn
+                ? "对照标的（交易所自带，不用选）"
+                : "对照标的（来自候选池，服务端按连接解析）"}
+            </span>
             <div className="chip-row" style={{ marginTop: 6 }}>
               {symbols.length > 0 ? (
                 symbols.map((s) => (

@@ -58,6 +58,13 @@ export function BacktestPage() {
   // 模拟交易所 = 随机行情。结果必须自己先说清楚，不能让用户拿去当证据。
   const simulatedConnection =
     connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
+  /**
+   * 自带标的的交易所（模拟交易所）：没有"选标的"这一步，
+   * 标的由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几个。
+   */
+  const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
+  const builtin = connAdapter?.builtinSymbols ?? false;
+  const builtinSymbols = (connAdapter?.defaultSymbols ?? []).map((s) => s.symbol);
 
   // 非法种子宁可不认也不假装在复现：这里明确说"会按随机跑"，
   // 而不是静默丢掉输入 —— 否则用户以为在同一条路上核对，其实换了条路。
@@ -65,14 +72,16 @@ export function BacktestPage() {
   const seedOk = seedInput === "" || (Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0);
 
   const run = async () => {
-    if (!connectionId || symbols.length === 0 || !strategyId) return;
+    if (!connectionId || !strategyId) return;
+    if (!builtin && symbols.length === 0) return;
     setBusy(true);
     setErr(null);
     try {
       const seed = seedText.trim() === "" ? undefined : Number(seedText.trim());
       const r = await api.runBacktest({
         connectionId,
-        symbols,
+        // 自带标的的连接不用传：服务端按连接解析（传了也没用，那边本来就不看候选池）
+        ...(builtin ? {} : { symbols }),
         strategyId,
         interval,
         barCount,
@@ -135,26 +144,43 @@ export function BacktestPage() {
           </div>
 
           <div className="symbol-picker">
-            <div className="symbol-picker-head">回测标的（可多选）</div>
-            <div className="chip-row">
-              {[...new Set(connSymbols)].map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={`symbol-chip ${symbols.includes(s) ? "symbol-on" : ""}`}
-                  onClick={() =>
-                    setSymbols((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
-                  }
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-            {connSymbols.length === 0 && (
-              <span className="dim small">该连接的候选池为空，请先到「策略 → 候选池」添加</span>
-            )}
-            {connSymbols.length > 0 && symbols.length === 0 && (
-              <span className="dim small">还没选标的 —— 点上面的代码即可选中</span>
+            <div className="symbol-picker-head">回测标的{builtin ? "" : "（可多选）"}</div>
+            {builtin ? (
+              <>
+                <div className="dim small">
+                  这个交易所自带标的（模拟交易所），不用选 —— 直接开跑，它会用自己的那几个：
+                </div>
+                <div className="chip-row">
+                  {builtinSymbols.map((s) => (
+                    <span key={s} className="chip chip-sm mono">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="chip-row">
+                  {[...new Set(connSymbols)].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`symbol-chip ${symbols.includes(s) ? "symbol-on" : ""}`}
+                      onClick={() =>
+                        setSymbols((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+                      }
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                {connSymbols.length === 0 && (
+                  <span className="dim small">该连接的候选池为空，请先到「策略 → 候选池」添加</span>
+                )}
+                {connSymbols.length > 0 && symbols.length === 0 && (
+                  <span className="dim small">还没选标的 —— 点上面的代码即可选中</span>
+                )}
+              </>
             )}
           </div>
 
@@ -175,18 +201,18 @@ export function BacktestPage() {
               variant="primary"
               onClick={run}
               busy={busy}
-              disabled={!connectionId || symbols.length === 0 || !strategyId || !local}
+              disabled={!connectionId || (!builtin && symbols.length === 0) || !strategyId || !local}
               title={
                 !local
                   ? "该策略的决策来源是大模型：回放里问模型等于用后见之明，请用「模拟对照」"
-                  : symbols.length === 0
+                  : !builtin && symbols.length === 0
                     ? "先选至少一个标的"
                     : undefined
               }
             >
               {busy ? "回测中…" : "开始回测"}
             </Button>
-            {symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
+            {!builtin && symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
             {!local && <span className="dim small">该策略的决策来源不支持回测</span>}
           </div>
           {simulatedConnection && (
@@ -301,7 +327,8 @@ export function BacktestPage() {
       {!result && !busy && (
         <Panel title="怎么用">
           <Empty>
-            选好连接、策略与标的后点「开始回测」。结果只在本页显示，不写机器人的任何统计 ——
+            选好连接与策略{builtin ? "（这个交易所自带标的，不用选）" : "与标的"}后点「开始回测」。
+            结果只在本页显示，不写机器人的任何统计 ——
             机器人只根据实时行情跑，这里专门回答「这套参数在那段历史里行不行」。
           </Empty>
         </Panel>

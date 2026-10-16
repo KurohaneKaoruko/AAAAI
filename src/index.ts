@@ -85,25 +85,45 @@ async function main(): Promise<void> {
   await new Promise<void>((done) => app.listen(config.server.port, config.server.host, () => done()));
   log.info("%s 已启动 http://%s:%d", config.app.name, config.server.host, config.server.port);
 
-  // 保证至少有一个可用连接与默认标的，避免首屏空白
+  // 保证至少有一个可用连接，避免首屏空白。
+  // 不往候选池里塞标的：模拟交易所的标的是它自带的（builtinSymbols），
+  // 用户不需要也不能在候选池里配它 —— 行情本来就是它编的。
   if (connections.list().length === 0) {
     const created = connections.create({ adapterId: "simulated", label: "模拟交易所（默认）" });
-    watchlist.add({
-      symbol: "DEMO-BTC",
-      name: "模拟比特币",
-      assetClass: "crypto",
-      currency: "USDT",
-      connectionId: created.id,
-    });
     config.execution.connectionId = created.id;
     log.info("已初始化默认连接: %s（模拟交易所）", created.id);
   }
+  dropBuiltinWatchlist(connections, watchlist);
+  bots.normalizeBuiltinSymbols();
   await controller.refreshTickers().catch(() => undefined);
 
 }
 
 function dirname(p: string): string {
   return p.slice(0, p.lastIndexOf("/"));
+}
+
+/**
+ * 清掉「自带标的的连接」在候选池里的遗留条目。
+ *
+ * 模拟交易所的标的由它自己定，候选池对它无效：之前存在这里的条目界面上既看不到、
+ * 也用不上，留着只会让「候选池 N 个标的」这种数字对不上。删掉，并在日志里说清楚。
+ */
+function dropBuiltinWatchlist(connections: ConnectionManager, watchlist: WatchlistManager): void {
+  for (const c of connections.list()) {
+    let builtin: boolean;
+    try {
+      builtin = connections.adapter(c.id).meta.builtinSymbols === true;
+    } catch {
+      continue;
+    }
+    if (!builtin) continue;
+    const stale = watchlist.list().filter((w) => w.connectionId === c.id);
+    for (const w of stale) watchlist.remove(w.id);
+    if (stale.length > 0) {
+      log.info("连接 %s 自带标的，已从候选池移除 %d 个无效条目: %s", c.label, stale.length, stale.map((w) => w.symbol).join(","));
+    }
+  }
 }
 
 /**

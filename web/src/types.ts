@@ -15,6 +15,10 @@ export interface AdapterMeta {
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
+  /** 自带标的：用户不需要也不能挑（模拟交易所） */
+  builtinSymbols?: boolean;
+  /** 常用/自带标的清单 */
+  defaultSymbols?: SymbolInfo[];
 }
 
 export interface Connection {
@@ -593,6 +597,8 @@ export interface EngineState {
     interval: string;
     symbols: string[];
     error: string | null;
+    /** 标的由交易所自带（模拟交易所），界面不要展示/要求挑选 */
+    symbolsBuiltIn: boolean;
   };
 }
 
