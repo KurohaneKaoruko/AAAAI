@@ -127,12 +127,14 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
                     <button
                       key={b.id}
                       type="button"
-                      className={`chip ${on ? "chip-accent" : ""}`}
+                      className={`bot-pick ${on ? "bot-pick-on" : ""}`}
                       onClick={() => setSelectedBot(b.id)}
                       title={`${b.name} · ${st.text}`}
+                      aria-pressed={on}
                     >
-                      {b.name}
-                      <span className={`badge ${st.cls}`} style={{ marginLeft: 6 }}>
+                      <span className="bot-pick-name">{b.name}</span>
+                      <span className={`bot-pick-state ${st.cls}`}>
+                        <span className="bot-pick-dot" />
                         {st.text}
                       </span>
                     </button>

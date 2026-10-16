@@ -94,6 +94,15 @@ export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () =>
   );
 }
 
+/**
+ * 顶栏最多放几个行情。
+ *
+ * 顶栏是"扫一眼"的地方，不是行情列表：放满了就换行，超出的在末尾说还有几个，
+ * 完整列表在「策略 → 候选池」页。以前是一行横着滚，超出的直接被裁掉，
+ * 看不出"还有"还是"就这些"。
+ */
+const MAX_TOP_TICKERS = 12;
+
 export function TopBar({
   store,
   theme,
@@ -152,15 +161,22 @@ export function TopBar({
       </div>
       {tickers.length > 0 && (
         <div className="ticker-strip">
-          {tickers.slice(0, 12).map((t) => (
+          {tickers.slice(0, MAX_TOP_TICKERS).map((t) => (
             <span className="ticker-item" key={t.symbol}>
               <span className="ticker-symbol">{t.symbol}</span>
               <span className="ticker-price mono">{money(t.price, t.price > 100 ? 2 : 4)}</span>
+              {/* 正数也带 +：只靠颜色分涨跌，色弱的人看不出方向 */}
               <span className={`ticker-change mono ${t.changePct >= 0 ? "up" : "down"}`}>
+                {t.changePct >= 0 ? "+" : ""}
                 {pct(t.changePct)}
               </span>
             </span>
           ))}
+          {tickers.length > MAX_TOP_TICKERS && (
+            <span className="ticker-more" title="顶栏只放这么多，完整的在「策略 → 候选池」">
+              还有 {tickers.length - MAX_TOP_TICKERS} 个标的
+            </span>
+          )}
         </div>
       )}
     </header>
