@@ -34,6 +34,15 @@ export interface BacktestInput {
 }
 
 export interface BacktestResult {
+  /**
+   * 行情来源：real = 交易所/数据商的真实行情；simulated = 本地随机生成的演示行情。
+   *
+   * 这一栏必须透出到界面：随机行情跑出来的收益曲线再漂亮也不构成任何证据，
+   * 用户有权知道这份结果是"策略表现"还是"随机数表演"。
+   */
+  marketData: "real" | "simulated";
+  /** 行情连接名（让人知道数据来自哪个交易所/数据源） */
+  connectionLabel?: string;
   symbols: string[];
   interval: string;
   barCount: number;
@@ -126,6 +135,7 @@ export async function runBacktest(
   );
 
   return {
+    marketData: adapter.meta.id === "simulated" ? "simulated" : "real",
     symbols: input.symbols,
     interval: input.interval,
     barCount: input.barCount,

@@ -115,6 +115,11 @@ export function BotDetailPage({
             ) : (
               <span className="chip chip-sm chip-off">真实下单（未运行）</span>
             )}
+            {bot.marketData === "simulated" && (
+              <span className="chip chip-sm chip-off" title="K 线由本地随机漫步生成，不是真实行情">
+                随机行情 · 演示
+              </span>
+            )}
             <span className="chip chip-sm">{bot.interval}</span>
           </span>
         }
@@ -172,7 +177,10 @@ export function BotDetailPage({
         </div>
       </Panel>
 
-      <Panel title="战绩" subtitle="只统计实时收到的 K 线；预热历史只喂指标，不产生成交">
+      <Panel
+        title="战绩"
+        subtitle="只统计实时收到的 K 线；预热历史只喂指标，不产生成交。成交按决策的下一根 K 线开盘价模拟，已计手续费与滑点"
+      >
         <div className="grid-4">
           <Stat label="权益" value={m ? money(m.finalEquity) : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} />
           <Stat label="收益率" value={m ? `${signed(m.totalReturn * 100)}%` : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} />

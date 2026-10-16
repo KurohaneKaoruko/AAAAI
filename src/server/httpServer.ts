@@ -420,9 +420,10 @@ export function createServer(controller: EngineController, options: ServerOption
         ? bots.strategyList().find((p) => p.id === body.strategyId)
         : undefined;
       if (!profile) return fail(res, new Error("策略不存在"), 400);
+      const adapter = controller.adapter(body.connectionId);
       const result = await runBacktest(
         controller.getConfig(),
-        controller.adapter(body.connectionId),
+        adapter,
         profile,
         {
           symbols: body.symbols,
@@ -434,7 +435,9 @@ export function createServer(controller: EngineController, options: ServerOption
           ...(body.minTradeValue !== undefined ? { minTradeValue: body.minTradeValue } : {}),
         },
       );
-      ok(res, { result });
+      // 把行情连接名一并给出：让人知道这份结果的数据来自哪儿
+      const conn = connections.get(body.connectionId);
+      ok(res, { result: conn?.label ? { ...result, connectionLabel: conn.label } : result });
     } catch (err) {
       fail(res, err);
     }

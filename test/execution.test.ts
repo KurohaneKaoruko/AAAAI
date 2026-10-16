@@ -263,13 +263,15 @@ test("PaperBroker 拆单：总量、方向不变，但分片成交", async () =>
 
   book.update(bar("X", 100));
   await broker.handle(intent({ quantity: 10 }));
-  assert.equal(fills.length, 1, "首片应立即成交");
+  assert.equal(fills.length, 0, "决策当根不成交：看到收盘价已经买不到那个价");
+  await pump(bus, 1);
+  assert.equal(fills.length, 1, "首片在下单后的第 1 根成交");
   await pump(bus, 1);
   assert.equal(fills.length, 2);
   await pump(bus, 1);
   assert.equal(fills.length, 3);
   await pump(bus, 1);
-  assert.equal(fills.length, 4, "第 4 片应在下单后第 3 根成交");
+  assert.equal(fills.length, 4, "第 4 片在下单后的第 4 根成交");
   await pump(bus, 3);
   assert.equal(fills.length, 4, "全部完成后不应再产生成交");
 
@@ -381,10 +383,11 @@ test("PaperBroker 拆单：关闭时行为与不拆完全一致（单笔成交�
   });
   const fills = collect(bus);
   book.update(bar("X", 100));
-  const fill = await broker.handle(intent({ quantity: 1 }));
-  await pump(bus, 5);
-  assert.equal(fills.length, 1, "关闭拆单时只应有一笔成交");
-  assert.ok(fill);
+  const queued = await broker.handle(intent({ quantity: 1 }));
+  assert.equal(queued, null, "决策当根只入队，不返回成交");
+  await pump(bus, 1);
+  assert.equal(fills.length, 1, "下一根 K 线成交，且只应有一笔");
+  const fill = fills[0]!;
   // 滑点 +10bps -> 100.1；手续费 0.1%
   assert.ok(Math.abs(fill.price - 100.1) < 1e-9);
   assert.ok(Math.abs(fill.fee - 100.1 * 0.001) < 1e-9);
