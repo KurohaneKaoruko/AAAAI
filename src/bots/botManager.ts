@@ -1054,7 +1054,12 @@ export class BotManager {
       const quantity = Math.abs(deltaValue) / price;
       const minTrade = bot.risk.minTradeValue;
       if (Math.abs(deltaValue) < minTrade || quantity <= 0) {
-        // 差额在噪声内：机器人自己也不会调，指引就不该怂恿人去动
+        // 不给操作，但必须说清是哪种"不操作"：
+        // 空仓观望（目标与当前都是 0）和"差额太小不值得动"是两回事。
+        const flat = currentWeight < 1e-6 && targetWeight < 1e-6;
+        const note = flat
+          ? "目标空仓，无需操作"
+          : `差额小于最小调仓额 ${round2(minTrade)}，无需操作`;
         actions.push({
           symbol,
           side: "HOLD",
@@ -1067,7 +1072,7 @@ export class BotManager {
           targetQty: round8(targetQty),
           reason: target.reason,
           at: target.at,
-          note: "差额小于最小调仓额，无需操作",
+          note,
         });
         continue;
       }
