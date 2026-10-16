@@ -341,7 +341,7 @@ export function StrategyPage({ store, initialTab }: { store: AppStore; initialTa
                   当前 {poolCount} 个标的 · 策略「{editing.name}」最多持有 {form.selfAllocating ? form.maxPositions : "不限（受风控仓位上限约束）"} 个
                 </p>
                 <p className="dim">
-                  例外：模拟交易所没有标的（只有四个仓位槽），不走候选池 —— 那里的行情是编出来的，挑标的没有意义。
+                  例外：模拟交易所没有标的（只有几条走向），不进候选池 —— 那几条走向是本地生成的，挑标的没有意义。
                 </p>
               </div>
             </Panel>

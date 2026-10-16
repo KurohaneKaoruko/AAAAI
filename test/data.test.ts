@@ -19,16 +19,16 @@ const noCred = { apiKey: "", apiSecret: "", testnet: false };
 test("SimulatedAdapter: 同一情景内行情自洽（默认每个实例是新情景）", async () => {
   const a = new SimulatedAdapter();
   a.init(noCred);
-  const k1 = await a.fetchKlines("仓位1", "1m", 40);
+  const k1 = await a.fetchKlines("单边上行", "1m", 40);
   const b = new SimulatedAdapter();
   b.init(noCred);
-  const k2 = await b.fetchKlines("仓位1", "1m", 40);
+  const k2 = await b.fetchKlines("单边上行", "1m", 40);
   assert.equal(k1.length, 40);
   // 随机性与复现的完整规则由 scenario.test.ts 锁住；这里只守"自洽 + 结构合法"：
   // 同一实例反复取同一窗口必须一致（实时轮询不会自己改写历史）
   assert.deepEqual(
     k1.map((x) => x.close),
-    (await a.fetchKlines("仓位1", "1m", 40)).map((x) => x.close),
+    (await a.fetchKlines("单边上行", "1m", 40)).map((x) => x.close),
     "同一情景内取数必须一致",
   );
   // 两个实例默认是不同的情景：同一代码不该每次都长成一条固定的线
@@ -50,12 +50,13 @@ test("SimulatedAdapter: 搜索与快照", async () => {
   const a = new SimulatedAdapter();
   a.init(noCred);
   const all = await a.searchSymbols("");
-  assert.ok(all.length >= 3);
-  // 模拟交易所没有标的，只有仓位槽：搜"仓位"能搜到，搜某个品种代码搜不到
-  const filtered = await a.searchSymbols("仓位");
-  assert.equal(filtered[0]?.symbol, "仓位1");
+  assert.equal(all.length, 5, "模拟交易所就是五条走向");
+  // 模拟交易所没有标的，只有走向：搜走向名能搜到，搜品种代码/仓位这种词搜不到
+  const filtered = await a.searchSymbols("跳水");
+  assert.equal(filtered[0]?.symbol, "急速跳水");
   assert.deepEqual(await a.searchSymbols("BTC"), [], "它没有跟真实品种重名的东西");
-  const tickers = await a.fetchTickers(["仓位1", "仓位2"]);
+  assert.deepEqual(await a.searchSymbols("仓位"), [], "它没有「仓位槽」这种东西");
+  const tickers = await a.fetchTickers(["单边上行", "震荡整理"]);
   assert.equal(tickers.length, 2);
   for (const t of tickers) {
     assert.ok(t.price > 0);
@@ -66,11 +67,11 @@ test("SimulatedAdapter: 搜索与快照", async () => {
 test("SimulatedAdapter: 模拟成交含手续费", async () => {
   const a = new SimulatedAdapter();
   a.init(noCred);
-  const order = await a.placeOrder({ symbol: "仓位1", side: "BUY", type: "MARKET", quoteQty: 1000 });
+  const order = await a.placeOrder({ symbol: "单边上行", side: "BUY", type: "MARKET", quoteQty: 1000 });
   assert.equal(order.status, "filled");
   assert.ok(order.avgPrice > 0);
   assert.ok(order.fee > 0);
-  const bad = await a.placeOrder({ symbol: "仓位1", side: "BUY", type: "MARKET", quantity: 0 });
+  const bad = await a.placeOrder({ symbol: "单边上行", side: "BUY", type: "MARKET", quantity: 0 });
   assert.equal(bad.status, "rejected");
 });
 

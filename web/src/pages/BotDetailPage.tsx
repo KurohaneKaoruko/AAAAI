@@ -13,7 +13,8 @@ import { api } from "../api";
 import { Button, Empty, Panel } from "../components/ui";
 import { describe } from "../components/StrategyProfiles";
 import { EquityChart } from "../components/EquityChart";
-import { money, pct, qty, signed, time, wPct, dateTime, TOPIC_LABEL } from "../lib/format";
+import { money, pct, qty, signed, time, wPct, dateTime, symbolColumnLabel, TOPIC_LABEL } from "../lib/format";
+import type { AppStore } from "../state/useAppStore";
 import type { Bot, BotAction, StrategyProfile } from "../types";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -25,12 +26,14 @@ const STATUS: Record<string, { text: string; cls: string }> = {
 
 export function BotDetailPage({
   botId,
+  store,
   onBack,
   onStart,
   onStop,
   onEdit,
 }: {
   botId: string;
+  store: AppStore;
   onBack: () => void;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
@@ -96,6 +99,9 @@ export function BotDetailPage({
   const m = st.metrics;
   const a = st.allocation;
   const running = st.status === "running";
+  // 这个机器人连的交易所自带交易物（模拟交易所的几条走向）？表头与文案据此换词
+  const builtin = store.connections.find((c) => c.id === bot.connectionId)?.adapter?.builtinSymbols ?? false;
+  const symLabel = symbolColumnLabel(builtin);
   const status = STATUS[st.status] ?? STATUS.idle!;
 
   return (
@@ -116,8 +122,8 @@ export function BotDetailPage({
               <span className="chip chip-sm chip-off">真实下单（未运行）</span>
             )}
             {bot.marketData === "simulated" && (
-              <span className="chip chip-sm chip-off" title="K 线由本地随机漫步生成，不是真实行情">
-                随机行情 · 演示
+              <span className="chip chip-sm chip-off" title="K 线由本地生成的走向叠加随机噪声，不是真实行情">
+                本地生成行情 · 演示
               </span>
             )}
             <span className="chip chip-sm">{bot.interval}</span>
@@ -143,7 +149,7 @@ export function BotDetailPage({
         {st.error && <div className="bot-error">{st.error}</div>}
         <div className="bot-meta">
           <span>
-            <em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b>
+            <em>{symLabel}</em> <b className="mono">{bot.symbols.join(" / ")}</b>
           </span>
           <span>
             <em>决策</em> <b>{bot.modelLabels.join(" / ") || "—"}</b>
@@ -203,7 +209,7 @@ export function BotDetailPage({
         )}
       </Panel>
 
-      <ActionPanel bot={bot} />
+      <ActionPanel bot={bot} symLabel={symLabel} />
 
       <Panel title="当前持仓" subtitle={a ? `权益 ${money(a.equity)} · 现金 ${wPct(a.cashWeight)}` : "尚未产生配置"}>
         {a && a.holdings.length > 0 ? (
@@ -211,7 +217,7 @@ export function BotDetailPage({
             <table className="table">
               <thead>
                 <tr>
-                  <th>标的</th>
+                  <th>{symLabel}</th>
                   <th className="num">数量</th>
                   <th className="num">成本价</th>
                   <th className="num">现价</th>
@@ -258,7 +264,7 @@ export function BotDetailPage({
                 <tr>
                   <th>时间</th>
                   <th>方向</th>
-                  <th>标的</th>
+                  <th>{symLabel}</th>
                   <th className="num">数量</th>
                   <th className="num">成交价</th>
                   <th className="num">手续费</th>
@@ -294,11 +300,11 @@ export function BotDetailPage({
       </Panel>
 
       {st.pnlBySymbol.length > 0 && (
-        <Panel title="分标的盈亏">
+        <Panel title={builtin ? "分走向盈亏" : "分标的盈亏"}>
           <table className="table">
             <thead>
               <tr>
-                <th>标的</th>
+                <th>{symLabel}</th>
                 <th className="num">已实现盈亏</th>
                 <th className="num">成交笔数</th>
               </tr>
@@ -397,7 +403,7 @@ export function BotDetailPage({
 }
 
 /** 操作指引：目标仓位与实时持仓的差额，换算成买卖与数量。 */
-function ActionPanel({ bot }: { bot: Bot }) {
+function ActionPanel({ bot, symLabel }: { bot: Bot; symLabel: string }) {
   const st = bot.state;
   const a = st.allocation;
   const acts = st.actions.filter((x) => x.side !== "HOLD");
@@ -413,7 +419,7 @@ function ActionPanel({ bot }: { bot: Bot }) {
             <thead>
               <tr>
                 <th>操作</th>
-                <th>标的</th>
+                <th>{symLabel}</th>
                 <th className="num">数量</th>
                 <th className="num">参考价</th>
                 <th className="num">金额</th>

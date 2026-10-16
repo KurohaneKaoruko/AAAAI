@@ -94,3 +94,9 @@ coverage/
 .env
 .env.local
 .env.*.local
+
+# ---- 例外：目录名撞上了上面的规则，但这些是源码，必须跟踪 ----
+# data/ 是给运行时数据目录用的；src/data/ 是源码。
+# lib/ 是给构建产物用的；web/src/lib/ 是源码。
+!src/data/
+!web/src/lib/

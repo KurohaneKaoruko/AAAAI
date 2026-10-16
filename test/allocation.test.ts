@@ -169,15 +169,15 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
       return "{}";
     },
     async allocate(_prompt, symbols) {
-      const has = symbols.includes("BTC") && symbols.includes("仓位2");
+      const has = symbols.includes("BTC") && symbols.includes("震荡整理");
       return JSON.stringify({
         allocations: has
           ? pickBtc.on
-            ? { BTC: 0.5, "仓位2": 0 }
-            : { BTC: 0, "仓位2": 0.5 }
+            ? { BTC: 0.5, "震荡整理": 0 }
+            : { BTC: 0, "震荡整理": 0.5 }
           : { BTC: 0.3 },
         confidence: 0.9,
-        reason: pickBtc.on ? "轮到买 BTC" : "轮到买 ETH",
+        reason: pickBtc.on ? "轮到买 BTC" : "轮到买 震荡整理",
       });
     },
   };
@@ -202,7 +202,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
 
   const groups = await Promise.all([
     adapter.fetchKlines("BTC", "1m", 120),
-    adapter.fetchKlines("仓位2", "1m", 120),
+    adapter.fetchKlines("震荡整理", "1m", 120),
   ]);
   const bars = mergeBarsByTime(groups);
 
@@ -211,7 +211,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
   pipeline.bus.subscribe(Topic.ALLOCATION, (e) => allocations.push(e.payload as Allocation));
   pipeline.bus.subscribe(Topic.SIGNAL, (e) => signals.push(e.payload as Signal));
 
-  // 第一阶段：先买 ETH。成交口径是"决策的下一根 K 线"，
+  // 第一阶段：先买 震荡整理。成交口径是"决策的下一根 K 线"，
   // 所以判断持仓前多喂一根 —— 让排队的买单落地。
   // 多喂几根：成交在"决策的下一根 K 线"，且第一次决策出现在各标的凑满
   // 预热窗口之后（快照只含单一标的的那一轮，会先买下它，随后被 0 权重清掉）。
@@ -224,7 +224,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
     return (pos.quantity * px) / pipeline.portfolio.equity();
   };
   const held = positions().map((p) => p.symbol);
-  assert.ok(held.includes("仓位2"), `第一阶段应持有 ETH，实际 ${held.join(",") || "空"}`);
+  assert.ok(held.includes("震荡整理"), `第一阶段应持有 震荡整理，实际 ${held.join(",") || "空"}`);
   // 落选的 BTC 必须被清到可忽略：风控刻意不为"不足 1 个单位"的零碎调仓下单，
   // 所以这里按权重断言而不是要求精确为 0。
   assert.ok(
@@ -232,7 +232,7 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
     `落选的 BTC 应被清仓，实际权重 ${(weightOf("BTC") * 100).toFixed(3)}%`,
   );
   assert.equal(allocations[0]!.source, "ai");
-  assert.match(allocations[0]!.reason, /轮到买 ETH/);
+  assert.match(allocations[0]!.reason, /轮到买 震荡整理/);
   // 未入选的标的必须收到 0 权重信号（否则不会卖）
   assert.ok(
     signals.some((s) => s.symbol === "BTC" && s.targetWeight === 0),
@@ -286,7 +286,7 @@ test("配置器：每 N 轮行情都会重新决策（回归：节流计数器�
 
   const groups = await Promise.all([
     adapter.fetchKlines("BTC", "1m", 220),
-    adapter.fetchKlines("仓位2", "1m", 220),
+    adapter.fetchKlines("震荡整理", "1m", 220),
   ]);
   await streamBars(pipeline.bus, pipeline.book, mergeBarsByTime(groups));
 

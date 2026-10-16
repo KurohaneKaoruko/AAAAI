@@ -25,7 +25,7 @@ export function makeBars(closes: number[], symbol = "TEST"): Bar[] {
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const base = buildConfig({
     app: { name: "TEST", log_level: "error" },
-    market: { symbols: ["仓位1"], interval: "1m", bar_count: 120, poll_ms: 60_000 },
+    market: { symbols: ["单边上行"], interval: "1m", bar_count: 120, poll_ms: 60_000 },
     strategy: { name: "momentum", fast_window: 5, slow_window: 20, max_target_weight: 0.5 },
     risk: {
       initial_cash: 100_000,
@@ -45,7 +45,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 /**
  * 测试用的模拟行情必须可复现。
  *
- * 模拟交易所默认每个情景都是新掷的随机路径（这是它存在的意义：策略要在
+ * 模拟交易所默认每个情景都是新掷的噪声（这是它存在的意义：策略要在
  * 不可预测的行情上被考察）。但"等成交出现""更大资金下更大的单"这类断言
  * 不能建立在随机数上 —— 那等于让 CI 靠运气过。所以测试统一锁一个种子，
  * 换成别的种子可能让某些用例因"行情恰好没走出信号"而失败（这是有意的：
@@ -53,11 +53,11 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
  *
  * 随机性本身由 test/scenario.test.ts 单独验证（它会清掉这个变量）。
  *
- * 种子与下面的时刻是**配套的一对**：价格是 (情景种子, 槽名, 时刻) 的纯函数，
- * 所以把模拟交易所的仓位槽改名（曾经叫 DEMO-*，现在叫仓位1~仓位4），
- * 整条路径就重掷了一遍，原来那对取值里"刚好走出信号"的窗口不再成立。
- * 动过槽名或时刻之后要重新挑一对 —— 判据是 test/bots.test.ts 与
- * test/backtest.test.ts 双双全绿（2026-10 改槽名后用的就是这一对）。
+ * 种子与下面的时刻是**配套的一对**：价格是 (情景种子, 走向名, 时刻) 的纯函数，
+ * 所以给走向改名（曾经叫 DEMO-*，后来叫仓位1~仓位4，现在是单边上行/缓慢阴跌/…）
+ * 等于把噪声整条重掷一遍，原来那对取值里"刚好走出信号"的窗口不再成立。
+ * 动过走向名或时刻之后要重新挑一对 —— 判据是 test/bots.test.ts 与
+ * test/backtest.test.ts 双双全绿（2026-10 改成"五种走向"后用的就是这一对）。
  */
 process.env.AAAAI_SIM_SEED ??= "12";
 

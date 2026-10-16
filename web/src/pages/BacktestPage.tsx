@@ -59,8 +59,8 @@ export function BacktestPage() {
   const simulatedConnection =
     connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
   /**
-   * 没有标的、只有自带仓位槽的交易所（模拟交易所）：没有"选标的"这一步，
-   * 用哪几个槽由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几个。
+   * 没有标的、只有自带走向的交易所（模拟交易所）：没有"选标的"这一步，
+   * 用哪几条走向由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几条。
    */
   const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
   const builtin = connAdapter?.builtinSymbols ?? false;
@@ -145,12 +145,12 @@ export function BacktestPage() {
 
           <div className="symbol-picker">
             <div className="symbol-picker-head">
-              {builtin ? "仓位槽（交易所自带）" : "回测标的（可多选）"}
+              {builtin ? "走向（交易所自带）" : "回测标的（可多选）"}
             </div>
             {builtin ? (
               <>
                 <div className="dim small">
-                  模拟交易所没有标的，也不用选 —— 开跑时它把这些仓位槽都算进来：
+                  模拟交易所没有标的，也不用选 —— 开跑时它把这 {builtinSymbols.length} 条走向都算进来：
                 </div>
                 <div className="chip-row">
                   {builtinSymbols.map((s) => (
@@ -188,14 +188,12 @@ export function BacktestPage() {
 
           {simulatedConnection && (
             <Notice tone="warn">
-              当前连接是「模拟交易所」：<b>每跑一次都掷一条新的随机行情路径</b>，
-              所以两次回测的数字不会一样 —— 这是刻意的，同一条路重跑只能证明"那条路上赚过钱"。
-              随机行情 + 规则的结果只是随机数与规则的产物，<b>不构成策略表现的任何证据</b>；
-              它的用途是看策略换条路还行不行。想看可信结果，请换用已连通的真实行情连接。
-              <div className="small" style={{ marginTop: 4 }}>
-                周期越短随机行情越安静：1m 常常几百根都不出一个信号（那不是策略坏了，是这个周期的波动本来就这么小）。
-                想看它做决策，请用 4h 或 1d。
-              </div>
+              当前连接是「模拟交易所」：它没有标的，只有几条本地生成的走向
+              {builtinSymbols.length > 0 ? `（${builtinSymbols.join(" / ")}）` : ""}。
+              走向的形状是写死的 —— 单边上行就一路上行、急速跳水就横盘后急跌；叠加的噪声每次重掷，
+              所以两次的数字不会完全一样。
+              它测的是「策略在不同走向下分别赚不赚」，跟任何真实市场无关，
+              <b>不构成策略表现的任何证据</b>。想看真实历史，请换用已连通的真实行情连接。
             </Notice>
           )}
           <div className="btn-row btn-row-auto">
@@ -228,7 +226,7 @@ export function BacktestPage() {
                 placeholder="留空 = 每次随机"
                 value={seedText}
                 onChange={(e) => setSeedText(e.target.value)}
-                title="模拟行情每次都会掷一条新的随机路径。想把某一次结果原样重跑，把当时显示的种子填到这里。"
+                title="模拟行情每次都会重掷随机噪声。想把某一次结果原样重跑，把当时显示的种子填到这里。"
               />
               <span className="dim">
                 {result?.scenarioSeed !== undefined ? (
@@ -257,10 +255,11 @@ export function BacktestPage() {
         >
           {result.marketData === "simulated" ? (
             <Notice tone="error">
-              这份结果跑在<b>随机生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}），
-              不代表策略在真实市场的表现，别拿它做决策。换成真实行情连接再跑一次。
+              这份结果跑在<b>本地生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：
+              走向是编的、噪声是随机的，不代表策略在真实市场的表现，别拿它做决策。
+              换成真实行情连接再跑一次。
               <div className="small" style={{ marginTop: 4 }}>
-                本次情景种子 <b>{result.scenarioSeed ?? "—"}</b>：再点一次「开始回测」会换一条新路径，
+                本次情景种子 <b>{result.scenarioSeed ?? "—"}</b>：再点一次「开始回测」会重掷噪声，
                 数字自然不同；想让这一次原样重现，才把这个种子用回去。
               </div>
             </Notice>
@@ -289,7 +288,7 @@ export function BacktestPage() {
             <table className="table" style={{ marginTop: 12 }}>
               <thead>
                 <tr>
-                  <th>标的</th>
+                  <th>{builtin ? "走向" : "标的"}</th>
                   <th className="num">已实现盈亏</th>
                   <th className="num">成交笔数</th>
                 </tr>
