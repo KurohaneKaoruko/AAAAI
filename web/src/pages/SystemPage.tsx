@@ -75,16 +75,6 @@ export function SystemPage({ store }: { store: AppStore }) {
     }
   };
 
-  const refreshTickers = async () => {
-    try {
-      await api.refreshTickers();
-      await store.reloadState();
-      store.toast("success", "行情已刷新");
-    } catch (err) {
-      store.toast("error", (err as Error).message);
-    }
-  };
-
   const visibleLogs = logs.filter((l) =>
     logFilter === "all" ? true : logFilter === "warn" ? l.level === "warn" : l.level === "error",
   );
@@ -127,7 +117,6 @@ export function SystemPage({ store }: { store: AppStore }) {
 
         <Panel title="维护操作">
           <div className="btn-column">
-            <Button onClick={refreshTickers}>刷新自选行情</Button>
             <Button variant="primary" onClick={persist}>
               将当前设置写入配置文件
             </Button>
