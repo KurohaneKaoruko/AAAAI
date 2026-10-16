@@ -239,9 +239,9 @@ export function BacktestPage() {
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
   return (
-    <div className="stat-card">
-      <span className="dim small">{label}</span>
-      <b className={`mono ${tone ?? ""}`}>{value}</b>
+    <div className="stat-tile">
+      <span className="stat-label">{label}</span>
+      <span className={`stat-value mono ${tone ?? ""}`}>{value}</span>
     </div>
   );
 }

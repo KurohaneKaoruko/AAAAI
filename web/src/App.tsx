@@ -5,6 +5,7 @@ import { useTheme } from "./lib/theme";
 import type { PageId } from "./components/Shell";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BotsPage } from "./pages/BotsPage";
+import { BotDetailPage } from "./pages/BotDetailPage";
 import { BacktestPage } from "./pages/BacktestPage";
 import { ExchangesPage } from "./pages/ExchangesPage";
 import { StrategyPage, type StrategyTab } from "./pages/StrategyPage";
@@ -21,6 +22,9 @@ export function App() {
   const [page, setPage] = useState<PageId>("dashboard");
   // 候选池是策略页里的一个标签页：跨页跳转要能落到对应标签，否则"去候选池"只会打开策略页第一个标签
   const [strategyTab, setStrategyTab] = useState<StrategyTab>("strategy");
+  // 机器人详情是机器人页的子页：卡片只管扫一眼，明细在这里摊开
+  const [botDetail, setBotDetail] = useState<string | null>(null);
+  const [botEditId, setBotEditId] = useState<string | null>(null);
   const [auth, setAuth] = useState<{ required: boolean; username: string; ok: boolean } | null>(null);
 
   const checkAuth = useCallback(async () => {
@@ -42,7 +46,20 @@ export function App() {
       case "dashboard":
         return <DashboardPage store={store} onNavigate={setPage} />;
       case "bots":
-        return <BotsPage store={store} />;
+        return botDetail ? (
+          <BotDetailPage
+            botId={botDetail}
+            onBack={() => setBotDetail(null)}
+            onStart={(id) => void api.startBot(id).then(() => undefined)}
+            onStop={(id) => void api.stopBot(id)}
+            onEdit={(id) => {
+              setBotDetail(null);
+              setBotEditId(id);
+            }}
+          />
+        ) : (
+          <BotsPage store={store} onOpenDetail={(id) => setBotDetail(id)} initialEditId={botEditId} />
+        );
       case "backtest":
         return <BacktestPage />;
       case "exchanges":
@@ -78,7 +95,17 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar page={page} onNavigate={setPage} connections={store.connections} />
+      <Sidebar
+        page={page}
+        onNavigate={(p) => {
+          setPage(p);
+          if (p === "bots") {
+            setBotDetail(null);
+            setBotEditId(null);
+          }
+        }}
+        connections={store.connections}
+      />
       <div className="app-main">
         <TopBar store={store} theme={theme} onToggleTheme={toggle} />
         <main className="content">{render()}</main>
