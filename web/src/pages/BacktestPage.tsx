@@ -93,7 +93,7 @@ export function BacktestPage() {
     <div className="page page-backtest">
       <Panel
         title="历史模拟（回测）"
-        subtitle="把一段真实历史行情灌进策略，看它的战绩。与机器人无关，也不影响任何机器人的统计"
+        subtitle="把一段历史行情灌进策略，看它的战绩。与机器人无关，也不影响任何机器人的统计"
       >
         <div className="connection-form">
           <div className="grid-2">

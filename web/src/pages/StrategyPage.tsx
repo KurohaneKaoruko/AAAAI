@@ -312,8 +312,9 @@ export function StrategyPage({ store, initialTab }: { store: AppStore; initialTa
                 <div className="explain-box">
                   <strong>这套流程怎么保证不出事</strong>
                   <p>
-                    每个环节都能独立降级：模型超时或输出非法 → 回退量化基线；因子/HRP 算不出权重 → 回退等比分配；
-                    风控不通过 → 不下单（而不是"小仓位试试"）。任何一环失败都不会让流水线卡死或乱下单。
+                    每个环节都能独立降级：模型超时或输出非法 → 回退量化基线；拿不到 K 线明细 → 回退横截面动量基线；
+                    HRP 没有可用结果 → 保持因子分给出的权重；没有任何标拿到正分 → 空仓（不硬凑权重）；
+                    风控不通过 → 不下单（而不是"小仓位试试"）。
                   </p>
                   <p className="dim">
                     新闻属外部不可信输入，只作为参考写进 prompt，不会直接触发交易。

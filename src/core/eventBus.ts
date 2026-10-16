@@ -8,7 +8,7 @@
  *   流水线内统一使用 publishAsync 保证顺序确定。
  */
 
-import type { Allocation, Signal } from "./types.js";
+import type { Allocation } from "./types.js";
 
 export const Topic = {
   BAR: "market.bar",
@@ -108,9 +108,4 @@ export class EventBus {
       this.buf = this.buf.slice(-this.historyLimit);
     }
   }
-}
-
-/** 便捷构造：把 Signal 包装成 SIGNAL 事件并发布。 */
-export function publishSignal(bus: EventBus, signal: Signal): void {
-  bus.publish(Topic.SIGNAL, signal);
 }

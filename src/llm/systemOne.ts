@@ -16,7 +16,6 @@
  */
 
 import { getLogger } from "../core/logger.js";
-import { parseDecision } from "./llmClient.js";
 
 const log = getLogger("llm:systemone");
 
@@ -250,7 +249,5 @@ export function buildStateFromPrompt(prompt: string): string {
   return `${header}\n\n${prompt.slice(marker)}`;
 }
 
-/** 校验 System One 决策输出（复用通用解析器，便于统一测试）。 */
-export function parseSystemOneDecision(text: string) {
-  return parseDecision(text);
-}
+// 决策输出由 LLMStrategy 用 llmClient 的 parseDecision 统一解析，
+// 这里不再提供第二份包装（免得解析路径有两套）。
