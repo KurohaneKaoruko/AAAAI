@@ -919,3 +919,49 @@ test("事件日志：实时决策要记进状态（界面的事件面板不是�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("资产配置：权重必须自洽（持仓之和 + 现金 = 100%，市值之和 + 现金 = 权益）", async () => {
+  // 界面那一栏是给人数用的：加起来不是 100%，用户没法判断该信哪个。
+  // 这是一条契约，不是一个已修的 bug —— 权益 = 现金 + Σ持仓市值，
+  // 权重就是各自市值/权益，所以恒等于 1；哪天改坏了这里先失败。
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-weight-"));
+  try {
+    const connections = new ConnectionManager(dir);
+    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
+    const bot = bots.create({
+      name: "权重",
+      connectionId: conn.id,
+      symbols: ["DEMO-BTC", "DEMO-ETH", "600519"],
+      barCount: 60,
+      pollMs: 120,
+      strategy: { fastWindow: 3, slowWindow: 8 },
+    });
+    await bots.start(bot.id);
+
+    const deadline = Date.now() + 15000;
+    let checked = 0;
+    while (Date.now() < deadline) {
+      const a = bots.state(bot.id).allocation;
+      if (a && a.holdings.length > 0) {
+        const weightSum = a.holdings.reduce((s, h) => s + h.weight, 0) + a.cashWeight;
+        assert.ok(
+          Math.abs(weightSum - 1) < 0.005,
+          `权重之和应约为 1，实际 ${weightSum}（持仓 ${a.holdings.map((h) => `${h.symbol}=${h.weight}`).join(",")} 现金=${a.cashWeight}）`,
+        );
+        const valueSum = a.holdings.reduce((s, h) => s + h.marketValue, 0) + a.cash;
+        assert.ok(
+          Math.abs(valueSum - a.equity) < 1,
+          `持仓市值之和 + 现金 应等于权益：${valueSum} vs ${a.equity}`,
+        );
+        checked += 1;
+        if (checked >= 3) break;
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    assert.ok(checked > 0, "应至少抓到一次有持仓的配置快照来校验");
+    bots.stop(bot.id);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

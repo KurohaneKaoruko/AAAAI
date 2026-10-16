@@ -7,7 +7,7 @@ import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularS
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { StrategyPicker, describe } from "../components/StrategyProfiles";
-import { money, pct, qty, signed, time } from "../lib/format";
+import { money, pct, qty, signed, time, wPct, weightRemainder } from "../lib/format";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
   idle: { text: "待机", cls: "badge-idle" },
@@ -310,11 +310,6 @@ function BotCard({
 }
 
 /** 小权重也要看得清：0.2% 不能显示成 0%。 */
-function wPct(w: number): string {
-  const digits = w > 0 && w < 0.01 ? 2 : w > 0 && w < 0.1 ? 1 : 0;
-  return `${(w * 100).toFixed(digits)}%`;
-}
-
 function AllocationOverview({ bots }: { bots: Bot[] }) {
   const rows = bots.filter((b) => b.state.allocation);
   const symbols = [...new Set(rows.flatMap((b) => b.state.allocation!.holdings.map((h) => h.symbol)))];
@@ -356,7 +351,8 @@ function AllocationOverview({ bots }: { bots: Bot[] }) {
                       </td>
                     );
                   })}
-                  <td className="num mono dim">{wPct(a.cashWeight)}</td>
+                  {/* 现金列吸收各标的显示舍入，这一行才看得见地加总到 100% */}
+                  <td className="num mono dim">{wPct(weightRemainder(a.holdings.map((h) => h.weight)))}</td>
                 </tr>
               );
             })}
@@ -370,6 +366,8 @@ function AllocationOverview({ bots }: { bots: Bot[] }) {
 /** 一个账号当前的资产配置：各标的权重条 + 现金。 */
 function AllocationBars({ alloc }: { alloc: BotAllocation }) {
   const [hover, setHover] = useState<string | null>(null);
+  // 展示用现金占比：按显示精度吸收各持仓的舍入，让这一栏看得见地加总到 100%
+  const cashShown = weightRemainder(alloc.holdings.map((h) => h.weight));
   if (alloc.holdings.length === 0) {
     // 全现金时那根条只剩一种颜色，不携带任何信息 —— 直接把数字说清楚
     return (
@@ -377,7 +375,7 @@ function AllocationBars({ alloc }: { alloc: BotAllocation }) {
         <div className="alloc-head">
           <span>资产配置</span>
           <span className="dim mono">
-            现金 {money(alloc.cash)} · 占比 {wPct(alloc.cashWeight)}
+            现金 {money(alloc.cash)} · 占比 {wPct(cashShown)}
           </span>
         </div>
         <div className="alloc-empty">
@@ -392,7 +390,7 @@ function AllocationBars({ alloc }: { alloc: BotAllocation }) {
       <div className="alloc-head">
         <span>资产配置</span>
         <span className="dim mono">
-          权益 {money(alloc.equity)} · 持仓 {alloc.heldCount} · 现金 {money(alloc.cash)}（{wPct(alloc.cashWeight)}）
+          权益 {money(alloc.equity)} · 持仓 {alloc.heldCount} · 现金 {money(alloc.cash)}（{wPct(cashShown)}）
         </span>
       </div>
       <div className="alloc-bar">
@@ -426,7 +424,7 @@ function AllocationBars({ alloc }: { alloc: BotAllocation }) {
           <span className="alloc-item">
             <i className="alloc-dot alloc-cash" />
             <b>现金</b>
-            <span className="mono dim">{wPct(alloc.cashWeight)}</span>
+            <span className="mono dim">{wPct(cashShown)}</span>
             <span className="mono dim">{money(alloc.cash, 0)}</span>
           </span>
         )}
