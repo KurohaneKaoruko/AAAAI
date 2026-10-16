@@ -53,6 +53,9 @@ export function BacktestPage() {
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   const strategy = strategies.find((s) => s.id === strategyId);
   const local = strategy ? strategy.decisionSource === "rules" : true;
+  // 模拟交易所 = 随机行情。结果必须自己先说清楚，不能让用户拿去当证据。
+  const simulatedConnection =
+    connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
 
   const run = async () => {
     if (!connectionId || symbols.length === 0 || !strategyId) return;
@@ -145,6 +148,13 @@ export function BacktestPage() {
             )}
           </div>
 
+          {simulatedConnection && (
+            <Notice tone="warn">
+              当前连接是「模拟交易所」：K 线由本地随机漫步生成。
+              跑出来的曲线只是随机数与规则的产物，<b>不构成策略表现的任何证据</b>。
+              想看可信结果，请换用已连通的真实行情连接。
+            </Notice>
+          )}
           <div className="btn-row btn-row-auto">
             <Button
               variant="primary"
@@ -169,7 +179,21 @@ export function BacktestPage() {
       </Panel>
 
       {result && (
-        <Panel title={`回测结果 · ${result.strategyName}`} subtitle={`${result.symbols.join(" / ")} · ${result.interval} · ${result.bars} 根 · 耗时 ${(result.durationMs / 1000).toFixed(1)}s`}>
+        <Panel
+          title={`回测结果 · ${result.strategyName}`}
+          subtitle={`${result.symbols.join(" / ")} · ${result.interval} · ${result.bars} 根 · 耗时 ${(result.durationMs / 1000).toFixed(1)}s`}
+        >
+          {result.marketData === "simulated" ? (
+            <Notice tone="error">
+              这份结果跑在<b>随机生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}），
+              不代表策略在真实市场的表现，别拿它做决策。换成真实行情连接再跑一次。
+            </Notice>
+          ) : (
+            <Notice tone="success">
+              行情来自 {result.connectionLabel ?? "真实数据源"}；成交按<b>决策的下一根 K 线开盘价</b>模拟，
+              已计手续费与滑点 —— 策略看不到还没发生的那一段。
+            </Notice>
+          )}
           <div className="grid-4">
             <Stat label="期末权益" value={money(result.metrics.finalEquity, 2)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />
             <Stat label="收益率" value={signed(result.metrics.totalReturn * 100) + "%"} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />

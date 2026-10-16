@@ -1162,6 +1162,7 @@ export class BotManager {
       ...bot,
       state: this.state(bot.id),
       modelLabels: labels,
+      marketData: this.connections.get(bot.connectionId)?.adapterId === "simulated" ? "simulated" : "real",
       history: this.historyOf(bot.id),
       totals: this.totalsOf(bot.id),
       ...this.slicingOf(bot),

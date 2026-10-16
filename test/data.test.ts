@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventBus, Topic } from "../src/core/eventBus.js";
-import { PriceBook } from "../src/data/streaming.js";
+import { PriceBook, streamBars } from "../src/data/streaming.js";
 import { PortfolioManager } from "../src/portfolio/portfolioManager.js";
 import { PaperBroker } from "../src/execution/paperBroker.js";
 import { SimulatedAdapter } from "../src/exchanges/simulated.js";
@@ -97,15 +97,26 @@ test("PaperBroker: 成交含滑点与手续费，组合正确记账", async () =
     await broker.handle(e.payload as OrderIntent);
   });
 
-  book.update({ symbol: "X", timestamp: new Date(), open: 100, high: 100, low: 100, close: 100, volume: 1 });
+  const t0 = Date.UTC(2026, 0, 1);
+  // 第 1 根：决策在这根收盘时做出 —— 不能按它的收盘价成交
+  await streamBars(bus, book, [
+    { symbol: "X", timestamp: new Date(t0), open: 100, high: 100, low: 100, close: 100, volume: 1 },
+  ]);
   await bus.publishAsync(Topic.ORDER_INTENT, {
     symbol: "X",
     side: "BUY",
     quantity: 1,
     price: 100,
-    timestamp: new Date(),
+    timestamp: new Date(t0),
     reason: "test",
   } satisfies OrderIntent);
+  assert.equal(portfolio.metrics().totalFills, 0, "决策当根不得成交");
+
+  // 第 2 根：开盘价 100，按它成交 + 滑点 10bps -> 100.1
+  await streamBars(bus, book, [
+    { symbol: "X", timestamp: new Date(t0 + 60_000), open: 100, high: 101, low: 99, close: 100.5, volume: 1 },
+  ]);
+  await new Promise((r) => setTimeout(r, 5));
 
   // 滑点 +10bps -> 100.1；手续费 0.1%
   assert.equal(portfolio.cash, 10_000 - 100.1 - 0.1001);

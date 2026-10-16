@@ -236,6 +236,9 @@ export interface BotAction {
 
 /** 一次历史模拟（回测）的结果。成交一次性全出——它就是要把整段历史跑完。 */
 export interface BacktestResult {
+  /** real = 真实行情；simulated = 本地随机生成的演示行情（不构成任何证据） */
+  marketData: "real" | "simulated";
+  connectionLabel?: string;
   symbols: string[];
   interval: string;
   barCount: number;
@@ -308,6 +311,8 @@ export interface Bot {
   };
   createdAt: string;
   modelLabels: string[];
+  /** 行情来源：real = 真实行情；simulated = 模拟交易所的随机行情 */
+  marketData: "real" | "simulated";
   /** 拆单执行统计（paper 券商且开了拆单时才有） */
   slicing?: {
     algo: "none" | "twap" | "vwap";

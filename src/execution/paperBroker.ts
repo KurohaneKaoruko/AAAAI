@@ -1,5 +1,11 @@
 /**
- * 模拟券商：按最新价 ± 滑点立即成交，收取手续费。
+ * 模拟券商：按**下一根 K 线的开盘价** ± 滑点成交，收取手续费。
+ *
+ * 成交口径（可信度的地基）：
+ * 决策发生在第 t 根 K 线收盘时（此刻才知道它的收盘价），
+ * 所以按第 t 根收盘价立即成交等于假设"看到收盘价还能买在收盘价"——
+ * 现实里做不到，回测里就会凭空多出一段利润。
+ * 因此订单入队，等**下一根 K 线开盘**才成交；数据结束时还没轮到的订单作废。
  *
  * 滑点走冲击成本模型（随订单规模与标的波动变化），而不是一个固定 bps；
  * 没有足够行情数据时自动退回固定滑点。
@@ -100,6 +106,11 @@ export class PaperBroker implements Broker {
   private seq = 0;
   /** 已推进的 K 线根数：拆单进度以它为时钟 */
   private barIndex = 0;
+  /**
+   * 待成交订单（决策已发出，等下一根 K 线开盘成交）。
+   * 同一批订单按入队顺序一起成交，不做优先级排序 —— 保持与真实时间线一致。
+   */
+  private queued: OrderIntent[] = [];
   private readonly volumeHistory = new Map<string, number[]>();
   /** 每个标的的近期 K 线（收盘价 + 成交量），供冲击成本模型估算波动与成交额 */
   private readonly barWindows = new Map<string, { close: number; volume: number }[]>();
@@ -146,6 +157,13 @@ export class PaperBroker implements Broker {
 
   private micro: ((symbol: string) => MarketMicroStats | undefined) | null = null;
 
+  /**
+   * 收到订单意图：**不入队即成交**，而是排队等下一根 K 线。
+   *
+   * 立刻按当前价成交是回测里最常见的伪盈利来源：信号用的是这根 K 线的收盘价，
+   * 而按同一个收盘价成交等于假设"知道收盘价还能买在收盘价"。现实中做不到。
+   * 所以这里只做校验与入队，真正的成交在 onBar（下一根 K 线开盘价）里完成。
+   */
   async handle(intent: OrderIntent): Promise<Fill | null> {
     const price = this.book.last(intent.symbol);
     if (price === undefined || !(intent.quantity > 0)) {
@@ -153,7 +171,27 @@ export class PaperBroker implements Broker {
       this.bus.publish(Topic.ORDER_REJECTED, intent);
       return null;
     }
-    if (!this.slicingOn) return this.fillWholeOrder(intent, price);
+    if (!this.slicingOn) {
+      /**
+       * 同一标的只保留最新的未成交订单。
+       *
+       * 为什么要取代而不是并存：风控是按**组合当前持仓**算调仓量的，
+       * 它看不见还没成交的订单。成交延迟一根 K 线时，若每轮决策都叠一单，
+       * 这些单会按同一时的持仓各算一次，叠加后把仓位打成反向（凭空做空）——
+       * 那是模拟口径自己造出来的仓位，不是策略的决定。
+       * 所以新决策取代同标的的旧单：真实交易里也是"撤掉旧单一挂新单"。
+       */
+      const stale = this.queued.filter((q) => q.symbol === intent.symbol);
+      if (stale.length > 0) {
+        this.queued = this.queued.filter((q) => q.symbol !== intent.symbol);
+        for (const q of stale) {
+          log.info("%s 的旧订单被新决策取代（避免叠加出反向仓位）", q.symbol);
+          this.bus.publish(Topic.ORDER_REJECTED, q);
+        }
+      }
+      this.queued.push(intent);
+      return null;
+    }
 
     const id = `${intent.symbol}-${this.seq++}`;
     const order = createSlicedOrder({
@@ -168,19 +206,44 @@ export class PaperBroker implements Broker {
     });
     this.pending.set(id, order);
     log.info(
-      "PAPER 拆单 %s %s %s → %s 片（%s），首片立即成交",
+      "PAPER 拆单 %s %s %s → %s 片（%s），按 K 线逐片成交（首片也等下一根 K 线）",
       order.side,
       order.symbol,
       order.totalQuantity.toFixed(6),
       order.plan.length,
       this.slicing.algo.toUpperCase(),
     );
-    const fill = this.executeDueSlice(order, intent);
-    if (isDone(order)) {
-      this.pending.delete(id);
-      this.pushCompleted(report(order, false));
+    // 不在这里立即成交：与不拆单时同一口径 —— 决策当根不能成交。
+    // 拆单进度由 onBar 每根 K 线推进，首片按计划在后续某根成交。
+    return null;
+  }
+
+  /**
+   * 成交上一根 K 线排下的订单：本根开盘价 ± 滑点。
+   *
+   * 用开盘价而不是收盘价：开盘价是"这根 K 线开始时就能拿到的价"，
+   * 而收盘价要到这根走完才知道 —— 用后者仍是超前信息。
+   * 跳空保护：开盘价缺失或明显异常（<=0 或偏离收盘 10 倍以上）就放弃这批订单，
+   * 按"没成交"处理，绝不按一个离谱的价格凑出成交。
+   */
+  private executeQueued(bar: Bar): void {
+    if (this.queued.length === 0) return;
+    const queue = this.queued;
+    this.queued = [];
+    const open = bar.open;
+    const usable = Number.isFinite(open) && open > 0 && (bar.close <= 0 || open > bar.close / 10) && (open < bar.close * 10);
+    if (!usable) {
+      log.warn("开盘价不可用（%s open=%s），本批 %d 笔订单作废", bar.symbol, open, queue.length);
+      for (const intent of queue) this.bus.publish(Topic.ORDER_REJECTED, intent);
+      return;
     }
-    return fill;
+    for (const intent of queue) {
+      if (intent.symbol !== bar.symbol) continue; // 该标的的订单等它自己的下一根 K 线
+      this.fillWholeOrder(intent, open);
+    }
+    // 非本标的的订单放回队首，保持顺序
+    const rest = queue.filter((i) => i.symbol !== bar.symbol);
+    if (rest.length > 0) this.queued = [...rest, ...this.queued];
   }
 
   /** 一次性全部成交（未开拆单时的原有行为，逐字保持）。 */
@@ -211,11 +274,12 @@ export class PaperBroker implements Broker {
     this.recordVolume(bar);
     this.recordWindow(bar);
     this.barIndex += 1;
+    this.executeQueued(bar);
     if (!this.slicingOn || this.pending.size === 0) return;
     for (const order of [...this.pending.values()]) {
       const due = takeDueSlice(order, this.barIndex);
       if (!due) continue;
-      this.executeDueSlice(order, undefined, due);
+      this.executeDueSlice(order, undefined, due, bar);
       if (isDone(order)) {
         this.pending.delete(order.id);
         this.pushCompleted(report(order, false));
@@ -224,14 +288,20 @@ export class PaperBroker implements Broker {
   }
 
   /** 执行当前到期的那一片，并广播子单成交。 */
+  /**
+   * 成交一片。成交价取**这根 K 线的开盘价**（由 onBar 传入），
+   * 与不拆单时同一口径；没有开盘价时退回当根收盘价并如实记原因。
+   */
   private executeDueSlice(
     order: SlicedOrder,
     intent?: OrderIntent,
     due?: { quantity: number; barOffset: number },
+    bar?: Bar,
   ): Fill | null {
     const slice = due ?? takeDueSlice(order, this.barIndex);
     if (!slice) return null;
-    const mid = this.book.last(order.symbol);
+    const open = bar?.open;
+    const mid = Number.isFinite(open) && (open as number) > 0 ? (open as number) : this.book.last(order.symbol);
     if (mid === undefined || !(slice.quantity > 0)) {
       log.warn("拆单切片无行情，暂缓: %s", order.symbol);
       return null;

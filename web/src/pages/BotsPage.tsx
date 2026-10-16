@@ -218,6 +218,12 @@ function BotCard({
           <span className={`badge ${st.cls}`}>{st.text}</span>
         </div>
         <div className="bot-card-chips">
+          {/* 行情来源：跑在随机行情上的机器人，成交与盈亏不是真实市场的结果 */}
+          {bot.marketData === "simulated" && (
+            <span className="chip chip-sm chip-off" title="K 线由本地随机漫步生成">
+              随机行情 · 演示
+            </span>
+          )}
           {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
           {bot.paperTrading && bot.state.status === "running" && (
             <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
