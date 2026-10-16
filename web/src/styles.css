@@ -1130,15 +1130,18 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .bot-meta em { font-style: normal; margin-right: 4px; }
 .bot-meta b { color: var(--text); font-weight: 500; }
 
-/* 卡片底部的详情入口：与上面的信息拉开一点距离，别贴太紧 */
-.bot-detail-link {
+/* 卡片底部一行：详情入口靠左、参与开关靠右，中间留白 */
+.bot-card-foot {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--border-soft);
 }
+.bot-detail-link { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .bot-stats {
   display: flex;
