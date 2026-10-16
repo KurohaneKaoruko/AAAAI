@@ -25,7 +25,7 @@ test("回测：整段历史一次跑完，成交一次性产出（这正是它�
   try {
     const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20, maxTargetWeight: 0.5 });
     const result = await runBacktest(testConfig(), testAdapter(), profile, {
-      symbols: ["仓位1"],
+      symbols: ["单边上行"],
       interval: "1m",
       barCount: 120,
       strategyId: profile.id,
@@ -48,7 +48,7 @@ test("回测：初始资金覆盖生效（用自己的钱，不受全局风控�
   try {
     const profile = strategies.create({ name: "双均线" });
     const result = await runBacktest(testConfig(), testAdapter(), profile, {
-      symbols: ["仓位1"],
+      symbols: ["单边上行"],
       barCount: 80,
       strategyId: profile.id,
       initialCash: 50_000,
@@ -56,7 +56,7 @@ test("回测：初始资金覆盖生效（用自己的钱，不受全局风控�
     assert.ok(result.metrics.finalEquity > 0);
     // 50k 的规模下成交金额应明显小于 100k 规模（否则资金覆盖没生效）
     const big = await runBacktest(testConfig(), testAdapter(), profile, {
-      symbols: ["仓位1"],
+      symbols: ["单边上行"],
       barCount: 80,
       strategyId: profile.id,
       initialCash: 400_000,
@@ -77,7 +77,7 @@ test("回测：模型类策略被明确拒绝（回放里问模型等于用后�
       await assert.rejects(
         () =>
           runBacktest(testConfig(), testAdapter(), profile, {
-            symbols: ["仓位1"],
+            symbols: ["单边上行"],
             barCount: 60,
             strategyId: profile.id,
           }),

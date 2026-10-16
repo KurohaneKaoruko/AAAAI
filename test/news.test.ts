@@ -32,13 +32,13 @@ function rfc1123(minutesAgo: number): string {
 const RSS = `<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Demo</title>
 <item>
-  <title>仓位1 大幅上涨 创历史新高</title>
+  <title>单边上行 大幅上涨 创历史新高</title>
   <description>机构称资金持续流入&lt;b&gt;强劲&lt;/b&gt;</description>
   <link>https://example.com/a</link>
   <pubDate>${rfc1123(60)}</pubDate>
 </item>
 <item>
-  <title>仓位1 暴跌 遭监管调查</title>
+  <title>单边上行 暴跌 遭监管调查</title>
   <description>交易所称将暂停服务</description>
   <link>https://example.com/b</link>
   <pubDate>${rfc1123(120)}</pubDate>
@@ -53,11 +53,11 @@ test("新闻：外部文本必须清洗（去标签/控制字符/限长）", () 
 });
 
 test("新闻：情绪打分能分辨多空，并处理程度副词与否定", () => {
-  const up = scoreSentiment("仓位1 大幅上涨 创历史新高，机构增持");
+  const up = scoreSentiment("单边上行 大幅上涨 创历史新高，机构增持");
   assert.ok(up.score > 0.3, `利好应显著为正，实际 ${up.score}`);
   assert.equal(label(up.score), "positive");
 
-  const down = scoreSentiment("仓位1 暴跌 遭监管调查");
+  const down = scoreSentiment("单边上行 暴跌 遭监管调查");
   assert.ok(down.score < -0.3, `利空应显著为负，实际 ${down.score}`);
   assert.equal(label(down.score), "negative");
 
@@ -69,9 +69,9 @@ test("新闻：情绪打分能分辨多空，并处理程度副词与否定", ()
 });
 
 test("新闻：RSS 解析（含实体、CDATA、时间）", () => {
-  const items = parseFeed(RSS, "仓位1", "演示源", 10);
+  const items = parseFeed(RSS, "单边上行", "演示源", 10);
   assert.equal(items.length, 2);
-  assert.equal(items[0]!.symbol, "仓位1");
+  assert.equal(items[0]!.symbol, "单边上行");
   assert.equal(items[0]!.source, "演示源");
   assert.ok(items[0]!.title.includes("上涨"));
   assert.ok(!items[0]!.summary.includes("<b>"), "摘要里的标签应被清掉");
@@ -107,12 +107,12 @@ test("新闻：坏源不影响整体，其它源照常返回", async () => {
       refreshMs: 60_000,
       includeInAnalysis: true,
     });
-    const res = await svc.refresh(["仓位1"]);
+    const res = await svc.refresh(["单边上行"]);
     assert.ok(res.items.length >= 1, "好源应返回条目");
     assert.ok(res.errors.some((e) => e.provider === "坏源"), "坏源应被记录为错误");
     // 同一 URL 再抓一次不应重复入库
     const before = svc.list(100).length;
-    await svc.refresh(["仓位1"]);
+    await svc.refresh(["单边上行"]);
     assert.equal(svc.list(100).length, before, "重复抓取不应产生重复条目");
     // 多空各一条
     const digests = toDigest(svc.list(100), 3);

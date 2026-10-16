@@ -15,9 +15,11 @@ export interface AdapterMeta {
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
-  /** 自带标的：用户不需要也不能挑（模拟交易所） */
+  /**
+   * 交易物由交易所自己定：用户不需要也不能挑（模拟交易所的几条走向）。
+   */
   builtinSymbols?: boolean;
-  /** 常用/自带标的清单 */
+  /** 常用/自带交易物清单 */
   defaultSymbols?: SymbolInfo[];
 }
 

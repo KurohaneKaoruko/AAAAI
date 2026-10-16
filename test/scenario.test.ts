@@ -13,6 +13,10 @@
  *
  * 另外锁住调用方的两条约定：历史模拟每次换新路径；模拟对照只换一次
  * （所有参赛者做同一套题，否则名次没有意义）。
+ *
+ * 还要分清两层：**走向的形状是写死的**（单边上行就一路上行、急速跳水就横盘后急跌），
+ * **掷随机的只是叠在上面的噪声**。形状随种子乱跳的话，"在阴跌行情下策略还行不行"
+ * 就无从谈起 —— 那测的是另一条走向。下面「走向」那条用例把这件事钉住。
  */
 
 // 本文件要显式验证"随机"，所以必须清掉 helpers 里的固定种子与固定时钟
@@ -44,9 +48,9 @@ function closes(bars: { close: number }[]): string {
 test("随机情景：换一个情景就是一条新路径（同一代码不再每次长一样）", async () => {
   const a = randomAdapter();
   a.newScenario(1);
-  const first = await a.fetchKlines("仓位1", "1d", 120);
+  const first = await a.fetchKlines("单边上行", "1d", 120);
   a.newScenario(2);
-  const second = await a.fetchKlines("仓位1", "1d", 120);
+  const second = await a.fetchKlines("单边上行", "1d", 120);
   assert.notEqual(closes(first), closes(second), "两条情景路径必须不同，否则测的还是同一条路的运气");
 });
 
@@ -63,12 +67,12 @@ test("随机情景：连续掷 10 次，至少 9 次路径互不相同（排除�
 test("情景内自洽：同一情景重复取数逐字节一致，取数顺序也不影响重叠部分", async () => {
   const a = randomAdapter();
   a.newScenario(7);
-  const wide = await a.fetchKlines("仓位2", "1h", 200);
-  const wideAgain = await a.fetchKlines("仓位2", "1h", 200);
+  const wide = await a.fetchKlines("震荡整理", "1h", 200);
+  const wideAgain = await a.fetchKlines("震荡整理", "1h", 200);
   assert.deepEqual(wide, wideAgain, "同一情景同一窗口必须逐字节一致（历史不能自己变）");
 
   // 先取长窗口再取短窗口：重叠的 50 根必须一致，否则预热段和后续成交会对不上
-  const narrow = await a.fetchKlines("仓位2", "1h", 50);
+  const narrow = await a.fetchKlines("震荡整理", "1h", 50);
   assert.deepEqual(
     wide.slice(-50),
     narrow,
@@ -79,12 +83,12 @@ test("情景内自洽：同一情景重复取数逐字节一致，取数顺序�
 test("复现：同一个种子原样重现同一个结果（随机不等于无法查证）", async () => {
   const a = randomAdapter();
   a.newScenario(20260916);
-  const first = await a.fetchKlines("仓位1", "1d", 150);
+  const first = await a.fetchKlines("单边上行", "1d", 150);
   // 中间换几次情景，确认不会串味
   a.newScenario();
   a.newScenario(1);
   a.newScenario(20260916);
-  const again = await a.fetchKlines("仓位1", "1d", 150);
+  const again = await a.fetchKlines("单边上行", "1d", 150);
   assert.deepEqual(first, again, "同一种子必须能原样重现");
 });
 
@@ -95,8 +99,8 @@ test("行情特征：存在共同市场因子（标的相关性为正），否�
   for (const seed of [11, 22, 33, 44]) {
     a.newScenario(seed);
     const [btc, eth] = await Promise.all([
-      a.fetchKlines("仓位1", "1d", 150),
-      a.fetchKlines("仓位2", "1d", 150),
+      a.fetchKlines("单边上行", "1d", 150),
+      a.fetchKlines("震荡整理", "1d", 150),
     ]);
     const rb = btc.slice(1).map((b, i) => Math.log(b.close / btc[i]!.close));
     const re = eth.slice(1).map((b, i) => Math.log(b.close / eth[i]!.close));
@@ -118,9 +122,52 @@ test("行情特征：存在共同市场因子（标的相关性为正），否�
   assert.ok(sum / n > 0.3, `平均相关性应明显为正，实际 ${(sum / n).toFixed(2)}`);
 });
 
+/**
+ * 走向的形状：把多个种子的噪声平均掉，剩下的应当就是走向本身。
+ *
+ * 这一条是"这五条走向到底是干什么的"的唯一依据 —— 名字里写着上行/阴跌/横盘/跳水，
+ * 就得真长成那样；否则用户在界面上选的"走向"是假的，测出来的盈利能力也没有意义。
+ */
+test("走向：五条走向的形状与名字相符（形状固定，随机的只是噪声）", async () => {
+  const a = randomAdapter();
+  const SEEDS = [11, 22, 33, 44, 55, 66, 77, 88];
+  const BARS = 120;
+  /** 平均掉噪声后的形状：以窗口第一根为 0 的累计对数涨跌。 */
+  const shapeOf = async (symbol: string): Promise<number[]> => {
+    const acc = new Array<number>(BARS).fill(0);
+    for (const seed of SEEDS) {
+      a.newScenario(seed);
+      const bars = await a.fetchKlines(symbol, "1m", BARS);
+      for (let i = 0; i < BARS; i += 1) {
+        acc[i] += Math.log(bars[i]!.close / bars[0]!.close);
+      }
+    }
+    return acc.map((v) => v / SEEDS.length);
+  };
+
+  const up = await shapeOf("单边上行");
+  const down = await shapeOf("缓慢阴跌");
+  const chop = await shapeOf("震荡整理");
+  const crash = await shapeOf("急速跳水");
+  const whip = await shapeOf("急涨急跌");
+  const net = (s: number[]) => s[s.length - 1]!;
+
+  assert.ok(net(up) > 0.15, `单边上行应明显收高，实际 ${net(up).toFixed(3)}`);
+  assert.ok(net(down) < -0.1, `缓慢阴跌应明显收低，实际 ${net(down).toFixed(3)}`);
+  // 横盘：净变化接近 0，但中途必须离开起点又回来（"来回"，不是一条平线）
+  assert.ok(Math.abs(net(chop)) < 0.1, `震荡整理净变化应接近 0，实际 ${net(chop).toFixed(3)}`);
+  assert.ok(Math.max(...chop.map(Math.abs)) > 0.15, "震荡整理窗口内应有明显来回");
+  assert.ok(net(crash) < -0.3, `急速跳水应明显收低，实际 ${net(crash).toFixed(3)}`);
+  // 急涨急跌：中途冲得比起点高 20% 以上，最后又落回起点之下
+  assert.ok(Math.max(...whip) > 0.2, "急涨急跌中途应有明显上冲");
+  assert.ok(net(whip) < 0, `急涨急跌应冲高后回落，实际 ${net(whip).toFixed(3)}`);
+  // 名字之间也得对得上：上行明显强于阴跌（不是两条形状差不多的随机线）
+  assert.ok(net(up) - net(down) > 0.25, "上行与阴跌必须是方向相反的两种走向");
+});
+
 test("行情量级：波动率落在可信区间，价格不会在窗口内飘到离谱", async () => {
   const a = randomAdapter();
-  for (const symbol of ["600519", "仓位1"]) {
+  for (const symbol of ["600519", "单边上行"]) {
     const perBar: number[] = [];
     const spans: number[] = [];
     for (const seed of [101, 202, 303, 404]) {
@@ -146,7 +193,7 @@ test("回测：每次自动掷新路径，且把种子记进结果", async () =>
   try {
     const strategies = new StrategyStore(dir);
     const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
-    const input = { symbols: ["仓位1"], interval: "1d", barCount: 150, strategyId: profile.id };
+    const input = { symbols: ["单边上行"], interval: "1d", barCount: 150, strategyId: profile.id };
 
     const first = await runBacktest(testConfig(), randomAdapter(), profile, input);
     const second = await runBacktest(testConfig(), randomAdapter(), profile, input);
@@ -167,7 +214,7 @@ test("回测：填入种子即可原样重现整段流水（随机结果也得�
     const strategies = new StrategyStore(dir);
     const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
     const adapter = randomAdapter();
-    const input = { symbols: ["仓位1"], interval: "1d", barCount: 150, strategyId: profile.id, scenarioSeed: 424242 };
+    const input = { symbols: ["单边上行"], interval: "1d", barCount: 150, strategyId: profile.id, scenarioSeed: 424242 };
 
     const first = await runBacktest(testConfig(), adapter, profile, input);
     // 同一个适配器实例、同一根种子：必须逐笔一致
@@ -191,7 +238,7 @@ test("对照：所有参赛者共用同一条路径（换路径等于换一套�
     { id: "s-1", label: "策略一", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 3, slowWindow: 8 } },
     { id: "s-2", label: "策略二", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 8, slowWindow: 30 } },
   ];
-  const opts = { adapter, symbols: ["仓位1"], bars: 150, interval: "1d", liveTrading: false, runners };
+  const opts = { adapter, symbols: ["单边上行"], bars: 150, interval: "1d", liveTrading: false, runners };
 
   const first = await runComparison(testConfig(), opts);
   const second = await runComparison(testConfig(), opts);
@@ -217,7 +264,7 @@ test("对照：传种子可复现整场名次", async () => {
   ];
   const opts = {
     adapter,
-    symbols: ["仓位1"],
+    symbols: ["单边上行"],
     bars: 150,
     interval: "1d",
     liveTrading: false,

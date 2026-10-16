@@ -49,6 +49,7 @@ export function App() {
         return botDetail ? (
           <BotDetailPage
             botId={botDetail}
+            store={store}
             onBack={() => setBotDetail(null)}
             onStart={(id) => void api.startBot(id).then(() => undefined)}
             onStop={(id) => void api.stopBot(id)}

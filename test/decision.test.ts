@@ -178,7 +178,7 @@ test("多模型对照：同一份行情、同一资金、各自独立记账", as
   ];
   const result = await runComparison(config, {
     adapter: testAdapter(),
-    symbols: ["仓位1"],
+    symbols: ["单边上行"],
     bars: 80,
     interval: "1m",
     liveTrading: false,
@@ -214,7 +214,7 @@ test("多模型对照：同一份行情、同一资金、各自独立记账", as
 test("多模型对照：无选手时返回空结果", async () => {
   const result = await runComparison(testConfig(), {
     adapter: testAdapter(),
-    symbols: ["仓位1"],
+    symbols: ["单边上行"],
     bars: 30,
     interval: "1m",
     liveTrading: false,
@@ -404,7 +404,7 @@ test("对照实验：每个选手只跑自己那一路，基线绝不调用模�
   };
   const result = await runComparison(config, {
     adapter: testAdapter(),
-    symbols: ["仓位1"],
+    symbols: ["单边上行"],
     bars: 40,
     interval: "1m",
     liveTrading: false,

@@ -184,9 +184,9 @@ export function BotsPage({
 }
 
 /**
- * 这台机器人用的就是交易所自带的那几个仓位槽（模拟交易所）？
+ * 这台机器人用的就是交易所自带的那几条走向（模拟交易所）？
  *
- * 只有"确实就是那几个"时才这么叫：老机器人可能只用了其中两个，
+ * 只有"确实就是那几条"时才这么叫：老机器人可能只用了其中两条，
  * 那时写成"自带"就成了假话 —— 卡片上写的必须能在详情页对得上。
  */
 function usesOnlyBuiltinSymbols(conn: Connection | undefined, symbols: string[]): boolean {
@@ -208,7 +208,7 @@ function BotCard({
   onOpenDetail,
 }: {
   bot: Bot;
-  /** 连接没有标的、只有自带仓位槽（模拟交易所）：不列标的 —— 那不是用户挑的东西 */
+  /** 连接没有标的、只有自带走向（模拟交易所）：不列标的 —— 那不是用户挑的东西 */
   builtin: boolean;
   strategies: StrategyProfile[];
   busy: boolean;
@@ -234,10 +234,10 @@ function BotCard({
           <span className={`badge ${st.cls}`}>{st.text}</span>
         </div>
         <div className="bot-card-chips">
-          {/* 行情来源：跑在随机行情上的机器人，成交与盈亏不是真实市场的结果 */}
+          {/* 行情来源：跑在本地生成行情上的机器人，成交与盈亏不是真实市场的结果 */}
           {bot.marketData === "simulated" && (
-            <span className="chip chip-sm chip-off" title="K 线由本地随机漫步生成">
-              随机行情 · 演示
+            <span className="chip chip-sm chip-off" title="K 线由本地生成的走向叠加随机噪声">
+              本地生成行情 · 演示
             </span>
           )}
           {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
@@ -271,7 +271,7 @@ function BotCard({
       <div className="bot-meta">
         {builtin ? (
           <span>
-            <em>仓位槽</em> <b className="mono">{bot.symbols.join(" / ")}</b>
+            <em>走向</em> <b className="mono">{bot.symbols.join(" / ")}</b>
           </span>
         ) : (
           <span>
@@ -501,15 +501,15 @@ function BotForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   /**
-   * 没有标的、只有自带仓位槽的交易所（模拟交易所）：界面上不出现"挑标的"这一步。
-   * 服务端建机器人时也会自动补上这几个槽，所以这里不选也照样能建。
+   * 没有标的、只有自带走向的交易所（模拟交易所）：界面上不出现"挑标的"这一步。
+   * 服务端建机器人时也会自动补上这几条走向，所以这里不选也照样能建。
    */
   const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
   const connBuiltin = connAdapter?.builtinSymbols ?? false;
   const connBuiltinSlots = (connAdapter?.defaultSymbols ?? []).map((s) => s.symbol);
 
   useEffect(() => {
-    // 自带仓位槽的连接不用拉"常用清单"：那几个槽不是给人挑的
+    // 自带走向的连接不用拉"常用清单"：那几条走向不是给人挑的
     if (!connectionId || connBuiltin) return;
     void api.popular(connectionId, 24).then((d) => setPopular(d.symbols)).catch(() => setPopular([]));
   }, [connectionId, connBuiltin]);
@@ -613,11 +613,11 @@ function BotForm({
 
       <div className="symbol-picker">
         <div className="symbol-picker-head">
-          {connBuiltin ? "仓位槽（交易所自带）" : "运行标的（可多选）"}
+          {connBuiltin ? "走向（交易所自带）" : "运行标的（可多选）"}
         </div>
         {connBuiltin ? (
           <div className="dim small">
-            模拟交易所没有标的：它自带四个仓位槽（{connBuiltinSlots.join(" / ")}），
+            模拟交易所没有标的：它自带 {connBuiltinSlots.length} 条走向（{connBuiltinSlots.join(" / ")}），
             开跑时全都在内 —— 它跟任何真实市场无关，没有「挑哪几个品种」这回事。
           </div>
         ) : (

@@ -291,7 +291,7 @@ export class EngineController {
       .filter((w) => w.connectionId === connectionId)
       .map((w) => w.symbol);
     if (fromWatchlist.length > 0) return fromWatchlist;
-    throw new Error("没有可运行的标的：请在「策略 → 候选池」添加，或换到模拟交易所（它自带仓位槽，不用挑）");
+    throw new Error("没有可运行的标的：请在「策略 → 候选池」添加，或换到模拟交易所（它自带几条走向，不用挑）");
   }
 
   /** 交易所自带的标的集合；不是这种交易所（或取不到）时返回空数组。 */

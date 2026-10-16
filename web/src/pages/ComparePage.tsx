@@ -164,7 +164,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           ) : (
             <>
               <span className="compare-status-lead">可以开始：</span>
-              {picked.size} 个参赛者 · {symbols.length} 个标的（{runTarget?.connectionLabel}） · {bars} 根 K 线
+              {picked.size} 个参赛者 · {symbols.length} 个{runTarget?.symbolsBuiltIn ? "走向" : "标的"}（{runTarget?.connectionLabel}） · {bars} 根 K 线
               {modelRunners > 0 && (
                 <>
                   {" "}
@@ -194,7 +194,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
               placeholder="留空 = 每次随机"
               value={seedText}
               onChange={(e) => setSeedText(e.target.value)}
-              title="模拟行情每次对照都会掷一条新的随机路径，且所有选手共用这一条。想原样重跑某次结果，把当时显示的种子填到这里。"
+              title="模拟行情每次对照都会重掷一层随机噪声，所有选手共用同一份。想原样重跑某次结果，把当时显示的种子填到这里。"
             />
             {!seedOk && (
               <Notice tone="warn">
@@ -205,7 +205,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           <div className="field">
             <span className="field-label">
               {runTarget?.symbolsBuiltIn
-                ? "对照标的（交易所自带，不用选）"
+                ? "对照走向（交易所自带，不用选）"
                 : "对照标的（来自候选池，服务端按连接解析）"}
             </span>
             <div className="chip-row" style={{ marginTop: 6 }}>
@@ -300,11 +300,9 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           但资金按对照实验统一设定（不用机器人自己的资金配置）。
           {simulatedRunTarget && (
             <div className="small" style={{ marginTop: 4 }}>
-              行情来自随机模拟：<b>每次对照都会掷一条新的随机路径，所有选手共用同一条</b>
-              （换路径等于换一套题，名次会跟着翻盘，所以同一次里绝不换）。
-              想看某个策略稳不稳，就多跑几个不同种子比着看。
-              <br />
-              周期越短随机行情越安静，短周期上可能整场都不出信号（不是选手坏了，是那个周期本来波动就小）。
+              行情来自模拟交易所：几条走向的形状是写死的，叠加的噪声<b>每次对照都重掷一层，所有选手共用同一份</b>
+              （换噪声等于换一套题，名次会跟着变，所以同一次里绝不换）。
+              想看某个策略稳不稳，就多跑几个不同种子比着看 —— 这里比的是「谁更会做那几条走向」。
             </div>
           )}
         </Notice>
@@ -318,8 +316,8 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           >
             {result.marketData === "simulated" && (
               <Notice tone="error">
-                这次对照跑在<b>随机生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：
-                名次只说明"在这条随机路径上谁更强"，不代表真实市场里的强弱。
+                这次对照跑在<b>本地生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：
+                名次只说明"在这几条走向上谁更强"，不代表真实市场里的强弱。
                 判断策略稳不稳，请换几个种子多跑几次；看真实表现请换用真实行情连接。
               </Notice>
             )}
