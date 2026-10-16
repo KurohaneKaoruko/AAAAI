@@ -31,6 +31,11 @@ export interface BacktestInput {
   maxDrawdownPct?: number;
   /** 最小调仓额（不填用全局风控配置） */
   minTradeValue?: number;
+  /**
+   * 复现用：指定随机情景的种子（仅模拟交易所有效）。
+   * 不填 = 每次都掷新路径；填了 = 沿用那一条，用来核对某次具体结果。
+   */
+  scenarioSeed?: number;
 }
 
 export interface BacktestResult {
@@ -48,6 +53,14 @@ export interface BacktestResult {
   barCount: number;
   /** 实际参与回放的 K 线数 */
   bars: number;
+  /**
+   * 随机行情的情景种子（真实行情为 undefined）。
+   *
+   * 模拟行情每次回测都是新掷的一条路径，结果因此不可复现 —— 这是刻意的：
+   * 同一条路径重跑一遍只能证明"那条路上赚过钱"，换一条路才知道是不是运气。
+   * 想复现某一次的具体结果，把这个种子填回去即可。
+   */
+  scenarioSeed?: number;
   durationMs: number;
   strategyId: string;
   strategyName: string;
@@ -103,6 +116,11 @@ export async function runBacktest(
   // 回测永远是本地撮合：它回答"策略行不行"，不碰任何真实账户
   const pipeline = buildPipeline(cfg, { adapter, liveTrading: false });
 
+  // 随机行情每次回测都掷一条新路径：同一条路重跑一遍只能证明"那条路上赚过钱"，
+  // 换一条路才知道策略是本事还是运气。传了种子则沿用那一条（复现用）。
+  // 真实行情不受影响（适配器没有这个方法）。
+  const scenarioSeed = adapter.newScenario?.(input.scenarioSeed);
+
   const groups = await Promise.all(
     input.symbols.map((s) => adapter.fetchKlines(s, input.interval, input.barCount)),
   );
@@ -140,6 +158,7 @@ export async function runBacktest(
     interval: input.interval,
     barCount: input.barCount,
     bars: bars.length,
+    ...(scenarioSeed !== undefined ? { scenarioSeed } : {}),
     durationMs: Date.now() - started,
     strategyId: profile.id,
     strategyName: profile.name,

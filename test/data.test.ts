@@ -16,7 +16,7 @@ import type { OrderIntent } from "../src/core/types.js";
 
 const noCred = { apiKey: "", apiSecret: "", testnet: false };
 
-test("SimulatedAdapter: 行情可复现且 K 线自洽", async () => {
+test("SimulatedAdapter: 同一情景内行情自洽（默认每个实例是新情景）", async () => {
   const a = new SimulatedAdapter();
   a.init(noCred);
   const k1 = await a.fetchKlines("DEMO-BTC", "1m", 40);
@@ -24,7 +24,19 @@ test("SimulatedAdapter: 行情可复现且 K 线自洽", async () => {
   b.init(noCred);
   const k2 = await b.fetchKlines("DEMO-BTC", "1m", 40);
   assert.equal(k1.length, 40);
-  assert.deepEqual(k1.map((x) => x.close), k2.map((x) => x.close), "同代码行情必须可复现");
+  // 随机性与复现的完整规则由 scenario.test.ts 锁住；这里只守"自洽 + 结构合法"：
+  // 同一实例反复取同一窗口必须一致（实时轮询不会自己改写历史）
+  assert.deepEqual(
+    k1.map((x) => x.close),
+    (await a.fetchKlines("DEMO-BTC", "1m", 40)).map((x) => x.close),
+    "同一情景内取数必须一致",
+  );
+  // 两个实例默认是不同的情景：同一代码不该每次都长成一条固定的线
+  assert.notDeepEqual(
+    k1.map((x) => x.close),
+    k2.map((x) => x.close),
+    "新实例必须是新的随机情景，否则测的还是同一条路的运气",
+  );
   for (const bar of k1) {
     assert.ok(bar.high >= Math.max(bar.open, bar.close) - 1e-9);
     assert.ok(bar.low <= Math.min(bar.open, bar.close) + 1e-9);

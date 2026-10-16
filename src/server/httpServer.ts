@@ -411,6 +411,8 @@ export function createServer(controller: EngineController, options: ServerOption
       initialCash?: number;
       maxDrawdownPct?: number;
       minTradeValue?: number;
+      /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 每次掷新路径） */
+      scenarioSeed?: number;
     };
     if (!body.connectionId || !Array.isArray(body.symbols) || body.symbols.length === 0) {
       return fail(res, new Error("缺少 connectionId 或 symbols"), 400);
@@ -433,6 +435,9 @@ export function createServer(controller: EngineController, options: ServerOption
           ...(body.initialCash !== undefined ? { initialCash: body.initialCash } : {}),
           ...(body.maxDrawdownPct !== undefined ? { maxDrawdownPct: body.maxDrawdownPct } : {}),
           ...(body.minTradeValue !== undefined ? { minTradeValue: body.minTradeValue } : {}),
+          ...(parseScenarioSeed(body.scenarioSeed) !== undefined
+            ? { scenarioSeed: parseScenarioSeed(body.scenarioSeed) }
+            : {}),
         },
       );
       // 把行情连接名一并给出：让人知道这份结果的数据来自哪儿
@@ -446,7 +451,21 @@ export function createServer(controller: EngineController, options: ServerOption
   /** 模拟对照的参赛者清单（机器人 / 策略 / 模型 / 基线，含不可用原因） */
   app.get("/api/bench/participants", (_req, res) => ok(res, { participants: controller.listParticipants() }));
 
-  /** 模拟对照：勾选参赛者 -> 并行模拟盘 -> 战绩排名 */
+  /**
+ * 解析"复现用情景种子"。
+ *
+ * 随机数种子没有"大概对"，错一个字符就是另一条路，所以这里宁可不认：
+ * 非法输入直接当没填（= 掷新路径），而不是悄悄用一个错的种子去跑，
+ * 让用户以为在复现某次结果、其实跑的是完全不相干的一条路径。
+ */
+function parseScenarioSeed(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return undefined;
+  return n >>> 0;
+}
+
+/** 模拟对照：勾选参赛者 -> 并行模拟盘 -> 战绩排名 */
   app.post("/api/bench/compare", (req, res) => {
     const body = (req.body ?? {}) as {
       /** 参赛者 key 列表 */
@@ -454,6 +473,8 @@ export function createServer(controller: EngineController, options: ServerOption
       symbols?: string[];
       bars?: number;
       interval?: string;
+      /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 掷一条新路径） */
+      scenarioSeed?: number;
     };
     void controller
       .runSimulationComparison({
@@ -461,6 +482,9 @@ export function createServer(controller: EngineController, options: ServerOption
         symbols: body.symbols,
         bars: typeof body.bars === "number" ? body.bars : undefined,
         interval: body.interval,
+        ...(parseScenarioSeed(body.scenarioSeed) !== undefined
+          ? { scenarioSeed: parseScenarioSeed(body.scenarioSeed) }
+          : {}),
       })
       .then((result) => ok(res, { result }))
       .catch((err) => fail(res, err, 409));
