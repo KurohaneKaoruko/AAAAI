@@ -239,15 +239,21 @@ export class PaperBroker implements Broker {
     }
     for (const intent of queue) {
       if (intent.symbol !== bar.symbol) continue; // 该标的的订单等它自己的下一根 K 线
-      this.fillWholeOrder(intent, open);
+      this.fillWholeOrder(intent, open, bar.timestamp);
     }
     // 非本标的的订单放回队首，保持顺序
     const rest = queue.filter((i) => i.symbol !== bar.symbol);
     if (rest.length > 0) this.queued = [...rest, ...this.queued];
   }
 
-  /** 一次性全部成交（未开拆单时的原有行为，逐字保持）。 */
-  private fillWholeOrder(intent: OrderIntent, mid: number): Fill {
+  /**
+   * 一次性全部成交。
+   *
+   * executedAt = 真正成交的那根 K 线时间。必须用它而不是决策时间：
+   * 决策发生在第 t 根收盘，成交发生在第 t+1 根开盘，两者是不同的时刻，
+   * 流水里写错时间会让人按错误的价格去核对甚至照着追单。
+   */
+  private fillWholeOrder(intent: OrderIntent, mid: number, executedAt?: Date): Fill {
     const stats = this.micro?.(intent.symbol);
     const bps = this.cost.slippageBps(intent.quantity * mid, stats);
     const execPrice = this.cost.execPrice(mid, intent.side, bps);
@@ -256,7 +262,7 @@ export class PaperBroker implements Broker {
       order: intent,
       price: execPrice,
       fee: notional * this.opts.feeRate,
-      timestamp: intent.timestamp,
+      timestamp: executedAt ?? intent.timestamp,
     };
     log.info(
       "PAPER %s %s %s @ %s",
@@ -319,7 +325,7 @@ export class PaperBroker implements Broker {
       side: order.side,
       quantity: slice.quantity,
       price: mid,
-      timestamp: intent?.timestamp ?? new Date(),
+      timestamp: bar?.timestamp ?? intent?.timestamp ?? new Date(),
       reason: intent ? intent.reason : `slice_${order.next - 1 + 1}/${order.plan.length}`,
     };
     recordSliceFill(order, { quantity: slice.quantity, price: execPrice, fee });

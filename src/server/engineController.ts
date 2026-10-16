@@ -53,6 +53,8 @@ export interface EngineState {
 export interface RunTarget {
   connectionId: string | null;
   connectionLabel: string | null;
+  /** 适配器 id（如 simulated）：界面据此说明"这次跑在随机行情上" */
+  connectionAdapterId: string | null;
   interval: string;
   symbols: string[];
   /** 解析不出标的时的原因（能跑则为 null） */
@@ -227,7 +229,7 @@ export class EngineController {
    * 前推验证与稳健性体检都在这里复用，保证和真正跑回测用的是同一套标的。
    */
   resolveRunTarget(connectionId?: string, symbols?: string[]): {
-    connection: { id: string; label: string };
+    connection: { id: string; label: string; adapterId: string };
     interval: string;
     symbols: string[];
   } {
@@ -240,7 +242,7 @@ export class EngineController {
     };
   }
 
-  private resolveConnection(connectionId?: string): { id: string; label: string } {
+  private resolveConnection(connectionId?: string): { id: string; label: string; adapterId: string } {
     const connections = this.connections.list();
     if (connections.length === 0) {
       throw new Error("尚未配置任何交易所连接，请先在「交易所」页添加连接");
@@ -248,7 +250,7 @@ export class EngineController {
     const id = connectionId || this.config.execution.connectionId || connections[0]!.id;
     const found = connections.find((c) => c.id === id);
     if (!found) throw new Error(`连接不存在: ${id}`);
-    return { id: found.id, label: found.label };
+    return { id: found.id, label: found.label, adapterId: found.adapterId };
   }
 
   private resolveSymbols(connectionId: string, requested?: string[]): string[] {
@@ -287,6 +289,7 @@ export class EngineController {
       return {
         connectionId: t.connection.id,
         connectionLabel: t.connection.label,
+        connectionAdapterId: t.connection.adapterId,
         interval: t.interval,
         symbols: t.symbols,
         error: null,
@@ -295,6 +298,7 @@ export class EngineController {
       return {
         connectionId: null,
         connectionLabel: null,
+        connectionAdapterId: null,
         interval: this.config.market.interval,
         symbols: [],
         error: (err as Error).message,
@@ -312,6 +316,8 @@ export class EngineController {
     bars?: number;
     symbols?: string[];
     interval?: string;
+    /** 复现用：指定随机情景种子（仅模拟交易所有效） */
+    scenarioSeed?: number;
   }): Promise<ComparisonResult> {
     if (this.state.comparing) {
       throw new Error("对照实验正在进行中");
@@ -346,9 +352,12 @@ export class EngineController {
         interval: options.interval ?? target.interval,
         liveTrading: false, // 对照实验始终用本地模拟成交，避免动真钱
         runners,
+        ...(options.scenarioSeed !== undefined ? { scenarioSeed: options.scenarioSeed } : {}),
       });
-      this.state.comparison = result;
-      return result;
+      // 行情连接名一并给出：让人知道这份名次的数据来自哪儿
+      const withSource = { ...result, connectionLabel: target.connection.label };
+      this.state.comparison = withSource;
+      return withSource;
     } finally {
       this.state.comparing = false;
       this.emitState();

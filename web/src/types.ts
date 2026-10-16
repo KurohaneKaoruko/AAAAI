@@ -243,6 +243,11 @@ export interface BacktestResult {
   interval: string;
   barCount: number;
   bars: number;
+  /**
+   * 随机行情的情景种子（真实行情没有）。不填则每次回测都会掷新路径；
+   * 想原样重现某一次结果，把这个数填回去。
+   */
+  scenarioSeed?: number;
   durationMs: number;
   strategyId: string;
   strategyName: string;
@@ -488,8 +493,13 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
+  /** real = 真实行情；simulated = 本地随机行情（名次只在这条随机路径上成立） */
+  marketData: "real" | "simulated";
+  connectionLabel?: string;
   symbols: string[];
   bars: number;
+  /** 随机行情的情景种子（真实行情没有）：所有参赛者共用的那一条路径 */
+  scenarioSeed?: number;
   initialCash: number;
   finishedAt: string;
   durationMs: number;
@@ -578,6 +588,8 @@ export interface EngineState {
   runTarget: {
     connectionId: string | null;
     connectionLabel: string | null;
+    /** 适配器 id（simulated = 随机行情），界面据此标注 */
+    connectionAdapterId: string | null;
     interval: string;
     symbols: string[];
     error: string | null;

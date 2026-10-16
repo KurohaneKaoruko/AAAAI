@@ -29,6 +29,8 @@ export function BacktestPage() {
   const [interval, setInterval] = useState("1d");
   const [barCount, setBarCount] = useState(200);
   const [cash, setCash] = useState(100000);
+  /** 情景种子：留空 = 每次掷新路径；填数字 = 沿用那一条（复现） */
+  const [seedText, setSeedText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -62,6 +64,7 @@ export function BacktestPage() {
     setBusy(true);
     setErr(null);
     try {
+      const seed = seedText.trim() === "" ? undefined : Number(seedText.trim());
       const r = await api.runBacktest({
         connectionId,
         symbols,
@@ -69,6 +72,8 @@ export function BacktestPage() {
         interval,
         barCount,
         initialCash: cash,
+        // 种子非法就当没填：宁可在新路径上跑，也不要假装在复现
+        ...(seed !== undefined && Number.isInteger(seed) && seed >= 0 ? { scenarioSeed: seed } : {}),
       });
       setResult(r.result);
     } catch (e) {
@@ -150,9 +155,14 @@ export function BacktestPage() {
 
           {simulatedConnection && (
             <Notice tone="warn">
-              当前连接是「模拟交易所」：K 线由本地随机漫步生成。
-              跑出来的曲线只是随机数与规则的产物，<b>不构成策略表现的任何证据</b>。
-              想看可信结果，请换用已连通的真实行情连接。
+              当前连接是「模拟交易所」：<b>每跑一次都掷一条新的随机行情路径</b>，
+              所以两次回测的数字不会一样 —— 这是刻意的，同一条路重跑只能证明"那条路上赚过钱"。
+              随机行情 + 规则的结果只是随机数与规则的产物，<b>不构成策略表现的任何证据</b>；
+              它的用途是看策略换条路还行不行。想看可信结果，请换用已连通的真实行情连接。
+              <div className="small" style={{ marginTop: 4 }}>
+                周期越短随机行情越安静：1m 常常几百根都不出一个信号（那不是策略坏了，是这个周期的波动本来就这么小）。
+                想看它做决策，请用 4h 或 1d。
+              </div>
             </Notice>
           )}
           <div className="btn-row btn-row-auto">
@@ -174,6 +184,30 @@ export function BacktestPage() {
             {symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
             {!local && <span className="dim small">该策略的决策来源不支持回测</span>}
           </div>
+          {simulatedConnection && (
+            <div className="field-row small" style={{ marginTop: 8 }}>
+              <label htmlFor="bt-seed">情景种子</label>
+              <input
+                id="bt-seed"
+                className="input"
+                style={{ width: 140 }}
+                inputMode="numeric"
+                placeholder="留空 = 每次随机"
+                value={seedText}
+                onChange={(e) => setSeedText(e.target.value)}
+                title="模拟行情每次都会掷一条新的随机路径。想把某一次结果原样重跑，把当时显示的种子填到这里。"
+              />
+              <span className="dim">
+                {result?.scenarioSeed !== undefined ? (
+                  <>
+                    上次用的种子 <b>{result.scenarioSeed}</b>
+                  </>
+                ) : (
+                  "每次结果都不同才看得出策略稳不稳"
+                )}
+              </span>
+            </div>
+          )}
           {err && <div className="bot-error">{err}</div>}
         </div>
       </Panel>
@@ -187,6 +221,10 @@ export function BacktestPage() {
             <Notice tone="error">
               这份结果跑在<b>随机生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}），
               不代表策略在真实市场的表现，别拿它做决策。换成真实行情连接再跑一次。
+              <div className="small" style={{ marginTop: 4 }}>
+                本次情景种子 <b>{result.scenarioSeed ?? "—"}</b>：再点一次「开始回测」会换一条新路径，
+                数字自然不同；想让这一次原样重现，才把这个种子用回去。
+              </div>
             </Notice>
           ) : (
             <Notice tone="success">

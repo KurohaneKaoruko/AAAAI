@@ -66,6 +66,8 @@ export const api = {
     initialCash?: number;
     maxDrawdownPct?: number;
     minTradeValue?: number;
+    /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 每次掷新路径） */
+    scenarioSeed?: number;
   }) => request<{ result: BacktestResult }>("/api/backtest", { method: "POST", body: JSON.stringify(body) }),
   refreshTickers: () => request<{ tickers: Ticker[] }>("/api/tickers/refresh", { method: "POST" }),
 
@@ -191,6 +193,8 @@ export const api = {
     symbols?: string[];
     bars?: number;
     interval?: string;
+    /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 掷一条新路径） */
+    scenarioSeed?: number;
   }) => request<{ result: ComparisonResult }>("/api/bench/compare", { method: "POST", body: JSON.stringify(body) }),
   lastComparison: () => request<{ result: ComparisonResult | null }>("/api/bench/compare"),
 

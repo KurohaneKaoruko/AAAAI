@@ -75,8 +75,22 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
+  /**
+   * 行情来源：real = 真实行情；simulated = 本地随机生成的行情。
+   * 跑在随机行情上时，这次名次只代表"在这条随机路径上谁更强"，界面必须标出来。
+   */
+  marketData: "real" | "simulated";
+  /** 行情连接名 */
+  connectionLabel?: string;
   symbols: string[];
   bars: number;
+  /**
+   * 本次对照的行情情景种子（真实行情为 undefined）。
+   *
+   * 随机行情下所有参赛者共用**同一条**路径：换路径等于换了一套题，
+   * 那样比出来的名次换套题就翻盘，没有意义。种子记下来，需要时可原样复跑。
+   */
+  scenarioSeed?: number;
   initialCash: number;
   finishedAt: string;
   durationMs: number;
@@ -91,6 +105,8 @@ export interface ComparisonOptions {
   interval: string;
   liveTrading: boolean;
   runners: RunnerSpec[];
+  /** 复现用：指定随机情景种子（仅模拟交易所有效）。不填 = 掷一条新路径。 */
+  scenarioSeed?: number;
 }
 
 /** 单个选手的流水线 + 记账句柄（行情缓存用流水线内部那本，见下）。 */
@@ -108,6 +124,9 @@ export async function runComparison(
   const startedAt = Date.now();
   // 统一初始资金：机器人各自的钱不参与对照，否则收益率之外还混着"谁本金大"
   const initialCash = config.risk.initialCash;
+
+  // 0) 随机行情只掷一条路径，所有选手共用（公平的前提是大家做同一套题）
+  const scenarioSeed = options.adapter.newScenario?.(options.scenarioSeed);
 
   // 1) 行情只拉一次，所有选手共享
   const groups = await Promise.all(
@@ -150,8 +169,10 @@ export async function runComparison(
   const results = contexts.map((ctx) => summarize(ctx, initialCash));
   const ranked = [...results].filter((r) => r.ok).sort((a, b) => b.totalReturn - a.totalReturn);
   const result: ComparisonResult = {
+    marketData: options.adapter.meta.id === "simulated" ? "simulated" : "real",
     symbols: options.symbols,
     bars: bars.length,
+    ...(scenarioSeed !== undefined ? { scenarioSeed } : {}),
     initialCash,
     finishedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,

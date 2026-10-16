@@ -122,4 +122,15 @@ export interface ExchangeAdapter {
   fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]>;
   placeOrder?(req: OrderRequest): Promise<OrderResult>;
   fetchBalances?(): Promise<Balance[]>;
+  /**
+   * 换一个随机情景（仅本地生成行情的适配器实现，如模拟交易所）。
+   *
+   * 语义由调用方定义，见各调用点的注释：
+   * - 历史模拟每次调用 → 每次都是一条新的随机路径；
+   * - 模拟对照只调用一次 → 所有参赛者面对同一条路径；
+   * - 实时轮询不调用 → 保持同一条路径向前延伸。
+   *
+   * 返回情景种子，会被记进结果，用于复现。
+   */
+  newScenario?(seed?: number): number;
 }

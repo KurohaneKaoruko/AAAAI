@@ -139,6 +139,11 @@ async function fakeModel(): Promise<{ url: string; hits: () => number; close: ()
 }
 
 test("开关：是否请求模型只由 decision_source 决定（rules 时一次都不发）", async () => {
+  // 这条用例要"K 线随真实时间一根根推进"，所以不能用 helpers 钉死的模拟时钟：
+  // 钉死后模拟世界不再前进，实时机器人永远等不到第 4 根 K 线。
+  // 于是这里放开时钟，并改用秒级周期（模拟交易所支持 1s）：仍是真实时间节奏，
+  // 只是让"跑过多根实时 K 线"在几秒内发生，而不是靠加快时间来实现。
+  delete process.env.AAAAI_SIM_NOW;
   const dir = tmpDir();
   const model = await fakeModel();
   try {
@@ -158,7 +163,15 @@ test("开关：是否请求模型只由 decision_source 决定（rules 时一次
         decisionSource: source,
       });
       // 让机器人用上这条策略：机器人是实时实体，每根实时 K 线才决策一次
-      const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 40, pollMs: 60, strategyId: profile.id });
+      const bot = bots.create({
+        name: "T",
+        connectionId: conn.id,
+        symbols: ["DEMO-BTC"],
+        interval: "1s",
+        barCount: 40,
+        pollMs: 60,
+        strategyId: profile.id,
+      });
       const llm = (bots as unknown as { llm: LlmManager }).llm;
       llm.create({ label: "fake", kind: "chat", baseUrl: model.url, model: "fake", apiKey: "sk-test" });
       const st = await bots.start(bot.id);

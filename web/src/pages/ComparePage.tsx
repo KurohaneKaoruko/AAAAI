@@ -43,6 +43,8 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bars, setBars] = useState(store.state?.config?.market?.barCount ?? 200);
+  /** 情景种子：留空 = 掷一条新路径；填数字 = 沿用那一条（复现） */
+  const [seedText, setSeedText] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -63,6 +65,8 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
   const runTarget = store.state?.runTarget;
   const symbols = runTarget?.symbols ?? [];
   const targetError = runTarget?.error ?? null;
+  /** 跑在随机行情上（模拟交易所）：此时"每次结果都不同"要说清楚，否则像 bug */
+  const simulatedRunTarget = runTarget?.connectionAdapterId === "simulated";
 
   const decisionInterval = Math.max(1, store.state?.config?.llm?.decisionInterval ?? 10);
   const modelRunners = participants.filter(
@@ -98,7 +102,13 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
     setBusy(true);
     setError(null);
     try {
-      const r = await api.runComparison({ keys: [...picked], bars });
+      const seed = seedText.trim() === "" ? undefined : Number(seedText.trim());
+      const r = await api.runComparison({
+        keys: [...picked],
+        bars,
+        // 种子非法就当没填：宁可在新路径上跑，也不要假装在复现
+        ...(seed !== undefined && Number.isInteger(seed) && seed >= 0 ? { scenarioSeed: seed } : {}),
+      });
       setResult(r.result);
       const top = r.result.results.find((x) => x.id === r.result.winners[0]);
       store.toast("success", `对照完成：${top?.label ?? "无"} 领先（${pct(top?.totalReturn ?? 0)}）`);
@@ -170,6 +180,18 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             step={20}
             onChange={setBars}
           />
+          <div className="field">
+            <span className="field-label">情景种子（随机行情才用得上）</span>
+            <input
+              className="input"
+              style={{ width: 160, marginTop: 6 }}
+              inputMode="numeric"
+              placeholder="留空 = 每次随机"
+              value={seedText}
+              onChange={(e) => setSeedText(e.target.value)}
+              title="模拟行情每次对照都会掷一条新的随机路径，且所有选手共用这一条。想原样重跑某次结果，把当时显示的种子填到这里。"
+            />
+          </div>
           <div className="field">
             <span className="field-label">对照标的（来自候选池，服务端按连接解析）</span>
             <div className="chip-row" style={{ marginTop: 6 }}>
@@ -259,9 +281,18 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
 
         {error && <Notice tone="error">{error}</Notice>}
         <Notice tone="info">
-          对照只在模拟盘中进行，绝不会发出真实订单。所有选手共用同一份行情与初始资金；
+          对照只在模拟盘中进行，绝不会发出真实订单。所有选手共用<b>同一份行情</b>与初始资金；
           每位选手只跑自己那一类决策来源，因此是单变量比较。机器人参赛时用它引用的策略与模型，
           但资金按对照实验统一设定（不用机器人自己的资金配置）。
+          {simulatedRunTarget && (
+            <div className="small" style={{ marginTop: 4 }}>
+              行情来自随机模拟：<b>每次对照都会掷一条新的随机路径，所有选手共用同一条</b>
+              （换路径等于换一套题，名次会跟着翻盘，所以同一次里绝不换）。
+              想看某个策略稳不稳，就多跑几个不同种子比着看。
+              <br />
+              周期越短随机行情越安静，短周期上可能整场都不出信号（不是选手坏了，是那个周期本来波动就小）。
+            </div>
+          )}
         </Notice>
       </Panel>
 
@@ -269,8 +300,15 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
         <>
           <Panel
             title="战绩排行"
-            subtitle={`${result.bars} 根 K 线 · ${result.symbols.join(" / ")} · 耗时 ${(result.durationMs / 1000).toFixed(1)}s · ${time(result.finishedAt)}`}
+            subtitle={`${result.bars} 根 K 线 · ${result.symbols.join(" / ")} · 耗时 ${(result.durationMs / 1000).toFixed(1)}s · ${time(result.finishedAt)}${result.scenarioSeed !== undefined ? ` · 情景种子 ${result.scenarioSeed}` : ""}`}
           >
+            {result.marketData === "simulated" && (
+              <Notice tone="error">
+                这次对照跑在<b>随机生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：
+                名次只说明"在这条随机路径上谁更强"，不代表真实市场里的强弱。
+                判断策略稳不稳，请换几个种子多跑几次；看真实表现请换用真实行情连接。
+              </Notice>
+            )}
             <div className="hint-line">
               看「总收益」排名；<b>最大回撤</b>越小越稳；<b>胜率</b>是盈利交易占比；
               <b>盈亏比</b>是平均盈利 / 平均亏损（∞ 表示没有亏损交易）。收益高但回撤也大的选手，实际不一定更好用。

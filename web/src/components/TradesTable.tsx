@@ -2,10 +2,13 @@
 
 import type { TradeRecord } from "../types";
 import { Empty } from "./ui";
-import { money, qty, signed, time } from "../lib/format";
+import { money, qty, signed, tradeTime } from "../lib/format";
 
 export function TradesTable({ trades }: { trades: TradeRecord[] }) {
   if (trades.length === 0) return <Empty>暂无成交流水</Empty>;
+  const shown = trades.slice(0, 200);
+  // 跨天才带日期：日线行情下所有 K 线都是同一时刻，只给时分秒会像"同一秒成交一堆单"
+  const spanDays = new Set(shown.map((t) => t.timestamp.slice(0, 10))).size > 1;
   return (
     <div className="table-scroll table-scroll-tall">
       <table className="table">
@@ -21,9 +24,9 @@ export function TradesTable({ trades }: { trades: TradeRecord[] }) {
           </tr>
         </thead>
         <tbody>
-          {trades.slice(0, 200).map((t) => (
+          {shown.map((t) => (
             <tr key={t.id}>
-              <td className="mono dim">{time(t.timestamp)}</td>
+              <td className="mono dim">{tradeTime(t.timestamp, spanDays)}</td>
               <td>
                 <span className={`side-tag ${t.side === "BUY" ? "side-buy" : "side-sell"}`}>
                   {t.side === "BUY" ? "买入" : "卖出"}
