@@ -25,9 +25,9 @@
   --warn: #e3a53c;
   --on-accent: #ffffff;
 
-  --sidebar-bg: linear-gradient(180deg, #0e1522, #0b0f16);
+  --sidebar-bg: #0e1522;
   --topbar-bg: rgba(11, 15, 22, 0.94);
-  --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  --cash-seg: #3a4553;   /* 资产配置条里的"现金"段：必须一眼看出没投出去 */
   --row-alt: rgba(255, 255, 255, 0.02);
   --row-alt-hover: rgba(255, 255, 255, 0.04);
   --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -58,7 +58,6 @@
   --topic-intent: #c699f0;
   --topic-view: #57b6c9;
   --spinner-border: rgba(255, 255, 255, 0.35);
-  --brand-grad: linear-gradient(92deg, #4f8ef7, #a06ef7);
 }
 
 /* ---------- 亮色（纯白） ---------- */
@@ -82,9 +81,9 @@
   --warn: #b7791f;
   --on-accent: #ffffff;
 
-  --sidebar-bg: linear-gradient(180deg, #f7f9fd, #ffffff);
+  --sidebar-bg: #ffffff;
   --topbar-bg: rgba(255, 255, 255, 0.92);
-  --panel-grad: linear-gradient(180deg, rgba(0, 0, 0, 0.015), transparent);
+  --cash-seg: #d8dee8;   /* 亮色下的现金段 */
   --row-alt: rgba(15, 23, 42, 0.025);
   --row-alt-hover: rgba(15, 23, 42, 0.05);
   --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12);
@@ -115,7 +114,6 @@
   --topic-intent: #7c3aed;
   --topic-view: #0e7490;
   --spinner-border: rgba(0, 0, 0, 0.2);
-  --brand-grad: linear-gradient(92deg, #1f6feb, #7c3aed);
 }
 
 * { box-sizing: border-box; }
@@ -184,10 +182,7 @@ code {
   font-size: 21px;
   font-weight: 800;
   letter-spacing: 2px;
-  background: var(--brand-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--accent);
 }
 .brand-sub { display: block; font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
 
@@ -334,7 +329,6 @@ code {
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: var(--panel-grad);
 }
 .panel-title { margin: 0; font-size: 14px; font-weight: 600; }
 .panel-sub { display: block; font-size: 12px; color: var(--text-dim); margin-top: 2px; }
@@ -502,6 +496,9 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-row { display: flex; gap: 8px; align-items: center; }
 .btn-row .btn { flex: 1; }
+/* 单个按钮的场合不要铺满整行：禁用的主按钮铺满全屏会让人以为能点 */
+.btn-row-auto .btn { flex: 0 0 auto; }
+.btn-row-auto { flex-wrap: wrap; }
 .btn-column { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 
 .spinner {
@@ -767,9 +764,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background:
-    radial-gradient(1000px 500px at 50% -10%, var(--accent-soft), transparent 70%),
-    var(--bg);
+  background: var(--bg);
   padding: 24px;
 }
 
@@ -1240,7 +1235,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 }
 .alloc-seg { transition: opacity 0.15s; }
 .alloc-seg:hover, .alloc-hover { opacity: 0.85; }
-.alloc-cash { background: repeating-linear-gradient(45deg, var(--row-alt), var(--row-alt) 4px, transparent 4px, transparent 8px); }
+.alloc-cash { background: var(--cash-seg); }
 .alloc-seg-1 { background: var(--accent); }
 .alloc-seg-2 { background: var(--accent-2); }
 .alloc-seg-3 { background: var(--up); }

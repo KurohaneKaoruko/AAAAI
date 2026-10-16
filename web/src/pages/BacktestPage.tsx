@@ -140,14 +140,24 @@ export function BacktestPage() {
             {connSymbols.length === 0 && (
               <span className="dim small">该连接的候选池为空，请先到「策略 → 候选池」添加</span>
             )}
+            {connSymbols.length > 0 && symbols.length === 0 && (
+              <span className="dim small">还没选标的 —— 点上面的代码即可选中</span>
+            )}
           </div>
 
-          <div className="btn-row">
+          <div className="btn-row btn-row-auto">
             <Button
               variant="primary"
               onClick={run}
               busy={busy}
               disabled={!connectionId || symbols.length === 0 || !strategyId || !local}
+              title={
+                !local
+                  ? "该策略的决策来源是大模型：回放里问模型等于用后见之明，请用「模拟对照」"
+                  : symbols.length === 0
+                    ? "先选至少一个标的"
+                    : undefined
+              }
             >
               {busy ? "回测中…" : "开始回测"}
             </Button>

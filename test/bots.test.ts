@@ -818,6 +818,13 @@ test("操作指引：把机器人的目标仓位换算成可人工照做的交�
       assert.ok(a.side === "BUY" || a.side === "SELL" || a.side === "HOLD");
       if (a.side === "HOLD") {
         assert.ok(a.note && a.note.length > 0, "不操作必须说明原因，否则看起来像卡住了");
+        // 原因必须对得上事实：目标与当前都为 0 时说"目标空仓"，
+        // 说成"差额小于最小调仓额 0"既自相矛盾又误导
+        if (a.fromWeight < 1e-6 && a.toWeight < 1e-6) {
+          assert.match(a.note!, /目标空仓/, `空仓观望不该说成调仓额：${a.note}`);
+        } else {
+          assert.match(a.note!, /最小调仓额/, `有仓位差额时应说明调仓额：${a.note}`);
+        }
         continue;
       }
       assert.ok(a.price > 0, `${a.symbol} 参考价必须来自行情`);

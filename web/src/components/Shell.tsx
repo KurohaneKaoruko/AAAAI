@@ -19,14 +19,17 @@ export type PageId =
   | "risk"
   | "system";
 
+// 分组即心智：交易 = 现在就要动手的（跑机器人、连交易所）；
+// 智能 = 动手之前的准备与复盘（策略、模型、让它们同场比一比、拿历史先验一验）。
+// 历史模拟放在「智能」组末尾，紧挨模拟对照：两者都是"先验证再上实盘"。
 const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "dashboard", label: "仪表盘", icon: "◧", group: "交易" },
   { id: "bots", label: "交易机器人", icon: "❖", group: "交易" },
-  { id: "backtest", label: "历史模拟", icon: "⏱", group: "交易" },
   { id: "exchanges", label: "交易所连接", icon: "⇄", group: "交易" },
   { id: "strategy", label: "策略", icon: "⚑", group: "智能" },
   { id: "llm", label: "模型管理", icon: "✦", group: "智能" },
   { id: "compare", label: "模拟对照", icon: "⇆", group: "智能" },
+  { id: "backtest", label: "历史模拟", icon: "⏱", group: "智能" },
   { id: "risk", label: "风控", icon: "⛨", group: "系统" },
   { id: "system", label: "系统与日志", icon: "⚙", group: "系统" },
 ];

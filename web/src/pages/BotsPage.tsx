@@ -375,35 +375,22 @@ function RunHistory({ bot }: { bot: Bot }) {
 }
 
 /**
- * 操作指引：机器人下一步该做什么，换算成"人可以照做"的操作。
+ * 操作指引：目标仓位与实时持仓的差额，换算成买卖与数量。
  *
- * 为什么需要：模拟盘与实盘的唯一差别就是不下单 —— 决策、信号、目标仓位完全一致。
- * 于是"还差多少才到位"能精确算出来。不敢全权交给机器人、或交易所不支持 API 交易时，
- * 照着这份清单在自己的交易软件里手动下单，就是在复现这台机器人的操作。
- *
- * 诚实原则：目标权重没出来就说没有决策；差额小于最小调仓额就说无需操作；
- * 拿不到价格就说无法换算。数字全部来自服务端（prices/targets/holdings），
- * 前端只做展示，不自己猜。
+ * 数字全部来自服务端（targets / prices / holdings），前端只做展示，不自己猜；
+ * 没决策、差额在噪声内、拿不到价格，各有各的说法，不含糊过去。
  */
 function ActionGuide({ bot }: { bot: Bot }) {
   const a = bot.state.allocation;
   const acts = bot.state.actions.filter((x) => x.side !== "HOLD");
+  const holds = bot.state.actions.filter((x) => x.side === "HOLD" && x.note);
   return (
     <details className="bot-events">
       <summary>
-        操作指引（供人工模仿） · {acts.length > 0 ? `${acts.length} 项待操作` : "暂无需操作"}
+        操作指引 · {acts.length > 0 ? `${acts.length} 项待操作` : "暂无需操作"}
+        {a?.decidedAt ? <span className="dim small"> · {time(a.decidedAt)}</span> : null}
       </summary>
-      <div className="dim small" style={{ margin: "4px 0 8px" }}>
-        机器人的目标仓位与实时持仓的差额。照着在自己的交易所下单，即可复现它的操作 ——
-        模拟盘与实盘的唯一差别就是不下单。
-        {a?.decidedAt ? ` 决策时间：${time(a.decidedAt)}` : ""}
-        {a?.reason ? ` · 理由：${a.reason}` : ""}
-      </div>
-      {acts.length === 0 ? (
-        <div className="dim small" style={{ marginBottom: 6 }}>
-          当前持仓与目标一致（或差额小于最小调仓额 {money(bot.risk.minTradeValue, 0)}），无需操作。
-        </div>
-      ) : (
+      {acts.length > 0 && (
         <table className="table" style={{ marginBottom: 6 }}>
           <thead>
             <tr>
@@ -412,7 +399,7 @@ function ActionGuide({ bot }: { bot: Bot }) {
               <th className="num">数量</th>
               <th className="num">参考价</th>
               <th className="num">金额</th>
-              <th className="num">当前→目标权重</th>
+              <th className="num">当前→目标</th>
               <th className="num">目标持仓</th>
             </tr>
           </thead>
@@ -437,19 +424,13 @@ function ActionGuide({ bot }: { bot: Bot }) {
           </tbody>
         </table>
       )}
-      {/* 没说出口的原因也要列出来，避免"看起来没操作"被误解成"卡住了" */}
-      {bot.state.actions.filter((x) => x.side === "HOLD" && x.note).length > 0 && (
-        <div className="dim small" style={{ marginBottom: 4 }}>
-          {bot.state.actions
-            .filter((x) => x.side === "HOLD" && x.note)
-            .map((x) => `${x.symbol}：${x.note}`)
-            .join("；")}
-        </div>
+      {a?.reason && acts.length > 0 && <div className="dim small">理由：{a.reason}</div>}
+      {holds.map((x) => (
+        <div key={x.symbol} className="dim small">{x.symbol} · {x.note}</div>
+      ))}
+      {acts.length > 0 && (
+        <div className="dim small">参考价为最新价，成交以实际下单为准；买入需按交易所最小单位取整。</div>
       )}
-      <div className="dim small">
-        参考价为行情最新价；实际成交价以你下单时为准。数量按参考价折算，
-        买入可能受交易所最小交易单位（如 A 股 100 股一手）限制，需自行取整。
-      </div>
     </details>
   );
 }
@@ -747,10 +728,8 @@ function BotForm({
         )}
         {paperTrading && (
           <Notice tone="info">
-            这个机器人会持续轮询真实行情并按策略模拟成交：钱不会动，但持仓、盈亏、成交记录都是它的实时操作统计。
-            启动时先用 {barCount} 根历史 K 线喂指标（不成交），之后每来一根新 K 线才可能产生成交。
-            卡片里的「操作指引」会实时列出它下一步想做的交易 —— 照着在自己的交易所手动下单，
-            就是在复现它的操作。
+            持续轮询真实行情、按策略本地撮合：钱不会动，持仓与盈亏都是实时操作统计。
+            启动先用 {barCount} 根历史 K 线喂指标（不成交），之后每来一根新 K 线才可能成交。
           </Notice>
         )}
         <div className="grid-2">
