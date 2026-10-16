@@ -198,9 +198,29 @@ test("模拟交易所自带标的：候选池空着也能开跑", async () => {
     assert.equal(state.runTarget.error, null, "候选池空不该成为「跑不了」的理由");
     assert.equal(state.runTarget.symbolsBuiltIn, true, "界面据此不再要求挑标的");
 
-    // 顶栏行情也照样有：不需要谁先往候选池里加东西
+    // 但它不进「候选池行情」：模拟品种是编出来的，没有报价可看，
+    // 拿它们当行情列出来，看着就像真有一批标的在报数。
+    assert.deepEqual(await controller.refreshTickers(), [], "自带标的的连接不发行情");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("候选池行情只按候选池取，并带上是哪个连接的", async () => {
+  const dir = tmpDataDir();
+  try {
+    const cm = new ConnectionManager(dir);
+    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const watchlist = new WatchlistManager(dir);
+    // 模拟连接的行情由它自己编，这里只是借它验证"按候选池取行情 + 带上连接"这条链路
+    watchlist.add({ connectionId: conn.id, symbol: "DEMO-BTC", name: "模拟品种", assetClass: "crypto", currency: "USDT" });
+    const controller = new EngineController(testConfig(), cm, watchlist, new LlmManager(dir));
+
     const tickers = await controller.refreshTickers();
-    assert.ok(tickers.length > 0, "自带标的的交易所应直接给出行情");
+    assert.equal(tickers.length, 1);
+    assert.equal(tickers[0]!.symbol, "DEMO-BTC");
+    assert.equal(tickers[0]!.connectionId, conn.id, "界面按 connectionId 分开显示");
+    assert.equal(controller.snapshot().tickers.length, 1, "快照里也要带上");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

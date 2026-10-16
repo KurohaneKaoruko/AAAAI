@@ -56,6 +56,8 @@ export interface Ticker {
   changePct: number;
   volume: number;
   timestamp: number;
+  /** 这条行情来自哪个连接（候选池行情按连接分开显示） */
+  connectionId?: string;
 }
 
 export interface WatchItem {

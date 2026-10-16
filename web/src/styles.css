@@ -287,15 +287,22 @@ code {
 .badge-warn { color: var(--warn); }
 .badge-accent { color: var(--accent); }
 
+/* ---------- 候选池行情（策略页） ---------- */
+.quote-block { margin-top: 14px; }
+.quote-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
 .ticker-strip {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-soft);
 }
 /* 每个行情是一小块：代码在左，价格与涨跌幅靠右对齐成一列。
-   以前三项同色同号挤成一条长句，只能一行行读，也扫不出某个标的。 */
+   三项同色同号挤成一条长句时，只能一行行读，扫不出某个标的。 */
 .ticker-item {
   display: flex;
   align-items: baseline;
@@ -336,7 +343,8 @@ code {
 }
 .ticker-change.up { background: var(--notice-ok-bg); color: var(--up); }
 .ticker-change.down { background: var(--notice-err-bg); color: var(--down); }
-.ticker-more { align-self: center; font-size: 11.5px; color: var(--text-dim); }
+/* 取不到报价就说取不到，不要留个空格子让人以为价格是 0 */
+.ticker-nodata { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
 
 /* 仪表盘上的机器人选择器：名字要看得清，状态用点区分（以前是名字+徽章
    挤在一个小胶囊里，两层边框、整体发灰） */

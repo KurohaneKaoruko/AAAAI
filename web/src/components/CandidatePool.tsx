@@ -25,6 +25,7 @@ export function CandidatePool({ store }: { store: AppStore }) {
   const [searching, setSearching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [manual, setManual] = useState<SymbolInfo | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!connectionId && connections[0]) setConnectionId(connections[0].id);
@@ -51,6 +52,15 @@ export function CandidatePool({ store }: { store: AppStore }) {
     };
   }, [connectionId]);
 
+  // 打开候选池取一次行情：不取的话，摆在"行情"位置上的是服务启动那一刻的价格，
+  // 谁也看不出它有多旧（这里没有定时刷新，之后靠「刷新」按钮）。
+  useEffect(() => {
+    void api
+      .refreshTickers()
+      .then(() => store.reloadState())
+      .catch(() => undefined);
+  }, []);
+
   if (connections.length === 0) {
     return (
       <Panel title="候选池">
@@ -63,7 +73,6 @@ export function CandidatePool({ store }: { store: AppStore }) {
   // 自带标的的交易所（模拟交易所）：没有"候选池"这回事 —— 行情是它自己编的，
   // 让人先配一套标的代码才能开跑，纯属多此一举。这里只把这件事说清楚。
   if (adapter?.builtinSymbols) {
-    const builtin = adapter.defaultSymbols ?? [];
     return (
       <Panel
         title="候选池"
@@ -90,16 +99,9 @@ export function CandidatePool({ store }: { store: AppStore }) {
           这里没有要你配的东西，直接去机器 / 回测 / 对照页开跑就行。
           候选池只对<b>真实交易所</b>生效（那里才有「允许交易哪些标的」这回事）。
         </Notice>
-        <div className="hint-line">自带的模拟品种：</div>
-        <div className="chip-row">
-          {builtin.map((s) => (
-            <span key={s.symbol} className="chip chip-sm mono" title={s.name}>
-              {s.symbol}
-            </span>
-          ))}
-        </div>
         <div className="dim small" style={{ marginTop: 8 }}>
-          结果里的持仓/成交只会出现这几个代码（它们是编出来的，不是真实行情）。
+          模拟的品种是编出来的，没有真实报价可看，所以这里连行情也不列 ——
+          结果里的持仓/成交会出现它们，代码是编的，不是真实标的。
         </div>
       </Panel>
     );
@@ -147,6 +149,21 @@ export function CandidatePool({ store }: { store: AppStore }) {
 
   const available = popular.filter((p) => !p.inWatchlist);
   const poolOn = watchlist.filter((w) => w.connectionId === connectionId);
+  // 候选池行情：按连接取。同一个代码在两个连接上都加了也能分得清（ticker 带 connectionId）。
+  const quoteOf = new Map(
+    (state?.tickers ?? []).filter((t) => t.connectionId === connectionId).map((t) => [t.symbol, t]),
+  );
+  const refreshQuotes = async () => {
+    setRefreshing(true);
+    try {
+      await api.refreshTickers();
+      await store.reloadState();
+    } catch (err) {
+      store.toast("error", (err as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <Panel
@@ -267,6 +284,45 @@ export function CandidatePool({ store }: { store: AppStore }) {
               </button>
             </span>
           ))}
+        </div>
+      )}
+
+      {poolOn.length > 0 && (
+        <div className="quote-block">
+          <div className="quote-head">
+            <span className="hint-line">池内行情（打开这一页时取一次，自己不会动）</span>
+            <Button small onClick={() => void refreshQuotes()} busy={refreshing}>
+              刷新
+            </Button>
+          </div>
+          <div className="ticker-strip">
+            {poolOn.map((w) => {
+              const q = quoteOf.get(w.symbol);
+              return (
+                <span className="ticker-item" key={w.id}>
+                  <span className="ticker-symbol" title={w.name}>
+                    {w.symbol}
+                  </span>
+                  {q ? (
+                    <>
+                      <span className="ticker-price mono">
+                        {money(q.price, q.price > 100 ? 2 : 4)}
+                      </span>
+                      {/* 正数也带 +：只靠颜色分涨跌，色弱的人看不出方向 */}
+                      <span
+                        className={`ticker-change mono ${q.changePct >= 0 ? "up" : "down"}`}
+                      >
+                        {q.changePct >= 0 ? "+" : ""}
+                        {pct(q.changePct)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="ticker-nodata">没有取到报价</span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 

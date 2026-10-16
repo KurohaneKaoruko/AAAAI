@@ -14,6 +14,14 @@ import { redactConfig } from "../configSchema.js";
 import { getLogger } from "../core/logger.js";
 import { strategyFields, StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
+
+/**
+ * 候选池行情：交易所行情 + 它来自哪个连接。
+ *
+ * 候选池里同一个代码可能出现在多个连接上（币安的 BTCUSDT 与某美股代码不会重名，
+ * 但两个连接都添同一个代码是允许的），界面按连接分开显示时要有这个字段才分得清。
+ */
+export type StateTicker = Ticker & { connectionId: string };
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { LlmManager } from "../llm/llmManager.js";
@@ -33,8 +41,8 @@ const log = getLogger("engine");
  * （/api/bots）。这里只剩：配置、候选池行情、模拟对照结果。
  */
 export interface EngineState {
-  /** 候选池实时行情 */
-  tickers: Ticker[];
+  /** 候选池行情 */
+  tickers: StateTicker[];
   /** 最近一次模拟对照结果 */
   comparison: ComparisonResult | null;
   /** 对照实验进行中 */
@@ -71,7 +79,6 @@ export type Broadcast = { type: "state"; data: EngineState };
 export class EngineController {
   private state: EngineState;
   private listeners = new Set<(b: Broadcast) => void>();
-  private tickerTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private config: AppConfig,
@@ -212,38 +219,32 @@ export class EngineController {
 
   // ---------------- 行情快照 ----------------
 
-  /** 拉取候选池行情（页面顶栏 ticker）。 */
-  async refreshTickers(): Promise<Ticker[]> {
+  /**
+   * 拉取候选池行情（策略页「候选池行情」）。
+   *
+   * 只按候选池取：候选池是"允许交易哪些标的"的唯一来源，行情也就只有这一份。
+   * 「自带标的」的连接（模拟交易所）不进这里 —— 它的标的由它自己编，
+   * 拿它们当行情列出来，看起来就像真有一批标的在报价。
+   */
+  async refreshTickers(): Promise<StateTicker[]> {
     const byConnection = new Map<string, string[]>();
-    // 自带标的的交易所（模拟交易所）不用先加候选池：它的标的自己就有，
-    // 顶栏照样能看到行情在动 —— 不然"模拟交易所"看起来像坏的。
-    for (const c of this.connections.list()) {
-      const builtin = this.builtinSymbolsOf(c.id);
-      if (builtin.length > 0) byConnection.set(c.id, builtin);
-    }
     for (const item of this.watchlist.list()) {
       const list = byConnection.get(item.connectionId) ?? [];
       if (!list.includes(item.symbol)) list.push(item.symbol);
       byConnection.set(item.connectionId, list);
     }
-    if (byConnection.size === 0) return this.state.tickers;
-    const out: Ticker[] = [];
+    if (byConnection.size === 0) return [];
+    const out: StateTicker[] = [];
     for (const [connectionId, symbols] of byConnection) {
       try {
         const adapter = this.connections.adapter(connectionId);
-        out.push(...(await adapter.fetchTickers(symbols)));
+        for (const t of await adapter.fetchTickers(symbols)) out.push({ ...t, connectionId });
       } catch (err) {
         log.warn("行情刷新失败[%s]: %s", connectionId, (err as Error).message);
       }
     }
     this.state.tickers = out;
     return out;
-  }
-
-  private startTickerPolling(intervalMs = 10_000): void {
-    this.tickerTimer = setInterval(() => {
-      void this.refreshTickers().then(() => this.emitState()).catch(() => undefined);
-    }, intervalMs);
   }
 
   // ---------------- 运行控制 ----------------
