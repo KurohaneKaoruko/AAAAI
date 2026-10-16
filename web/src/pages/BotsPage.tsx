@@ -371,14 +371,18 @@ function AllocationOverview({ bots }: { bots: Bot[] }) {
 function AllocationBars({ alloc }: { alloc: BotAllocation }) {
   const [hover, setHover] = useState<string | null>(null);
   if (alloc.holdings.length === 0) {
+    // 全现金时那根条只剩一种颜色，不携带任何信息 —— 直接把数字说清楚
     return (
       <div className="alloc">
         <div className="alloc-head">
           <span>资产配置</span>
-          <span className="dim mono">全部现金</span>
+          <span className="dim mono">
+            现金 {money(alloc.cash)} · 占比 {wPct(alloc.cashWeight)}
+          </span>
         </div>
-        <div className="alloc-bar">
-          <div className="alloc-seg alloc-cash" style={{ width: "100%" }} />
+        <div className="alloc-empty">
+          <b className="mono">{money(alloc.equity)}</b>
+          <span className="dim">全部为现金，暂无持仓</span>
         </div>
       </div>
     );
@@ -388,7 +392,7 @@ function AllocationBars({ alloc }: { alloc: BotAllocation }) {
       <div className="alloc-head">
         <span>资产配置</span>
         <span className="dim mono">
-          持仓 {alloc.heldCount} · 现金 {wPct(alloc.cashWeight)} · 权益 {money(alloc.equity, 0)}
+          权益 {money(alloc.equity)} · 持仓 {alloc.heldCount} · 现金 {money(alloc.cash)}（{wPct(alloc.cashWeight)}）
         </span>
       </div>
       <div className="alloc-bar">

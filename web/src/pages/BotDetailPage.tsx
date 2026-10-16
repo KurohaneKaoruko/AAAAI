@@ -228,7 +228,10 @@ export function BotDetailPage({
             </table>
           </div>
         ) : (
-          <Empty>当前没有持仓（全部现金）。</Empty>
+          <div className="alloc-empty">
+            <b className="mono">{money(a?.equity ?? 0)}</b>
+            <span className="dim">全部为现金，暂无持仓</span>
+          </div>
         )}
       </Panel>
 
