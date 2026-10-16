@@ -210,25 +210,30 @@ function BotCard({
 
   return (
     <div className="bot-card">
+      {/* 头部分三块：名字+状态（永远不拆开）、成交方式标签（可整体换行）、
+          操作按钮（靠右）。混在一排 wrap 会散成参差的两行。 */}
       <div className="bot-card-head">
-        <span className="bot-name">{bot.name}</span>
-        <span className={`badge ${st.cls}`}>{st.text}</span>
-        <span className="chip chip-sm">持续运行</span>
-        {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
-        {bot.paperTrading && bot.state.status === "running" && (
-          <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
-        )}
-        {bot.paperTrading && bot.state.status !== "running" && (
-          <span className="chip chip-sm">模拟成交</span>
-        )}
-        {/* "实盘下单中" 只在真的在跑的时候出现：停了还挂着这四个字会让人以为订单还在发 */}
-        {bot.state.liveTrading && bot.state.status === "running" && (
-          <span className="chip chip-sm chip-live">实盘下单中</span>
-        )}
-        {bot.state.liveTrading && bot.state.status !== "running" && (
-          <span className="chip chip-sm chip-off">上次运行为实盘</span>
-        )}
-        <span className="chip chip-sm">{bot.interval}</span>
+        <div className="bot-card-title">
+          <span className="bot-name">{bot.name}</span>
+          <span className={`badge ${st.cls}`}>{st.text}</span>
+        </div>
+        <div className="bot-card-chips">
+          {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
+          {bot.paperTrading && bot.state.status === "running" && (
+            <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
+          )}
+          {bot.paperTrading && bot.state.status !== "running" && (
+            <span className="chip chip-sm">模拟成交</span>
+          )}
+          {/* "实盘下单中" 只在真的在跑的时候出现：停了还挂着这四个字会让人以为订单还在发 */}
+          {bot.state.liveTrading && bot.state.status === "running" && (
+            <span className="chip chip-sm chip-live">实盘下单中</span>
+          )}
+          {bot.state.liveTrading && bot.state.status !== "running" && (
+            <span className="chip chip-sm chip-off">上次运行为实盘</span>
+          )}
+          <span className="chip chip-sm">{bot.interval}</span>
+        </div>
         <div className="bot-actions">
           <Button small variant="primary" onClick={onStart} disabled={running} busy={busy}>
             {running ? "运行中" : "启动"}
