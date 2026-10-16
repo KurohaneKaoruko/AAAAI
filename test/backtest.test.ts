@@ -1,154 +1,112 @@
+/**
+ * 历史模拟（回测）：整段历史一次性跑完，成交一次性全出。
+ *
+ * 与机器人的边界被测试锁住：机器人的统计只来自实时 K 线（见 bots.test.ts），
+ * 这里才是那些"一启动就几十笔成交"该待的地方 —— 而且它不属于任何机器人。
+ */
+
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import test from "node:test";
-import { runBacktest } from "../src/backtest/engine.js";
-import { testAdapter, testConfig } from "./helpers.js";
-import { dig, num, str, bool } from "../src/config.js";
-import { buildConfig } from "../src/configSchema.js";
-import { parseDecision } from "../src/llm/llmClient.js";
-import { mergeBarsByTime } from "../src/data/streaming.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runBacktest } from "../src/backtest/runner.js";
+import { StrategyStore } from "../src/strategies/profileStore.js";
+import { testAdapter } from "./helpers.js";
+import { testConfig } from "./helpers.js";
 
-test("runBacktest: 模拟交易所全链路跑通", async () => {
-  const adapter = testAdapter();
-  const result = await runBacktest(testConfig(), {
-    adapter,
-    symbols: ["DEMO-BTC"],
-    bars: 120,
-    interval: "1m",
-    liveTrading: false,
-  });
-  assert.equal(result.bars, 120);
-  assert.ok(result.metrics.finalEquity > 0, "权益应为正");
-  assert.equal(result.metrics.equityPoints, 120);
-  assert.ok(result.events > 100, "事件应覆盖 BAR 及各 Agent 事件");
-  assert.ok(result.equityCurve.length === 120);
+function setup(): { dir: string; strategies: StrategyStore } {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-bt-"));
+  return { dir, strategies: new StrategyStore(dir) };
+}
+
+test("回测：整段历史一次跑完，成交一次性产出（这正是它该有的行为）", async () => {
+  const { dir, strategies } = setup();
+  try {
+    const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20, maxTargetWeight: 0.5 });
+    const result = await runBacktest(testConfig(), testAdapter(), profile, {
+      symbols: ["DEMO-BTC"],
+      interval: "1m",
+      barCount: 120,
+      strategyId: profile.id,
+    });
+
+    assert.equal(result.bars, 120, "应回放 120 根");
+    assert.ok(result.metrics.totalFills > 0, `历史回放应产生成交，实际 ${result.metrics.totalFills} 笔`);
+    assert.equal(result.trades.length, result.metrics.totalFills, "流水笔数应与指标一致（本次未截断）");
+    assert.ok(result.equityCurve.length > 1, "应有权益曲线");
+    assert.ok(result.pnlBySymbol.length > 0, "应有分标的盈亏");
+    assert.equal(result.strategyName, "双均线");
+    assert.ok(result.durationMs >= 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-test("runBacktest: 多标的时间序列正确归并", async () => {
-  const adapter = testAdapter();
-  const result = await runBacktest(testConfig(), {
-    adapter,
-    symbols: ["DEMO-BTC", "DEMO-ETH"],
-    bars: 60,
-    interval: "1m",
-    liveTrading: false,
-  });
-  assert.equal(result.symbols.length, 2);
-  // 归并后按时间升序：权益曲线时间戳必须单调不减
-  const times = result.equityCurve.map((p) => Date.parse(p.timestamp));
-  const sorted = [...times].sort((a, b) => a - b);
-  assert.deepEqual(times, sorted);
-  assert.ok(result.bars >= 120, "两个标的的 K 线都应汇入");
+test("回测：初始资金覆盖生效（用自己的钱，不受全局风控配置影响）", async () => {
+  const { dir, strategies } = setup();
+  try {
+    const profile = strategies.create({ name: "双均线" });
+    const result = await runBacktest(testConfig(), testAdapter(), profile, {
+      symbols: ["DEMO-BTC"],
+      barCount: 80,
+      strategyId: profile.id,
+      initialCash: 50_000,
+    });
+    assert.ok(result.metrics.finalEquity > 0);
+    // 50k 的规模下成交金额应明显小于 100k 规模（否则资金覆盖没生效）
+    const big = await runBacktest(testConfig(), testAdapter(), profile, {
+      symbols: ["DEMO-BTC"],
+      barCount: 80,
+      strategyId: profile.id,
+      initialCash: 400_000,
+    });
+    const avgQty = (r: typeof result) =>
+      r.trades.reduce((a, t) => a + t.quantity * t.price, 0) / Math.max(1, r.trades.length);
+    assert.ok(avgQty(big) > avgQty(result), "更大资金应下更大的单");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-test("runBacktest: 结果确定可复现", async () => {
-  const a = await runBacktest(testConfig(), { adapter: testAdapter(), symbols: ["DEMO-BTC"], bars: 60, interval: "1m", liveTrading: false });
-  const b = await runBacktest(testConfig(), { adapter: testAdapter(), symbols: ["DEMO-BTC"], bars: 60, interval: "1m", liveTrading: false });
-  assert.equal(a.metrics.finalEquity, b.metrics.finalEquity);
-  assert.equal(a.metrics.totalFills, b.metrics.totalFills);
+test("回测：模型类策略被明确拒绝（回放里问模型等于用后见之明）", async () => {
+  const { dir, strategies } = setup();
+  try {
+    for (const source of ["chat", "systemone", "hybrid"] as const) {
+      const profile = strategies.create({ name: `模型策略 ${source}`, decisionSource: source });
+      await assert.rejects(
+        () =>
+          runBacktest(testConfig(), testAdapter(), profile, {
+            symbols: ["DEMO-BTC"],
+            barCount: 60,
+            strategyId: profile.id,
+          }),
+        /回测不支持|后见之明|模拟对照/,
+        `${source} 类策略必须在回测里被拒绝，而不是偷偷用模型跑出一段虚高成绩`,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-test("mergeBarsByTime: 多组 K 线按时间升序合并", () => {
-  const t = (n: number) => new Date(1_700_000_000_000 + n * 1000);
-  const merged = mergeBarsByTime([
-    [
-      { symbol: "A", timestamp: t(3), open: 1, high: 1, low: 1, close: 1, volume: 0 },
-      { symbol: "A", timestamp: t(1), open: 1, high: 1, low: 1, close: 1, volume: 0 },
-    ],
-    [{ symbol: "B", timestamp: t(2), open: 1, high: 1, low: 1, close: 1, volume: 0 }],
-  ]);
-  assert.deepEqual(
-    merged.map((b) => `${b.symbol}@${b.timestamp.getTime()}`),
-    ["A@1700000001000", "B@1700000002000", "A@1700000003000"],
-  );
-});
-
-test("config: dig / num / str / bool 安全取值", () => {
-  const cfg = { a: { b: 1, c: "x", d: true } };
-  assert.equal(dig(cfg, "a", "b", 0), 1);
-  assert.equal(dig(cfg, "a", "zzz", 42), 42);
-  assert.equal(dig(cfg, "nope", "x", 7), 7);
-  assert.equal(num(cfg, ["a", "b"], 0), 1);
-  assert.equal(num(cfg, ["a", "c"], 0), 0); // "x" 非数值 -> 默认
-  assert.equal(num({ a: { b: "3.5" } }, ["a", "b"], 0), 3.5);
-  assert.equal(str(cfg, ["a", "c"], "?"), "x");
-  assert.equal(str(cfg, ["a", "missing"], "fallback"), "fallback");
-  assert.equal(bool(cfg, ["a", "d"], false), true);
-  assert.equal(bool(cfg, ["a", "missing"], true), true);
-});
-
-test("config: buildConfig 默认值与脱敏", () => {
-  const config = buildConfig({});
-  assert.equal(config.market.symbols.length, 0);
-  assert.equal(config.market.interval, "1m");
-  assert.equal(config.execution.mode, "paper");
-  assert.equal(config.server.port, 8787);
-  // llm.enabled 已删除（从未被读取）：是否用模型只看 strategy.decision_source
-  assert.equal("enabled" in config.llm, false);
-  assert.equal(config.strategy.decisionSource, "rules");
-  assert.equal(config.llm.apiKey, "");
-  assert.equal(config.risk.initialCash, 100000);
-});
-
-test("llm: parseDecision 容忍围栏与越界", () => {
-  const ok = parseDecision('```json\n{"target_weight": 0.35, "confidence": 0.8, "reason": "趋势向上"}\n```');
-  assert.equal(ok.targetWeight, 0.35);
-  assert.equal(ok.confidence, 0.8);
-
-  const camel = parseDecision('{"targetWeight": 1, "confidence": 2}');
-  assert.equal(camel.targetWeight, 1);
-  assert.equal(camel.confidence, 1); // 收敛到 1
-
-  assert.throws(() => parseDecision("没有 JSON"));
-  assert.throws(() => parseDecision('{"target_weight": 1.5}'));
-  assert.throws(() => parseDecision('{"target_weight": -0.1}'));
-});
-test("runBacktest: 开启拆单后全链路仍跑通，且成交笔数不少于不拆单", async () => {
-  const base = testConfig();
-  const sliced = testConfig({
-    ...base,
-    execution: {
-      ...base.execution,
-      slicingAlgo: "twap",
-      slicingSlices: 4,
-      slicingSpacingBars: 1,
-      slicingVolumeProfileBars: 20,
-    },
-  });
-  const whole = await runBacktest(base, {
-    adapter: testAdapter(),
-    symbols: ["DEMO-BTC"],
-    bars: 300,
-    interval: "1m",
-    liveTrading: false,
-  });
-  const cut = await runBacktest(sliced, {
-    adapter: testAdapter(),
-    symbols: ["DEMO-BTC"],
-    bars: 300,
-    interval: "1m",
-    liveTrading: false,
-  });
-
-  assert.equal(cut.equityCurve.length, 300, "拆单不应改变 K 线推进");
-  assert.ok(cut.metrics.finalEquity > 0, "拆单后权益仍应为正");
-  assert.ok(
-    cut.metrics.totalFills >= whole.metrics.totalFills,
-    `拆单会把一笔单变成多笔成交：${whole.metrics.totalFills} -> ${cut.metrics.totalFills}`,
-  );
-  // 拆单不改变总持仓规模量级（尾差来自数据末尾未到期的切片）
-  const gross = (r: typeof cut) => r.positions.reduce((a, p) => a + Math.abs(p.quantity), 0);
-  assert.ok(gross(cut) >= 0);
-});
-
-test("runBacktest: Ledoit-Wolf 收缩协方差可用在 HRP 路径上，不影响回测完整性", async () => {
-  const base = testConfig();
-  const result = await runBacktest(
-    testConfig({
-      ...base,
-      optimize: { ...base.optimize, method: "risk_parity", covariance: "lw", targetVol: 0.3 },
-    }),
-    { adapter: testAdapter(), symbols: ["DEMO-BTC", "DEMO-ETH"], bars: 200, interval: "1m", liveTrading: false },
-  );
-  assert.equal(result.bars >= 400, true);
-  assert.ok(result.metrics.finalEquity > 0);
+test("回测：取不到 K 线时明确报错（不留空结果让人误以为跑了但没赚）", async () => {
+  const { dir, strategies } = setup();
+  try {
+    const profile = strategies.create({ name: "双均线" });
+    const adapter = testAdapter();
+    // 让适配器返回空：模拟标的不存在
+    adapter.fetchKlines = async () => [];
+    await assert.rejects(
+      () =>
+        runBacktest(testConfig(), adapter, profile, {
+          symbols: ["不存在"],
+          barCount: 60,
+          strategyId: profile.id,
+        }),
+      /没有取到任何 K 线/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

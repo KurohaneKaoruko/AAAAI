@@ -2,6 +2,7 @@
 
 import type {
   AdapterMeta,
+  BacktestResult,
   PoolCounts,
   AuthStatus,
   Bot,
@@ -55,9 +56,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // 引擎
   state: () => request<EngineState>("/api/state"),
-  start: (body: { mode: "backtest" | "live"; symbols?: string[]; connectionId?: string; bars?: number; interval?: string }) =>
-    request<{ state: EngineState }>("/api/engine/start", { method: "POST", body: JSON.stringify(body) }),
-  stop: () => request<{ state: EngineState }>("/api/engine/stop", { method: "POST" }),
+  /** 历史模拟（回测）：跑一段真实历史，一次性返回战绩。不属于任何机器人。 */
+  runBacktest: (body: {
+    connectionId: string;
+    symbols: string[];
+    strategyId: string;
+    interval?: string;
+    barCount?: number;
+    initialCash?: number;
+    maxDrawdownPct?: number;
+    minTradeValue?: number;
+  }) => request<{ result: BacktestResult }>("/api/backtest", { method: "POST", body: JSON.stringify(body) }),
   refreshTickers: () => request<{ tickers: Ticker[] }>("/api/tickers/refresh", { method: "POST" }),
 
   // 配置

@@ -55,6 +55,11 @@ export interface AllocatorOptions {
     reason: string;
     entryBarIndex: number;
   }) => void;
+  /**
+   * 预热闸门：返回 true 时本轮不决策（K 线已进缓冲区，只是不产生配置/下单/留痕）。
+   * 实时机器人靠它把"启动时的历史"与"实时收到的行情"分开。
+   */
+  gate?: () => boolean;
 }
 
 export class AllocatorAgent extends Agent {
@@ -114,6 +119,8 @@ export class AllocatorAgent extends Agent {
 
   /** 一轮行情 = 一次决策机会；按 interval 节流后再真正调用模型。 */
   private async decide(timestamp: Date): Promise<void> {
+    // 预热中：K 线只进缓冲区，不决策 —— 实时机器人的统计只能来自实时行情
+    if (this.opts.gate?.()) return;
     // 预热未完成时不计入节流计数，保证预热一结束就能做第一次决策
     if (this.snapshots().length === 0) return;
     const due = this.rounds % Math.max(1, this.opts.interval) === 0;

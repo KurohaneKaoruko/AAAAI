@@ -104,7 +104,7 @@ test("机器人: 连接不存在 / 没选标的 时给出明确错误", () => {
   }
 });
 
-test("机器人: 回测跑完后状态完整（引擎删除后，运行数据都来自这里）", async () => {
+test("机器人: 实时运行状态完整（引擎删除后，运行数据都来自这里）", async () => {
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
@@ -112,15 +112,28 @@ test("机器人: 回测跑完后状态完整（引擎删除后，运行数据都
     const wm = new WatchlistManager(dir);
     wm.add({ symbol: "DEMO-BTC", name: "模拟比特币", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
-    const bot = bots.create({ name: "回测", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 60 });
+    const bot = bots.create({ name: "实时", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 60, pollMs: 100 });
     const st = await bots.start(bot.id);
 
-    assert.equal(st.status, "stopped");
+    // 机器人只有实时一种跑法：预热喂指标，成交随实时 K 线产生
+    assert.equal(st.status, "running");
+    assert.equal(st.bars, 0, "实时 bars 从 0 开始");
+    assert.ok(st.warmupBars > 0, "预热历史 K 线已就绪");
+    assert.equal(st.trades.length, 0, "预热不产生成交");
+    assert.equal(st.liveTrading, false, "默认模拟成交不是实盘");
     assert.ok(st.metrics, "应产出指标");
     assert.ok(st.metrics!.finalEquity > 0);
-    assert.ok(st.equityCurve.length > 1, "应产出权益曲线（仪表盘靠它画图）");
-    assert.ok(st.bars > 0);
-    assert.equal(st.liveTrading, false, "回测永远不是实盘");
+
+    // 等第一根实时 K 线带来成交，权益曲线才有内容（仪表盘靠它画图）
+    const deadline = Date.now() + 15000;
+    while ((bots.state(bot.id).metrics?.totalFills ?? 0) === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const st2 = bots.state(bot.id);
+    assert.ok((st2.metrics?.totalFills ?? 0) > 0, "实时 K 线到来后应产生成交");
+    assert.ok(st2.equityCurve.length > 0, "应有权益曲线");
+    assert.ok(st2.bars > 0, "实时 bars 应推进");
+    bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

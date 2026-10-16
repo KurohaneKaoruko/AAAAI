@@ -5,6 +5,7 @@ import { useTheme } from "./lib/theme";
 import type { PageId } from "./components/Shell";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BotsPage } from "./pages/BotsPage";
+import { BacktestPage } from "./pages/BacktestPage";
 import { ExchangesPage } from "./pages/ExchangesPage";
 import { StrategyPage, type StrategyTab } from "./pages/StrategyPage";
 import { RiskPage } from "./pages/RiskPage";
@@ -42,6 +43,8 @@ export function App() {
         return <DashboardPage store={store} onNavigate={setPage} />;
       case "bots":
         return <BotsPage store={store} />;
+      case "backtest":
+        return <BacktestPage />;
       case "exchanges":
         return <ExchangesPage store={store} />;
       case "strategy":

@@ -13,7 +13,7 @@ import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
 import { getLogger } from "../core/logger.js";
 import { strategyFields, StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
-import type { Ticker } from "../exchanges/types.js";
+import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { LlmManager } from "../llm/llmManager.js";
@@ -167,6 +167,11 @@ export class EngineController {
 
   getConfig(): AppConfig {
     return this.config;
+  }
+
+  /** 取某个连接的行情/交易适配器（不存在会抛错）。回测与运行目标解析都用它。 */
+  adapter(connectionId: string): ExchangeAdapter {
+    return this.connections.adapter(connectionId);
   }
 
   private freshState(): EngineState {

@@ -73,6 +73,15 @@ export interface Pipeline {
   strategy: Strategy;
   /** 资产配置器（开启 self_allocating 或混合决策时非空） */
   allocator: AllocatorAgent | null;
+  /**
+   * 预热开关：true 时 K 线只进各 Agent 的缓冲区（指标该有的历史都有），
+   * 但**不决策、不下单、不留痕**。
+   *
+   * 为什么需要：实时机器人的统计必须来自它实时接到的每一根新 K 线。
+   * 若把一大段历史直接灌进流水线，启动瞬间就会产生几十笔"历史成交"——
+   * 那是回放，不是这个机器人在实时的作为，统计也就不可能用来衡量它的实时表现。
+   */
+  primeMode: boolean;
 }
 
 export function buildPipeline(
@@ -174,6 +183,9 @@ export function buildPipeline(
       config.strategy.maxGrossExposure,
     );
 
+  // 预热闸门：整条流水线共用一份开关
+  const prime = { mode: false };
+
   // 资产配置模式（AI 自己选资产）：混合决策下由「分析 -> 决策」产出权重；
   // 其余来源仍由对应模型直接给配置建议。
   const allocating = config.strategy.selfAllocating || hybrid;
@@ -194,9 +206,11 @@ export function buildPipeline(
       warmup: config.strategy.slowWindow,
       limits,
       allocator: assetAllocator,
-      // 留痕时把当时的价格一并记下，结算时才能算这段窗口的实际收益
+      // 留痕时把当时的价格一并记下，结算时才能算这段窗口的实际收益。
+      // 预热期间不留痕：那是在回放历史，不是这台机器人的实时决策。
       journal: options.journal
         ? (entry) => {
+            if (prime.mode) return;
             const refPrices: Record<string, number> = {};
             for (const symbol of Object.keys(entry.weights)) {
               const price = book.last(symbol);
@@ -205,6 +219,8 @@ export function buildPipeline(
             options.journal!.record({ ...entry, refPrices });
           }
         : undefined,
+      // 预热闸门：与 ORDER_INTENT 那道闸同一份开关
+      gate: () => prime.mode,
       // 混合决策在逐标的模式下也走这里：分析一次，然后逐标的让决策模型定档位
       perSymbolDecide:
         hybrid && !config.strategy.selfAllocating && soClient
@@ -256,12 +272,28 @@ export function buildPipeline(
           },
         });
 
-  // 执行层接入总线：订单意图 -> 券商 -> 成交广播
+  // 执行层接入总线：订单意图 -> 券商 -> 成交广播。
+  // 预热期（primeMode）一律不发单：历史只用来喂指标，不产生成交。
   bus.subscribe<OrderIntent>(Topic.ORDER_INTENT, async (e) => {
+    if (prime.mode) return;
     await broker.handle(e.payload);
   });
 
-  return { bus, book, portfolio, broker, strategy, allocator };
+  return {
+    bus,
+    book,
+    portfolio,
+    broker,
+    strategy,
+    allocator,
+    // 活引用：pipeline.primeMode = true 必须立刻对所有闸门生效
+    get primeMode(): boolean {
+      return prime.mode;
+    },
+    set primeMode(v: boolean) {
+      prime.mode = v;
+    },
+  };
 }
 
 /**

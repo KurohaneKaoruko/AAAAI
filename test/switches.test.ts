@@ -157,22 +157,33 @@ test("开关：是否请求模型只由 decision_source 决定（rules 时一次
         name: source === "rules" ? "量化" : "模型",
         decisionSource: source,
       });
-      // 让机器人用上这条策略：改机器人自己的决策来源
-      const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], mode: "backtest", barCount: 40, strategyId: profile.id });
+      // 让机器人用上这条策略：机器人是实时实体，每根实时 K 线才决策一次
+      const bot = bots.create({ name: "T", connectionId: conn.id, symbols: ["DEMO-BTC"], barCount: 40, pollMs: 60, strategyId: profile.id });
       const llm = (bots as unknown as { llm: LlmManager }).llm;
       llm.create({ label: "fake", kind: "chat", baseUrl: model.url, model: "fake", apiKey: "sk-test" });
       const st = await bots.start(bot.id);
-      return { error: st.error, status: st.status };
+      // 让几轮实时 K 线跑过（决策只发生在实时阶段，预热期不决策）
+      const deadline = Date.now() + 12000;
+      while (bots.state(bot.id).bars < 4 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      bots.stop(bot.id);
+      // 等在途请求落地：否则前一轮 chat 的尾包可能在下一轮采样后才到，
+      // 看起来就像"量化交易也调了模型"—— 那是采样时机问题，不是真调用。
+      await new Promise((r) => setTimeout(r, 400));
+      return { error: st.error, status: st.status, bars: bots.state(bot.id).bars };
     };
 
     const before = model.hits();
     const on = await run("chat");
+    assert.ok(on.bars >= 4, `应跑过多根实时 K 线（实际 ${on.bars}），否则这条前提没被真正检验`);
     assert.ok(model.hits() > before, "决策来源=对话模型时机器人应真的请求模型");
     assert.equal(on.error, null);
-    assert.equal(on.status, "stopped");
+    assert.equal(on.status, "running");
 
     const mid = model.hits();
     const off = await run("rules");
+    assert.ok(off.bars >= 4, `量化交易这一轮同样要跑过实时 K 线（实际 ${off.bars}）`);
     assert.equal(model.hits(), mid, "决策来源=量化交易时不得发出任何模型请求");
     assert.equal(off.error, null);
   } finally {
@@ -243,24 +254,25 @@ test("文案前提：改决策来源不会影响正在跑的机器人（所以�
       name: "T",
       connectionId: conn.id,
       symbols: ["DEMO-BTC"],
-      mode: "backtest",
       barCount: 40,
+      pollMs: 60,
       strategyId: s1.id,
     });
 
     await bots.start(bot.id);
     assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "rules", "这次跑的是量化策略");
+    bots.stop(bot.id);
+    assert.equal(bots.state(bot.id).metrics?.finalEquity !== undefined, true, "本次运行结果仍在");
 
     // 改策略本身：改完之后**下次启动**才生效，这次已跑完的结果不会被回溯改写
     strategies.update(s1.id, { decisionSource: "chat" });
     assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "chat", "策略实体已更新");
-    const before = bots.state(bot.id).metrics?.finalEquity;
-    assert.ok(before !== undefined, "已完成的运行结果仍在");
 
     // 再启动一次才会按新来源跑 —— 这正是「下次启动运行时生效」的意思
     const st2 = await bots.start(bot.id);
-    assert.equal(st2.status, "stopped");
+    assert.equal(st2.status, "running");
     assert.equal(bots.strategyOf(bots.get(bot.id)!).decisionSource, "chat");
+    bots.stop(bot.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
