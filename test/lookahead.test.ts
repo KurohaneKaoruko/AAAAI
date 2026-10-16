@@ -8,6 +8,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { EventBus, Topic } from "../src/core/eventBus.js";
 import { PriceBook, streamBars } from "../src/data/streaming.js";
 import { PaperBroker } from "../src/execution/paperBroker.js";
@@ -195,6 +198,40 @@ test("同标的未成交订单被新决策取代：否则叠单会打出反向�
 
   assert.equal(fills.length, 1, "只应保留最新的那一单");
   assert.equal(fills[0]!.qty, 5, "成交数量应等于最新决策的数量");
+});
+
+/** 递归收集 web/src 下的界面文案文件。 */
+function collectSources(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (["node_modules", "dist"].includes(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) collectSources(full, out);
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+test("文案与成交口径一致：界面不得说成交按收盘价撮合", () => {
+  // 行为由上面几条锁住；这条锁文案。用户是照着文案去核对每一笔成交的，
+  // 文案把口径说反（说成按收盘价成交），他就会把正确的行为当成 bug。
+  // 只扫界面目录：代码注释里讨论"为什么不能用收盘价"是正当的反例。
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "web", "src");
+  // 只认"正面断言"的说法，不用"成交…按收盘价"这种宽松模式 ——
+  // 「不按收盘价凑」是正确表述，宽松模式会把它也当成违规。
+  const falseClaims = [/按收盘价成交/, /按收盘价撮合/, /收盘价一次性撮合/];
+  const offenders: string[] = [];
+  for (const file of collectSources(root)) {
+    const text = readFileSync(file, "utf8");
+    for (const re of falseClaims) {
+      const hit = text.match(re);
+      if (hit) offenders.push(`${file.replace(root + "/", "")}: ${hit[0]}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "界面文案把成交口径说成了按收盘价，与 paperBroker「下一根开盘价成交」矛盾");
+
+  // 光"没有坏话"不算数：界面上必须正面说清口径，否则用户无从知道成交怎么来的
+  const backtest = readFileSync(join(root, "pages", "BacktestPage.tsx"), "utf8");
+  assert.match(backtest, /下一根 K 线的开盘价/, "回测页应正面写清「成交按下一根 K 线开盘价」");
 });
 
 test("不同标的的未成交订单互不取代", async () => {

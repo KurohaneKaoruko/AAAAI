@@ -171,9 +171,19 @@ export class EngineController {
     return this.config;
   }
 
-  /** 取某个连接的行情/交易适配器（不存在会抛错）。回测与运行目标解析都用它。 */
+  /** 取某个连接的适配器（不存在会抛错）。实时运行与行情刷新用它 —— 同一个世界。 */
   adapter(connectionId: string): ExchangeAdapter {
     return this.connections.adapter(connectionId);
+  }
+
+  /**
+   * 一次性历史运行（回测/对照）专用的独立实例。
+   *
+   * 它们会调用 `newScenario()` 掷一条新路径，不能掷在实时机器人正在用的那个
+   * 实例上（否则机器人行情出现断层）。见 ConnectionManager.independentAdapter。
+   */
+  independentAdapter(connectionId: string): ExchangeAdapter {
+    return this.connections.independentAdapter(connectionId);
   }
 
   private freshState(): EngineState {
@@ -346,7 +356,8 @@ export class EngineController {
       });
 
       const result = await runComparison(this.config, {
-        adapter: this.connections.adapter(target.connection.id),
+        // 独立实例：对照掷新路径，但不能掷到实时机器人脚下的行情上
+        adapter: this.connections.independentAdapter(target.connection.id),
         symbols: target.symbols,
         bars: options.bars ?? this.config.market.barCount,
         interval: options.interval ?? target.interval,

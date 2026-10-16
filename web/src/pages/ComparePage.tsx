@@ -68,6 +68,11 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
   /** 跑在随机行情上（模拟交易所）：此时"每次结果都不同"要说清楚，否则像 bug */
   const simulatedRunTarget = runTarget?.connectionAdapterId === "simulated";
 
+  // 非法种子宁可不认也不假装在复现（服务端也是这个口径）：界面必须说出来，
+  // 否则用户填了个错的种子、以为在复现某次名次，其实跑的是另一条路。
+  const seedInput = seedText.trim();
+  const seedOk = seedInput === "" || (Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0);
+
   const decisionInterval = Math.max(1, store.state?.config?.llm?.decisionInterval ?? 10);
   const modelRunners = participants.filter(
     (p) => picked.has(p.key) && !p.unavailable && p.decisionSource !== "rules",
@@ -191,6 +196,11 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
               onChange={(e) => setSeedText(e.target.value)}
               title="模拟行情每次对照都会掷一条新的随机路径，且所有选手共用这一条。想原样重跑某次结果，把当时显示的种子填到这里。"
             />
+            {!seedOk && (
+              <Notice tone="warn">
+                「{seedInput}」不是合法种子（要 0 或正整数）：这次会掷一条新路径，不是在复现。
+              </Notice>
+            )}
           </div>
           <div className="field">
             <span className="field-label">对照标的（来自候选池，服务端按连接解析）</span>
