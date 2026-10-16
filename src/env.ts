@@ -30,12 +30,5 @@ export function readEnv(name: string, fallback = ""): string {
   return process.env[envKey(name)] ?? fallback;
 }
 
-/** 读取第三方生态变量（原名，不加前缀）。 */
-export function readRawEnv(name: string, fallback = ""): string {
-  return process.env[name] ?? fallback;
-}
-
-/** 判断一个变量名是否为 AAAAI 自有配置项（带前缀）。 */
-export function isOwnEnv(name: string): boolean {
-  return name.startsWith(`${ENV_PREFIX}_`);
-}
+// 第三方生态变量（原名，不加前缀）请用 config.ts 的 fromEnv() ——
+// 这里不再提供第二份实现，免得"读环境变量"有两套写法。

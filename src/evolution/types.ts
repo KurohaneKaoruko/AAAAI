@@ -152,8 +152,6 @@ export const PARAM_RULES: Record<
   },
 };
 
-export const TUNABLE_PARAMS = Object.keys(PARAM_RULES);
-
 export function paramLabel(key: string): string {
   return PARAM_RULES[key]?.label ?? key;
 }

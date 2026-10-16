@@ -253,11 +253,10 @@ export function resolveRunners(keys: string[], deps: ParticipantDeps): RunnerSpe
   return runners;
 }
 
-/** 参赛者数量上限：再多流水线并行会互相拖慢，时间呈线性增长。 */
+/**
+ * 参赛者数量上限：再多流水线并行会互相拖慢，时间呈线性增长。
+ *
+ * 前端也写着同一个数字（勾选时先拦一道），两边必须一致 ——
+ * 否则界面让人勾、服务端却拒。test/bench.test.ts 盯着它们相等。
+ */
 export const MAX_RUNNERS = 6;
-
-/** 预计模型调用次数：只有需要模型的选手才计。 */
-export function estimateCalls(participants: Participant[], bars: number, decisionInterval: number): number {
-  const modelRunners = participants.filter((p) => !p.unavailable && p.decisionSource !== "rules").length;
-  return Math.floor(bars / Math.max(1, decisionInterval)) * modelRunners;
-}

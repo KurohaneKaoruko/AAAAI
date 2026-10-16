@@ -157,6 +157,27 @@ test("因子配置器：分数高的拿更多权重，且不突破额度", () =>
   assert.ok((tw.STRONG ?? 0) >= (tw.MID ?? 0), "强趋势权重不低于弱趋势");
 });
 
+test("因子配置器：拿不到正分就退成现金，而不是「等比分配」", () => {
+  // 界面文案曾写"因子/HRP 算不出权重 → 回退等比分配"，但代码里从来没有
+  // 等比兜底（optimizer 里那个 equalWithin 一直没人调用，已删）。
+  // 真实行为：没有标的拿到正分 → 权重为空 → 全额现金。这里钉住，文案照它写。
+  //
+  // 注意：因子分是横截面 z-score，只要有一个标的"相对更好"，它就会拿到正分。
+  // 所以要让所有人都不为正，得用两条一模一样的序列（相对彼此没有优势）。
+  const flat = bars(Array.from({ length: 60 }, () => 100));
+  const inputs: FactorInput[] = [
+    { symbol: "FLAT-A", bars: flat },
+    { symbol: "FLAT-B", bars: flat },
+  ];
+  const r = allocateByFactors(inputs, {
+    limits: { maxPositionWeight: 0.5, grossCap: 0.8 },
+    optimize: { method: "score", factorWeights: {}, targetVol: 0, minPositions: 0 },
+    grossCap: 0.8,
+  });
+  assert.deepEqual(r.result.weights, {}, `因子分都不为正时应空仓，实际 ${JSON.stringify(r.result.weights)}`);
+  assert.equal(r.result.cashWeight, 1, "空仓时现金应占满");
+});
+
 // ---------------------------------------------------------------- 组合优化
 
 test("组合优化：两资产 HRP 权重 = 逆方差比例（解析解 σA=20%、σB=10%）", () => {

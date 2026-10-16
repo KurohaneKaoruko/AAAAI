@@ -279,10 +279,3 @@ export function applyConstraints(
   for (const [s, w] of capped) out[s] = Number(w.toFixed(6));
   return out;
 }
-
-function equalWithin(symbols: string[], constraints: OptimizeConstraints): Record<string, number> {
-  const w = Math.min(constraints.maxPositionWeight, constraints.grossCap / Math.max(1, symbols.length));
-  const out: Record<string, number> = {};
-  for (const s of symbols) if (w > 0) out[s] = Number(w.toFixed(6));
-  return out;
-}
