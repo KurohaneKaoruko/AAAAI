@@ -201,7 +201,7 @@ test("机器人：坏配置给出明确报错，删除后不再保留", async ()
   const { dir, bots, connectionId } = setup();
   try {
     assert.throws(() => bots.create({ name: "", connectionId, symbols: ["DEMO-BTC"] }), /名称/);
-    assert.throws(() => bots.create({ name: "X", connectionId, symbols: [] }), /标的/);
+    // 不校验"没选标的"：这个连接是模拟交易所，标的是它自带的（见 connections.test.ts）
     assert.throws(
       () => bots.create({ name: "X", connectionId: "nope", symbols: ["DEMO-BTC"] }),
       /连接不存在/,

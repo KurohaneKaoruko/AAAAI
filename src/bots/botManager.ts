@@ -464,14 +464,57 @@ export class BotManager {
     return this.bots.find((b) => b.id === id);
   }
 
+  /**
+   * 交易所自带的标的集合（模拟交易所）；不是这种交易所时返回空数组。
+   * 这种交易所的机器人不需要用户选标的：用它的自带清单。
+   */
+  private builtinSymbolsOf(connectionId: string): string[] {
+    try {
+      const meta = this.connections.adapter(connectionId).meta;
+      if (!meta.builtinSymbols) return [];
+      return (meta.defaultSymbols ?? []).map((s) => s.symbol);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 把「自带标的的连接」上那些标的对不上的机器人拉齐到自带清单。
+   *
+   * 这种连接的标的是交易所编出来的：老机器人可能存着自带清单里的两个、或者别的代码，
+   * 在界面上既选不了也改不了（那里根本没有挑标的这一步），留着就是一份谁也管不到的
+   * 隐藏配置。启动时统一成自带清单，并写日志说明改了谁。
+   */
+  normalizeBuiltinSymbols(): void {
+    let changed = 0;
+    for (const bot of this.bots) {
+      const builtin = this.builtinSymbolsOf(bot.connectionId);
+      if (builtin.length === 0) continue;
+      if (builtin.length === bot.symbols.length && builtin.every((s) => bot.symbols.includes(s))) continue;
+      log.info(
+        "机器人「%s」在自带标的的连接上，标的 %s → %s（自带清单）",
+        bot.name,
+        bot.symbols.join(",") || "（空）",
+        builtin.join(","),
+      );
+      bot.symbols = builtin;
+      changed += 1;
+    }
+    if (changed > 0) this.persist();
+  }
+
   create(input: BotInput): BotView {
     if (this.bots.length >= 12) {
       throw new Error("机器人数量已达上限（12），避免误开过多并行任务");
     }
     if (!input.name.trim()) throw new Error("请填写机器人名称");
-    if (!input.symbols || input.symbols.length === 0) throw new Error("请至少选择一个标的");
     const connection = this.connections.get(input.connectionId);
     if (!connection) throw new Error(`连接不存在: ${input.connectionId}`);
+    // 自带标的的交易所（模拟交易所）不用选标的：直接用交易所自带的那套。
+    // 行情本来就是它编的，让用户先配一套代码才能开跑没有意义。
+    const symbols =
+      input.symbols && input.symbols.length > 0 ? input.symbols : this.builtinSymbolsOf(input.connectionId);
+    if (symbols.length === 0) throw new Error("请至少选择一个标的");
 
     // 没给策略 id 就按传入参数新建一条：机器人永远引用一条真实存在的策略，
     // 不会出现「填了窗口却被忽略」的假配置。
@@ -497,7 +540,7 @@ export class BotManager {
       name: input.name.trim(),
       enabled: input.enabled ?? true,
       connectionId: input.connectionId,
-      symbols: input.symbols,
+      symbols,
       mode: input.mode ?? "live",
       interval: input.interval ?? this.config.market.interval,
       barCount: input.barCount ?? this.config.market.barCount,
@@ -544,7 +587,13 @@ export class BotManager {
     if (patch.symbols !== undefined && patch.symbols.length > 0) bot.symbols = patch.symbols;
     if (patch.connectionId !== undefined) {
       if (!this.connections.get(patch.connectionId)) throw new Error(`连接不存在: ${patch.connectionId}`);
+      const switched = patch.connectionId !== bot.connectionId;
       bot.connectionId = patch.connectionId;
+      // 换到自带标的的交易所（模拟交易所）：旧标的属于旧交易所，换成它自带的
+      if (switched && (patch.symbols === undefined || patch.symbols.length === 0)) {
+        const builtin = this.builtinSymbolsOf(patch.connectionId);
+        if (builtin.length > 0) bot.symbols = builtin;
+      }
     }
     if (patch.mode !== undefined) bot.mode = patch.mode;
     if (patch.paperTrading !== undefined) bot.paperTrading = patch.paperTrading;
@@ -599,6 +648,10 @@ export class BotManager {
     const bot = this.get(id);
     if (!bot) throw new Error(`机器人不存在: ${id}`);
     if (this.isRunning(id)) throw new Error(`机器人「${bot.name}」已在运行`);
+    if (!bot.symbols.length) {
+      // 自带标的的交易所（模拟交易所）不用选：补上它自带的清单
+      bot.symbols = this.builtinSymbolsOf(bot.connectionId);
+    }
     if (!bot.symbols.length) throw new Error(`机器人「${bot.name}」没有标的`);
 
     const adapter: ExchangeAdapter = this.connections.adapter(bot.connectionId);

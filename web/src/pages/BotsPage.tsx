@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
-import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
+import type { Bot, BotAllocation, BotInput, Connection, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { StrategyPicker, describe } from "../components/StrategyProfiles";
@@ -157,6 +157,7 @@ export function BotsPage({
               <BotCard
                 key={b.id}
                 bot={b}
+                builtin={usesOnlyBuiltinSymbols(store.connections.find((c) => c.id === b.connectionId), b.symbols)}
                 strategies={strategies}
                 busy={busyId === b.id}
                 onStart={() => void start(b.id)}
@@ -182,8 +183,21 @@ export function BotsPage({
   );
 }
 
+/**
+ * 这台机器人的标的就完全是交易所自带的那一套（模拟交易所）？
+ *
+ * 只有在"确实一样"时才说「交易所自带」：老机器人可能只用了自带清单里的两个，
+ * 那时说「自带」就成了假话 —— 卡片上写的必须能在详情页对得上。
+ */
+function usesOnlyBuiltinSymbols(conn: Connection | undefined, symbols: string[]): boolean {
+  if (!conn?.adapter?.builtinSymbols) return false;
+  const codes = (conn.adapter.defaultSymbols ?? []).map((s) => s.symbol);
+  return codes.length > 0 && codes.length === symbols.length && codes.every((c) => symbols.includes(c));
+}
+
 function BotCard({
   bot,
+  builtin,
   strategies,
   busy,
   onStart,
@@ -194,6 +208,8 @@ function BotCard({
   onOpenDetail,
 }: {
   bot: Bot;
+  /** 连接自带标的（模拟交易所）：不列标的 —— 那几个代码跟用户的选择没关系 */
+  builtin: boolean;
   strategies: StrategyProfile[];
   busy: boolean;
   onStart: () => void;
@@ -253,7 +269,11 @@ function BotCard({
       </div>
 
       <div className="bot-meta">
-        <span><em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b></span>
+        {builtin ? (
+          <span><em>标的</em> <b className="mono">交易所自带</b></span>
+        ) : (
+          <span><em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b></span>
+        )}
         <span>
           <em>模型</em>{" "}
           <b>{bot.modelLabels.length > 0 ? bot.modelLabels.join(bot.decisionSource === "hybrid" ? " → " : " / ") : "未选择"}</b>
@@ -476,11 +496,17 @@ function BotForm({
   const [popular, setPopular] = useState<PopularSymbol[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * 自带标的的交易所（模拟交易所）：标的由交易所定，界面上不出现"挑标的"这一步。
+   * 服务端建机器人时也会自动补上这套，所以这里不选也照样能建。
+   */
+  const connBuiltin = connections.find((c) => c.id === connectionId)?.adapter?.builtinSymbols ?? false;
 
   useEffect(() => {
-    if (!connectionId) return;
+    // 自带标的的连接不用拉"常用清单"：那几个代码不是给人挑的
+    if (!connectionId || connBuiltin) return;
     void api.popular(connectionId, 24).then((d) => setPopular(d.symbols)).catch(() => setPopular([]));
-  }, [connectionId]);
+  }, [connectionId, connBuiltin]);
 
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   // 实时 ≠ 实盘：是否真下单取决于「风控」页的执行方式
@@ -580,7 +606,13 @@ function BotForm({
       </div>
 
       <div className="symbol-picker">
-        <div className="symbol-picker-head">运行标的（可多选）</div>
+        <div className="symbol-picker-head">运行标的{connBuiltin ? "" : "（可多选）"}</div>
+        {connBuiltin ? (
+          <div className="dim small">
+            这个交易所自带行情与标的（模拟交易所），不用挑：开跑时直接用它的自带清单。
+            想看它用的是哪几个代码，去「策略 → 候选池」页。
+          </div>
+        ) : (
         <div className="chip-row">
           {[...new Set([...connSymbols, ...popular.map((p) => p.symbol)])].map((s) => (
             <button
@@ -598,6 +630,7 @@ function BotForm({
             <span className="dim small">该连接的候选池为空，请先到「策略 → 候选池」添加</span>
           )}
         </div>
+        )}
       </div>
 
       {modelKinds.length > 0 && (
@@ -658,11 +691,16 @@ function BotForm({
         <NumberField label="回撤熔断" hint={pct(maxDD, 0)} value={maxDD} step={0.01} min={0.01} max={1} onChange={setMaxDD} />
       </div>
 
-      {symbols.length === 0 && <Notice tone="warn">请至少选择一个标的</Notice>}
+      {!connBuiltin && symbols.length === 0 && <Notice tone="warn">请至少选择一个标的</Notice>}
       {err && <Notice tone="error">{err}</Notice>}
 
       <div className="btn-row">
-        <Button variant="primary" onClick={submit} busy={busy} disabled={!name.trim() || symbols.length === 0}>
+        <Button
+          variant="primary"
+          onClick={submit}
+          busy={busy}
+          disabled={!name.trim() || (!connBuiltin && symbols.length === 0)}
+        >
           {editing ? "保存" : "创建机器人"}
         </Button>
         <Button onClick={onDone}>取消</Button>

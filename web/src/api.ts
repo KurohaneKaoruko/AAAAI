@@ -59,7 +59,8 @@ export const api = {
   /** 历史模拟（回测）：跑一段真实历史，一次性返回战绩。不属于任何机器人。 */
   runBacktest: (body: {
     connectionId: string;
-    symbols: string[];
+    /** 自带标的的交易所（模拟交易所）可以不传：服务端按连接解析 */
+    symbols?: string[];
     strategyId: string;
     interval?: string;
     barCount?: number;

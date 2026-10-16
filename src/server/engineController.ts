@@ -59,6 +59,11 @@ export interface RunTarget {
   symbols: string[];
   /** 解析不出标的时的原因（能跑则为 null） */
   error: string | null;
+  /**
+   * 标的由交易所自带（模拟交易所），用户不需要选。
+   * 界面据此不再展示/要求挑选标的 —— 选出来的东西跟模拟行情无关。
+   */
+  symbolsBuiltIn: boolean;
 }
 
 export type Broadcast = { type: "state"; data: EngineState };
@@ -164,6 +169,10 @@ export class EngineController {
   }
 
   snapshot(): EngineState {
+    // runTarget 是派生值，每次现算：连接和候选池随时会变，存一份就会出现
+    // 「界面说跑不了、其实能跑」—— 首次启动时连接是在控制器建好之后才创建的，
+    // 存下来的那份永远停在"尚未配置任何交易所连接"。
+    this.state.runTarget = this.safeRunTarget();
     return { ...this.state, config: redactConfig(this.config) };
   }
 
@@ -205,14 +214,19 @@ export class EngineController {
 
   /** 拉取候选池行情（页面顶栏 ticker）。 */
   async refreshTickers(): Promise<Ticker[]> {
-    const items = this.watchlist.list();
-    if (items.length === 0) return this.state.tickers;
     const byConnection = new Map<string, string[]>();
-    for (const item of items) {
+    // 自带标的的交易所（模拟交易所）不用先加候选池：它的标的自己就有，
+    // 顶栏照样能看到行情在动 —— 不然"模拟交易所"看起来像坏的。
+    for (const c of this.connections.list()) {
+      const builtin = this.builtinSymbolsOf(c.id);
+      if (builtin.length > 0) byConnection.set(c.id, builtin);
+    }
+    for (const item of this.watchlist.list()) {
       const list = byConnection.get(item.connectionId) ?? [];
-      list.push(item.symbol);
+      if (!list.includes(item.symbol)) list.push(item.symbol);
       byConnection.set(item.connectionId, list);
     }
+    if (byConnection.size === 0) return this.state.tickers;
     const out: Ticker[] = [];
     for (const [connectionId, symbols] of byConnection) {
       try {
@@ -265,6 +279,10 @@ export class EngineController {
 
   private resolveSymbols(connectionId: string, requested?: string[]): string[] {
     if (requested && requested.length > 0) return requested;
+    // 自带标的的交易所（模拟交易所）：标的由交易所定，候选池对它无效。
+    // 行情都是它自己编的，还要人先配一套标的代码才能跑，纯属多余。
+    const builtin = this.builtinSymbolsOf(connectionId);
+    if (builtin.length > 0) return builtin;
     const fromConfig = this.config.market.symbols.filter(Boolean);
     if (fromConfig.length > 0) return fromConfig;
     const fromWatchlist = this.watchlist
@@ -272,7 +290,18 @@ export class EngineController {
       .filter((w) => w.connectionId === connectionId)
       .map((w) => w.symbol);
     if (fromWatchlist.length > 0) return fromWatchlist;
-    throw new Error("没有可运行的标的：请在「策略 → 候选池」添加，或在运行面板手动输入");
+    throw new Error("没有可运行的标的：请在「策略 → 候选池」添加，或换一个自带标的的交易所（模拟交易所）");
+  }
+
+  /** 交易所自带的标的集合；不是这种交易所（或取不到）时返回空数组。 */
+  private builtinSymbolsOf(connectionId: string): string[] {
+    try {
+      const meta = this.connections.adapter(connectionId).meta;
+      if (!meta.builtinSymbols) return [];
+      return (meta.defaultSymbols ?? []).map((s) => s.symbol);
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -303,6 +332,7 @@ export class EngineController {
         interval: t.interval,
         symbols: t.symbols,
         error: null,
+        symbolsBuiltIn: this.builtinSymbolsOf(t.connection.id).length > 0,
       };
     } catch (err) {
       return {
@@ -312,6 +342,7 @@ export class EngineController {
         interval: this.config.market.interval,
         symbols: [],
         error: (err as Error).message,
+        symbolsBuiltIn: false,
       };
     }
   }

@@ -95,6 +95,14 @@ export interface AdapterMeta {
   notes?: string[];
   /** 常用标的清单：供「一键选取」用，无需输入关键词 */
   defaultSymbols?: SymbolInfo[];
+  /**
+   * 标的由交易所自己决定，用户不需要（界面上也不该）挑选。
+   *
+   * 模拟交易所就是这种：行情是本地编的，让用户先去候选池里配一套代码
+   * 纯属多余 —— 他和什么标的交易根本没有关系。这种连接的标的集合
+   * 一律取 `defaultSymbols`，候选池对它无效。
+   */
+  builtinSymbols?: boolean;
 }
 
 export interface KeyField {

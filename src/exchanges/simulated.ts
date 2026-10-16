@@ -168,8 +168,11 @@ export class SimulatedAdapter implements ExchangeAdapter {
     klineIntervals: ["1s", "5s", "15s", "30s", "1m", "5m", "15m", "1h", "4h", "1d"],
     keyFields: [],
     defaultSymbols: DEMO_SYMBOLS,
+    // 标的由交易所自己定：候选池里没有它要配置的东西
+    builtinSymbols: true,
     notes: [
       "无需密钥",
+      "标的由模拟交易所自带（不用在候选池里挑）",
       "每次历史模拟都掷一条新的随机路径（同一根 K 线不会每回都长一样）",
       "同一情景内取数自洽：同一时刻反复取必得同一根 K 线",
       "结果里带情景种子，想复现某次结果就用同一个种子重跑（配合同一时刻）",
