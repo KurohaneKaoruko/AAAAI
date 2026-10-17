@@ -144,11 +144,11 @@ export async function runBacktest(
   }
 
   log.info(
-    "回测 %s %s %d 根: 权益 %.2f 成交 %d",
+    "回测 %s %s %d 根: 权益 %s 成交 %d",
     input.symbols.join(","),
     input.interval,
     bars.length,
-    m.finalEquity,
+    m.finalEquity.toFixed(2),
     m.totalFills,
   );
 

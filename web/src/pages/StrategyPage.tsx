@@ -49,7 +49,7 @@ const AGENTS: AgentNode[] = [
 function sourceHint(form: { decisionSource: DecisionSource; hybridInfluence?: number }): string {
   switch (form.decisionSource) {
     case "rules":
-      return "量化交易：本地算指标与仓位，完全不调用模型。快慢线交叉定方向，因子打分定强弱。";
+      return "量化交易：本地算指标与仓位，完全不调用模型。快慢均线差按噪声归一（趋势强度低于噪声不进场），因子打分定强弱。";
     case "chat":
       return "对话模型：把最近 20 根 K 线交给大模型，由它给 0~1 的目标仓位；失败自动回退量化基线。";
     case "systemone":

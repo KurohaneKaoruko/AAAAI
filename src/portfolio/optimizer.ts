@@ -241,7 +241,11 @@ export function applyVolTarget(
   const scale = Math.min(options.targetVol / currentVol, options.maxLeverage ?? 1);
   const scaled: Record<string, number> = {};
   for (const s of symbols) scaled[s] = (weights[s] ?? 0) * scale;
-  log.debug("波动率目标：当前 %.2f%% -> 缩放系数 %.2f", currentVol * 100, scale);
+  log.debug(
+    "波动率目标：当前 %s%% -> 缩放系数 %s",
+    (currentVol * 100).toFixed(2),
+    scale.toFixed(3),
+  );
   return applyConstraints(scaled, options);
 }
 
