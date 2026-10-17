@@ -670,7 +670,7 @@ function BotForm({
           <strong>本机器人将使用策略「{chosen.name}」</strong>
           <p>
             {chosen.decisionSource === "rules"
-              ? `量化交易：双均线 ${chosen.fastWindow}/${chosen.slowWindow}，目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}，不调用任何模型。`
+              ? `量化交易：双均线 ${chosen.fastWindow}/${chosen.slowWindow}，趋势强度按噪声归一（弱于噪声不进场），目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}，不调用任何模型。`
               : `${chosen.decisionSource === "hybrid" ? "混合决策" : chosen.decisionSource === "chat" ? "对话模型" : "决策模型"}；` +
                 (chosen.selfAllocating
                   ? `由 AI 在候选池里自选资产（最多 ${chosen.maxPositions} 个、总仓位 ${pct(chosen.maxGrossExposure, 0)}，每 ${chosen.allocationInterval} 轮配置一次）。`

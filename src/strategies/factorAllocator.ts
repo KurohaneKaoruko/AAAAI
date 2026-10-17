@@ -150,6 +150,11 @@ function maybeVolTarget(
     options.optimize.covariance,
   );
   const after = portfolioVolatility(adjusted, returns, 252, options.optimize.covariance);
-  log.debug("波动率目标：%.2f%% -> %.2f%%（目标 %.2f%%）", current * 100, after * 100, targetVol * 100);
+  log.debug(
+    "波动率目标：%s%% -> %s%%（目标 %s%%）",
+    (current * 100).toFixed(2),
+    (after * 100).toFixed(2),
+    (targetVol * 100).toFixed(2),
+  );
   return adjusted;
 }

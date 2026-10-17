@@ -18,7 +18,6 @@ import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import { listAdapterMetas } from "../exchanges/registry.js";
 import { serializeConfig } from "../configSchema.js";
 import { fromEnv } from "../config.js";
-import { listAdapterMetas as _unused } from "../exchanges/registry.js";
 import type { WatchlistManager } from "../watchlist.js";
 import type { AuthService } from "../auth/auth.js";
 import type { BotManager } from "../bots/botManager.js";
@@ -28,6 +27,7 @@ import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
 import type { StrategyProfileInput } from "../strategies/profileStore.js";
 import { robustness, walkForward } from "../validation/walkForward.js";
+import { runWinRate } from "../validation/winRate.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
@@ -454,6 +454,47 @@ export function createServer(controller: EngineController, options: ServerOption
 
   /** 模拟对照的参赛者清单（机器人 / 策略 / 模型 / 基线，含不可用原因） */
   app.get("/api/bench/participants", (_req, res) => ok(res, { participants: controller.listParticipants() }));
+
+  /**
+   * 多情景胜率：同一策略掷 N 条随机路径，统计正收益率场景占比。
+   *
+   * 只在模拟交易所上有意义（真实行情给不出「不同场景」），其余连接直接拒绝。
+   */
+  app.post("/api/validation/win-rate", async (req, res) => {
+    const body = (req.body ?? {}) as {
+      connectionId?: string;
+      strategyId?: string;
+      symbols?: string[];
+      interval?: string;
+      barCount?: number;
+      scenarios?: number;
+      seed?: number;
+    };
+    if (!body.connectionId) return fail(res, new Error("缺少 connectionId"), 400);
+    try {
+      const profile = body.strategyId
+        ? bots.strategyList().find((p) => p.id === body.strategyId)
+        : bots.strategyList().find((p) => p.id === controller.defaultStrategyId());
+      if (!profile) return fail(res, new Error("策略不存在"), 400);
+      const symbols =
+        Array.isArray(body.symbols) && body.symbols.length > 0
+          ? body.symbols
+          : controller.resolveRunTarget(body.connectionId).symbols;
+      // 独立实例：每条路径都要 newScenario，不能掷在实时机器人正用的实例上
+      const adapter = controller.independentAdapter(body.connectionId);
+      const report = await runWinRate(controller.getConfig(), adapter, profile, symbols, {
+        interval: body.interval ?? "1m",
+        barCount: Math.max(60, Math.min(1000, Math.floor(body.barCount ?? 200))),
+        scenarios: Math.max(2, Math.min(200, Math.floor(body.scenarios ?? 24))),
+        ...(parseScenarioSeed(body.seed) !== undefined
+          ? { seed: parseScenarioSeed(body.seed) }
+          : {}),
+      });
+      ok(res, report);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
 
   /**
  * 解析"复现用情景种子"。

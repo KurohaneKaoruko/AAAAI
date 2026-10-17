@@ -144,6 +144,28 @@ export const api = {
       avgGap: number;
       oosPositiveRatio: number;
     }>(`/api/validation/walk-forward${symbols?.length ? `?symbols=${symbols.join(",")}` : ""}`),
+  scenarioWinRate: (input: {
+    connectionId: string;
+    strategyId?: string;
+    symbols?: string[];
+    interval?: string;
+    barCount?: number;
+    scenarios?: number;
+    seed?: number;
+  }) =>
+    request<{
+      scenarios: number;
+      interval: string;
+      barCount: number;
+      winRate: number;
+      medianReturn: number;
+      worstReturn: number;
+      bestReturn: number;
+      avgReturn: number;
+      outcomes: { seed: number; returnPct: number; positive: boolean; maxDrawdownPct: number; fills: number }[];
+      byRegime: { regime: string; runs: number; positiveRuns: number; medianReturn: number; worstReturn: number }[];
+      seed: number;
+    }>("/api/validation/win-rate", { method: "POST", body: JSON.stringify(input) }),
 
   // 新闻情报
   news: () => request<{ items: NewsItem[]; status: NewsStatus }>("/api/news"),
