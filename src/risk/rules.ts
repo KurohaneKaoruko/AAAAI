@@ -51,4 +51,17 @@ export class RiskRules {
     if (Math.abs(deltaValue) > cap) return deltaValue > 0 ? cap : -cap;
     return deltaValue;
   }
+
+  /**
+   * 现金账户约束：买单最多花掉手上的现金。卖单不受影响（卖出只会回笼现金）。
+   *
+   * 为什么留 1%：信号在收盘算出，成交在下一根开盘，中间有滑点与手续费。
+   * 全部按现金花满，成交时几乎必然差一点点。真正的兜底在券商成交时
+   * （模拟券商按可用现金把买单收缩到付得起的量，零头都买不起才拒单）——
+   * 这里先收缩，只是不让「注定只剩零头」的整单反反复复堆进队列。
+   */
+  clampBuyToCash(deltaValue: number, cash: number): number {
+    if (deltaValue <= 0) return deltaValue;
+    return Math.min(deltaValue, Math.max(0, cash) * 0.99);
+  }
 }

@@ -32,13 +32,15 @@ export class RiskGuardAgent extends Agent {
     const decision = this.rules.check(signal, equity, this.portfolio.drawdownPct);
     if (!decision.allowed) {
       logger.info("信号被拦截 %s: %s", signal.symbol, decision.reason);
-      this.bus.publish(Topic.ORDER_REJECTED, signal);
+      // 拒单事件带上「为什么被拦」：光有信号本身，面板上只能说"这个信号被拒"，
+      // 看不出是哪条风控拦的 —— 回撤熔断与权重越界的处理方式完全不同。
+      this.bus.publish(Topic.ORDER_REJECTED, { ...signal, reason: decision.reason });
       return;
     }
 
     const price = this.book.last(signal.symbol);
     if (price === undefined) {
-      this.bus.publish(Topic.ORDER_REJECTED, signal);
+      this.bus.publish(Topic.ORDER_REJECTED, { ...signal, reason: "无行情价格，无法下单" });
       return;
     }
 
@@ -51,7 +53,10 @@ export class RiskGuardAgent extends Agent {
       logger.debug("调仓金额 %s 低于最小调仓额，忽略", rawDelta.toFixed(2));
       return;
     }
-    const deltaValue = this.rules.clampDeltaValue(rawDelta);
+    // 先截单笔上限，再按现金账户约束收缩买单：
+    // 现金花完时的买单直接没了（低于 1 个单位即跳过），既不产生永远成交不了的
+    // 排队单，也不会让现金透支 —— 真实现金账户里本来也买不了。
+    const deltaValue = this.rules.clampBuyToCash(this.rules.clampDeltaValue(rawDelta), this.portfolio.cash);
 
     // 调仓金额不足 1 个单位则跳过，避免噪声单
     if (Math.abs(deltaValue) < price) return;

@@ -251,6 +251,55 @@ async function pump(bus: EventBus, n: number, close = 100, volume = 1000): Promi
   }
 }
 
+test("现金账户：模拟券商买单买不起全额按可用现金成交，绝不透支", async () => {
+  const bus = new EventBus();
+  const book = new PriceBook();
+  let cash = 1000;
+  const broker = new PaperBroker(bus, book, { feeRate: 0.001, slippageBps: 0, availableCash: () => cash });
+  const fills = collect(bus);
+  const rejects: { symbol?: string; reason?: string }[] = [];
+  bus.subscribe(Topic.ORDER_REJECTED, (e) => rejects.push(e.payload as { symbol?: string; reason?: string }));
+  // 按组合经理的口径同步记账：成交后现金就是成交额加手续费，与真实记账同一公式
+  bus.subscribe<Fill>(Topic.FILL, (e) => {
+    const f = e.payload;
+    const notional = Math.abs(f.order.quantity) * f.price;
+    cash += (f.order.side === "BUY" ? -notional : notional) - f.fee;
+  });
+
+  book.update(bar("X", 100));
+  // 想买 20 股 = 2000 元，手上只有 1000：收缩到付得起的量，成交后现金归零、绝不为负
+  await broker.handle(intent({ quantity: 20, side: "BUY" }));
+  await pump(bus, 1);
+  assert.equal(fills.length, 1, "买不起全额不等于不成交：按付得起的量成交（买单=把这笔钱投进去）");
+  assert.ok(
+    fills[0]!.order.quantity > 9 && fills[0]!.order.quantity < 10,
+    `成交数量应约等于 1000/(100×1.001)，实际 ${fills[0]!.order.quantity}`,
+  );
+  assert.ok(cash >= 0 && cash < 0.01, `成交后现金应归零且不为负，实际 ${cash}`);
+  assert.equal(rejects.length, 0, "还有零头可买时不拒单");
+
+  // 现金归零后的买单才拒单（连一个零头都买不起）
+  await broker.handle(intent({ quantity: 1, side: "BUY" }));
+  await pump(bus, 1);
+  assert.equal(fills.length, 1, "现金为零时买单不成交");
+  assert.equal(rejects.length, 1, "拒单要发事件：界面得能说明为什么没买上");
+  assert.match(String(rejects[0]!.reason), /现金不足/);
+
+  // 卖单不受现金约束（卖出只会回笼现金）
+  await broker.handle(intent({ quantity: 3, side: "SELL" }));
+  await pump(bus, 1);
+  assert.equal(fills.length, 2, "卖单不查现金");
+  assert.equal(rejects.length, 1, "卖单没有被拦");
+
+  // 买得起全额的买单原样成交，且现金始终不为负
+  cash = 1000;
+  await broker.handle(intent({ quantity: 5, side: "BUY" }));
+  await pump(bus, 1);
+  assert.equal(fills.length, 3, "买得起的单照常成交");
+  assert.equal(fills[2]!.order.quantity, 5, "付得起全额就按原量成交");
+  assert.ok(cash >= 0, `成交后现金不允许为负，实际 ${cash}`);
+});
+
 test("PaperBroker 拆单：总量、方向不变，但分片成交", async () => {
   const bus = new EventBus();
   const book = new PriceBook();

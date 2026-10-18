@@ -264,6 +264,9 @@ export function buildPipeline(
           impactK: config.cost.impactK,
           maxSlippageBps: config.cost.maxSlippageBps,
           interval: config.market.interval,
+          // 现金账户语义：模拟成交与真实券商同一道底线 —— 花不起的钱买不了。
+          // 借款上线时要改这里（现实里融资账户才允许现金为负）。
+          availableCash: () => portfolio.cash,
           slicing: {
             algo: config.execution.slicingAlgo,
             slices: config.execution.slicingSlices,
