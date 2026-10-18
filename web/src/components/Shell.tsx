@@ -17,7 +17,8 @@ export type PageId =
   | "llm"
   | "compare"
   | "risk"
-  | "system";
+  | "system"
+  | "settings";
 
 // 分组即心智：交易 = 现在就要动手的（跑机器人、连交易所）；
 // 智能 = 动手之前的准备与复盘（策略、模型、让它们同场比一比、拿历史先验一验）。
@@ -31,7 +32,8 @@ const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "compare", label: "模拟对照", icon: "⇆", group: "智能" },
   { id: "backtest", label: "历史模拟", icon: "⏱", group: "智能" },
   { id: "risk", label: "风控", icon: "⛨", group: "系统" },
-  { id: "system", label: "系统与日志", icon: "⚙", group: "系统" },
+  { id: "system", label: "系统与日志", icon: "☰", group: "系统" },
+  { id: "settings", label: "设置", icon: "⚙", group: "系统" },
 ];
 
 export function Sidebar({

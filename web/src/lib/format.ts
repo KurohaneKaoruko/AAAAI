@@ -1,7 +1,20 @@
 /** 格式化工具。 */
 
-export const money = (v: number, digits = 2): string =>
-  v.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+import { getDisplayPrefs } from "./display";
+
+/**
+ * 金额格式化。
+ *
+ * 设了「价格符号」（设置页）就加在最前面；不设时与从前逐字节一致 ——
+ * 这是「这个设置只改显示」这句话能被核对的前提。
+ * 负数把符号插在减号与数字之间：-¥5.00，而不是 ¥-5.00。
+ */
+export const money = (v: number, digits = 2): string => {
+  const body = v.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const symbol = getDisplayPrefs().priceSymbol;
+  if (!symbol) return body;
+  return body.startsWith("-") ? `-${symbol}${body.slice(1)}` : `${symbol}${body}`;
+};
 
 export const pct = (v: number, digits = 2): string => `${(v * 100).toFixed(digits)}%`;
 
