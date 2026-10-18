@@ -26,8 +26,8 @@ export class MomentumStrategy implements Strategy {
   readonly warmup: number;
 
   constructor(
-    private readonly fast = 5,
-    private readonly slow = 20,
+    private readonly fast = 2,
+    private readonly slow = 8,
     private readonly maxWeight = 0.5,
   ) {
     if (fast <= 0 || slow <= 0 || fast >= slow) {

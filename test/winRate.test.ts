@@ -262,3 +262,39 @@ test("现金账户：组合口径不可能亏穿本金（模拟不提供融资�
   );
   assert.ok(report.worstReturn < 0, "这段窗口应当有亏损路径 —— 否则该用例测不到穿负的边界");
 });
+
+test("默认策略参数：五走向组合在标准口径下全部为正（默认退化会先在这里变红）", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aaaaai-winrate-def-"));
+  try {
+    // 不填窗口 = 用产品默认参数（2/8）。这里锁的是「默认值本身的质量」：
+    // 完整测量表在 docs/architecture.md「设计取舍 · 默认策略参数」，
+    // 同口径实测中位 ~75%、最差 ~59%；下限留足余量，防止哪天悄悄退化回旧默认。
+    const store = new StrategyStore(dir);
+    const profile = store.create({ name: "默认策略" });
+    assert.equal(profile.fastWindow, 2);
+    assert.equal(profile.slowWindow, 8);
+
+    const report = await runWinRate(
+      testConfig(),
+      testAdapter(),
+      profile,
+      ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"],
+      { scenarios: 8, interval: "1m", barCount: 200, seed: 20261018, perRegime: false },
+    );
+    assert.equal(
+      report.positiveRuns,
+      report.scenarios,
+      `默认参数应全为正收益（实际 ${report.positiveRuns}/${report.scenarios}）`,
+    );
+    assert.ok(
+      report.medianReturn > 0.3,
+      `默认参数的中位收益不该低于 30%（实际 ${(report.medianReturn * 100).toFixed(1)}%）`,
+    );
+    assert.ok(
+      report.worstReturn > 0.1,
+      `默认参数的最差路径不该低于 10%（实际 ${(report.worstReturn * 100).toFixed(1)}%）`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

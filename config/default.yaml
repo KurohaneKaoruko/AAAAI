@@ -58,8 +58,10 @@ strategy:
   #                决策模型拿这份分析定仓位；两步职责分离
   decision_source: rules
   name: llm-momentum         # momentum = 纯动量 | llm-momentum = 模型决策+动量兜底
-  fast_window: 5             # 快线窗口
-  slow_window: 20            # 慢线窗口（须大于快线）
+  # 窗口默认 2/8：在多情景胜率上扫窗口网格实测选出的平台中值（不是「经典 5/20」）。
+  # 依据、判定规则与测量表见 docs/architecture.md「设计取舍 · 默认策略参数」。
+  fast_window: 2             # 快线窗口
+  slow_window: 8             # 慢线窗口（须大于快线）
   max_target_weight: 0.5     # 逐标的模式下单个标的的目标仓上限（占总权益）
   # 资产配置：让 AI/规则在「候选池」里自己选标的、配权重（关闭 = 人指定标的，模型只定仓位）
   self_allocating: false
