@@ -157,13 +157,24 @@ export const api = {
       scenarios: number;
       interval: string;
       barCount: number;
+      symbols: string[];
       winRate: number;
+      positiveRuns: number;
+      flatRuns: number;
+      negativeRuns: number;
       medianReturn: number;
       worstReturn: number;
       bestReturn: number;
       avgReturn: number;
       outcomes: { seed: number; returnPct: number; positive: boolean; maxDrawdownPct: number; fills: number }[];
-      byRegime: { regime: string; runs: number; positiveRuns: number; medianReturn: number; worstReturn: number }[];
+      byRegime: {
+        regime: string;
+        runs: number;
+        positiveRuns: number;
+        flatRuns: number;
+        medianReturn: number;
+        worstReturn: number;
+      }[];
       seed: number;
     }>("/api/validation/win-rate", { method: "POST", body: JSON.stringify(input) }),
 

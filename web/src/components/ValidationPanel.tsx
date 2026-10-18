@@ -37,13 +37,24 @@ interface WinRateReport {
   scenarios: number;
   interval: string;
   barCount: number;
+  symbols: string[];
   winRate: number;
+  positiveRuns: number;
+  flatRuns: number;
+  negativeRuns: number;
   medianReturn: number;
   worstReturn: number;
   bestReturn: number;
   avgReturn: number;
   outcomes: { seed: number; returnPct: number; positive: boolean; maxDrawdownPct: number; fills: number }[];
-  byRegime: { regime: string; runs: number; positiveRuns: number; medianReturn: number; worstReturn: number }[];
+  byRegime: {
+    regime: string;
+    runs: number;
+    positiveRuns: number;
+    flatRuns: number;
+    medianReturn: number;
+    worstReturn: number;
+  }[];
   seed: number;
 }
 
@@ -57,7 +68,7 @@ export function ValidationPanel({ store }: { store: AppStore }) {
   const [busy, setBusy] = useState<"wf" | "rb" | "wr" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (which: "wf" | "rb" | "wr") => {
+  const run = async (which: "wf" | "rb" | "wr", seed?: number) => {
     setBusy(which);
     setError(null);
     try {
@@ -75,7 +86,14 @@ export function ValidationPanel({ store }: { store: AppStore }) {
           setError("多情景胜率需要模拟交易所连接：它靠反复掷新的随机路径统计「多少场景盈利为正」，真实行情只有一条历史，给不出这个数。");
           return;
         }
-        setWinRate(await api.scenarioWinRate({ connectionId: sim.id, scenarios: 24 }));
+        // 不传种子 = 掷新的一批路径；传了 = 用那颗起始种子复跑同一份报告
+        setWinRate(
+          await api.scenarioWinRate({
+            connectionId: sim.id,
+            scenarios: 24,
+            ...(seed !== undefined ? { seed } : {}),
+          }),
+        );
       }
     } catch (err) {
       setError((err as Error).message);
@@ -104,7 +122,8 @@ export function ValidationPanel({ store }: { store: AppStore }) {
     >
       <div className="hint-line">
         前推验证用「前一段数据的表现」预测「后一段」，落差越大说明参数越像是在拟合历史；
-        参数平台则在 (快线, 慢线, 目标仓) 网格上扫一遍，最优点周围如果只有它自己好，就是过拟合。
+        参数平台则在 (快线, 慢线, 目标仓) 网格上扫一遍，最优点周围如果只有它自己好，就是过拟合；
+        多情景胜率换一批随机路径，看「资金比本金多」的场景占几成。
       </div>
       {error && <Notice tone="error">{error}</Notice>}
 
@@ -117,54 +136,65 @@ export function ValidationPanel({ store }: { store: AppStore }) {
           </Notice>
           <div className="grid-3" style={{ marginTop: 8 }}>
             <div className="stat-tile">
-              <span className="stat-label">正收益场景占比</span>
+              <span className="stat-label">正收益场景占比（{winRate.scenarios} 条）</span>
               <span className={`stat-value mono ${winRate.winRate >= 0.5 ? "up" : "down"}`}>
                 {pct(winRate.winRate)}
               </span>
-              <span className="stat-sub">期末资金超过本金的场景 / 全部场景</span>
+              <span className="stat-note">
+                正 {winRate.positiveRuns} · 保本 {winRate.flatRuns} · 亏 {winRate.negativeRuns}（期末资金 vs 本金）
+              </span>
             </div>
             <div className="stat-tile">
               <span className="stat-label">中位收益率</span>
               <span className={`stat-value mono ${winRate.medianReturn >= 0 ? "up" : "down"}`}>
                 {pct(winRate.medianReturn)}
               </span>
-              <span className="stat-sub">典型一条路径的结果（比平均值诚实）</span>
+              <span className="stat-note">典型一条路径的结果（比平均值诚实）</span>
             </div>
             <div className="stat-tile">
               <span className="stat-label">最差一条</span>
               <span className={`stat-value mono ${winRate.worstReturn >= 0 ? "up" : "down"}`}>
                 {pct(winRate.worstReturn)}
               </span>
-              <span className="stat-sub">运气最差时亏多少（费用已计入）</span>
+              <span className="stat-note">运气最差时亏多少（费用已计入）</span>
             </div>
           </div>
           {winRate.byRegime.length > 0 && (
-            <table className="table compact" style={{ marginTop: 8 }}>
-              <thead>
-                <tr>
-                  <th>走向</th>
-                  <th>正收益场景</th>
-                  <th>中位收益</th>
-                  <th>最差</th>
-                </tr>
-              </thead>
-              <tbody>
-                {winRate.byRegime.map((r) => (
-                  <tr key={r.regime}>
-                    <td>{r.regime}</td>
-                    <td className="mono">
-                      {r.positiveRuns}/{r.runs}
-                    </td>
-                    <td className={`mono ${r.medianReturn >= 0 ? "up" : "down"}`}>{pct(r.medianReturn)}</td>
-                    <td className={`mono ${r.worstReturn >= 0 ? "up" : "down"}`}>{pct(r.worstReturn)}</td>
+            <div className="table-scroll" style={{ marginTop: 8 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>走向（单独跑）</th>
+                    <th className="num">正 / 保本 / 亏</th>
+                    <th className="num">中位收益</th>
+                    <th className="num">最差</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {winRate.byRegime.map((r) => (
+                    <tr key={r.regime}>
+                      <td>{r.regime}</td>
+                      <td className="mono num">
+                        {r.positiveRuns} / {r.flatRuns} / {r.runs - r.positiveRuns - r.flatRuns}
+                      </td>
+                      <td className={`mono num ${r.medianReturn >= 0 ? "up" : "down"}`}>{pct(r.medianReturn)}</td>
+                      <td className={`mono num ${r.worstReturn >= 0 ? "up" : "down"}`}>{pct(r.worstReturn)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-          <div className="small" style={{ marginTop: 6 }}>
-            {winRate.interval} · {winRate.barCount} 根/条 · 起始种子 {winRate.seed}（同种子可复现这份报告）。
-            单走向运行才有分走向归因；多走向组合赚的是组合的钱，不拆。
+          <div className="small" style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>
+              以上面数字为组合口径：{winRate.symbols.join(" + ")} 一起跑。表格每行是该走向<b>单独</b>跑的成绩
+              （同一批种子），组合里赚的钱不拆到各走向头上。保本 = 完全没成交、资金原封不动。
+              {winRate.interval} · {winRate.barCount} 根/条 · 起始种子 {winRate.seed}。
+            </span>
+            <Button small onClick={() => run("wr", winRate.seed)} busy={busy === "wr"}>
+              用种子 {winRate.seed} 复跑
+            </Button>
+            <span>再点上方「多情景胜率」则是换一批新路径。</span>
           </div>
         </div>
       )}
@@ -194,28 +224,30 @@ export function ValidationPanel({ store }: { store: AppStore }) {
                   </span>
                 </div>
               </div>
-              <table className="table compact" style={{ marginTop: 8 }}>
-                <thead>
-                  <tr>
-                    <th>折</th>
-                    <th>样本内</th>
-                    <th>样本外</th>
-                    <th>落差</th>
-                    <th>样本外成交</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {folds.map((f) => (
-                    <tr key={f.fold}>
-                      <td>#{f.fold}</td>
-                      <td className={`mono ${f.isReturn >= 0 ? "up" : "down"}`}>{pct(f.isReturn)}</td>
-                      <td className={`mono ${f.oosReturn >= 0 ? "up" : "down"}`}>{pct(f.oosReturn)}</td>
-                      <td className={`mono ${f.gap >= 0 ? "up" : "down"}`}>{pct(f.gap)}</td>
-                      <td className="mono">{f.oosFills}</td>
+              <div className="table-scroll" style={{ marginTop: 8 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>折</th>
+                      <th className="num">样本内</th>
+                      <th className="num">样本外</th>
+                      <th className="num">落差</th>
+                      <th className="num">样本外成交</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {folds.map((f) => (
+                      <tr key={f.fold}>
+                        <td>#{f.fold}</td>
+                        <td className={`mono num ${f.isReturn >= 0 ? "up" : "down"}`}>{pct(f.isReturn)}</td>
+                        <td className={`mono num ${f.oosReturn >= 0 ? "up" : "down"}`}>{pct(f.oosReturn)}</td>
+                        <td className={`mono num ${f.gap >= 0 ? "up" : "down"}`}>{pct(f.gap)}</td>
+                        <td className="mono num">{f.oosFills}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </div>
@@ -231,31 +263,33 @@ export function ValidationPanel({ store }: { store: AppStore }) {
           )}
           {!report.best && <Empty>网格里没有一个格子赚钱，谈不上平台</Empty>}
           {report.best && report.cells.length > 0 && (
-            <table className="table compact" style={{ marginTop: 8 }}>
-              <thead>
-                <tr>
-                  <th>快线</th>
-                  <th>慢线</th>
-                  <th>目标仓</th>
-                  <th>收益</th>
-                  <th>回撤</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.cells.map((c) => (
-                  <tr
-                    key={`${c.fast}-${c.slow}-${c.targetWeight}`}
-                    className={c.fast === report.best?.fast && c.slow === report.best?.slow ? "row-best" : ""}
-                  >
-                    <td className="mono">{c.fast}</td>
-                    <td className="mono">{c.slow}</td>
-                    <td className="mono">{pct(c.targetWeight)}</td>
-                    <td className={`mono ${c.returnPct >= 0 ? "up" : "down"}`}>{pct(c.returnPct)}</td>
-                    <td className="mono">{pct(c.drawdown)}</td>
+            <div className="table-scroll" style={{ marginTop: 8 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>快线</th>
+                    <th>慢线</th>
+                    <th className="num">目标仓</th>
+                    <th className="num">收益</th>
+                    <th className="num">回撤</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {report.cells.map((c) => (
+                    <tr
+                      key={`${c.fast}-${c.slow}-${c.targetWeight}`}
+                      className={c.fast === report.best?.fast && c.slow === report.best?.slow ? "row-best" : ""}
+                    >
+                      <td className="mono">{c.fast}</td>
+                      <td className="mono">{c.slow}</td>
+                      <td className="mono num">{pct(c.targetWeight)}</td>
+                      <td className={`mono num ${c.returnPct >= 0 ? "up" : "down"}`}>{pct(c.returnPct)}</td>
+                      <td className="mono num">{pct(c.drawdown)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
