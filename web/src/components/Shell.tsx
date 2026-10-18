@@ -32,7 +32,7 @@ const NAV: { id: PageId; label: string; icon: string; group: string }[] = [
   { id: "compare", label: "模拟对照", icon: "⇆", group: "智能" },
   { id: "backtest", label: "历史模拟", icon: "⏱", group: "智能" },
   { id: "risk", label: "风控", icon: "⛨", group: "系统" },
-  { id: "system", label: "系统与日志", icon: "☰", group: "系统" },
+  { id: "system", label: "系统", icon: "☰", group: "系统" },
   { id: "settings", label: "设置", icon: "⚙", group: "系统" },
 ];
 
