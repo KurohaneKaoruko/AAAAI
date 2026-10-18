@@ -189,6 +189,7 @@ export function ValidationPanel({ store }: { store: AppStore }) {
             <span>
               以上面数字为组合口径：{winRate.symbols.join(" + ")} 一起跑。表格每行是该走向<b>单独</b>跑的成绩
               （同一批种子），组合里赚的钱不拆到各走向头上。保本 = 完全没成交、资金原封不动。
+              买单只能用账上现金（现金账户，不透支），所以组合总敞口不会超过权益。
               {winRate.interval} · {winRate.barCount} 根/条 · 起始种子 {winRate.seed}。
             </span>
             <Button small onClick={() => run("wr", winRate.seed)} busy={busy === "wr"}>

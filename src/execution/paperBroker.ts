@@ -2,10 +2,15 @@
  * 模拟券商：按**下一根 K 线的开盘价** ± 滑点成交，收取手续费。
  *
  * 成交口径（可信度的地基）：
- * 决策发生在第 t 根 K 线收盘时（此刻才知道它的收盘价），
- * 所以按第 t 根收盘价立即成交等于假设"看到收盘价还能买在收盘价"——
- * 现实里做不到，回测里就会凭空多出一段利润。
- * 因此订单入队，等**下一根 K 线开盘**才成交；数据结束时还没轮到的订单作废。
+ * - 决策发生在第 t 根 K 线收盘时（此刻才知道它的收盘价），
+ *   所以按第 t 根收盘价立即成交等于假设"看到收盘价还能买在收盘价"——
+ *   现实里做不到，回测里就会凭空多出一段利润。
+ *   因此订单入队，等**下一根 K 线开盘**才成交；数据结束时还没轮到的订单作废。
+ * - 现金账户：买单成交前查可用现金，付不起全额就按付得起的量成交
+ *   （买单等价于「把这笔钱投进去」），零头都买不起才拒单 —— 绝不透支。
+ *   真实券商不会让你花没有的钱；不设这道线的话，多标的各自满仓会
+ *   凭空造出一个 2~3 倍杠杆的模拟账户，大跌时权益能穿成负数。
+ *   接了 availableCash 查询才启用这道线（不接 = 旧行为，仅供特殊场景）。
  *
  * 滑点走冲击成本模型（随订单规模与标的波动变化），而不是一个固定 bps；
  * 没有足够行情数据时自动退回固定滑点。
@@ -46,6 +51,15 @@ export interface PaperBrokerOptions {
   slicing?: Partial<SlicingOptions>;
   /** K 线间隔（如 1m / 5m / 1h），用于把「每根波动」折算成日频口径 */
   interval?: string;
+  /**
+   * 可用现金查询（现金账户语义）：买单成交前必须付得起「成交额 + 手续费」，
+   * 不够就拒单。不接这个查询时行为与从前一致（不检查现金）。
+   *
+   * 为什么必须有：真实券商不会让你花没有的钱，模拟盘如果默认给无限保证金，
+   * 多标的各自满仓（例：5 个标的各 50% = 2.5 倍总敞口）就会在模拟里
+   * 凭空造出一个实盘不存在的杠杆账户 —— 大跌时权益甚至能穿成负数。
+   */
+  availableCash?: () => number;
 }
 
 export interface SlicedOrderReport {
@@ -249,19 +263,33 @@ export class PaperBroker implements Broker {
   /**
    * 一次性全部成交。
    *
+   * 现金账户语义：BUY 成交前查一次可用现金。付得起就按原量成交；付不起就
+   * **按现金能买到的量成交**（买单本来就等价于「把这笔钱投进去」），
+   * 只有当现金连最小的量都买不起时才拒单（广播 ORDER_REJECTED）。
+   * 绝不透支 —— 真实券商不会让你花没有的钱。
+   *
+   * 为什么不直接拒单：订单在上一根收盘按当时的价格定量，成交在下一根开盘，
+   * 期间价格会动。按「价位差一点就整单拒掉」的口径，粗周期（每根波动大）
+   * 上的满仓买单会反复被拒、策略又反复重试，事件流里刷满「拒单」——
+   * 那是模拟口径自己造出来的噪声，不是市场行为。
+   *
    * executedAt = 真正成交的那根 K 线时间。必须用它而不是决策时间：
    * 决策发生在第 t 根收盘，成交发生在第 t+1 根开盘，两者是不同的时刻，
    * 流水里写错时间会让人按错误的价格去核对甚至照着追单。
    */
-  private fillWholeOrder(intent: OrderIntent, mid: number, executedAt?: Date): Fill {
+  private fillWholeOrder(intent: OrderIntent, mid: number, executedAt?: Date): Fill | null {
     const stats = this.micro?.(intent.symbol);
     const bps = this.cost.slippageBps(intent.quantity * mid, stats);
     const execPrice = this.cost.execPrice(mid, intent.side, bps);
-    const notional = intent.quantity * execPrice;
+    const affordable = this.affordableQuantity(intent, execPrice);
+    if (affordable === null) return null;
+    const order = affordable < intent.quantity ? { ...intent, quantity: affordable } : intent;
+    const notional = order.quantity * execPrice;
+    const fee = notional * this.opts.feeRate;
     const fill: Fill = {
-      order: intent,
+      order,
       price: execPrice,
-      fee: notional * this.opts.feeRate,
+      fee,
       timestamp: executedAt ?? intent.timestamp,
     };
     log.info(
@@ -273,6 +301,43 @@ export class PaperBroker implements Broker {
     );
     this.bus.publish(Topic.FILL, fill);
     return fill;
+  }
+
+  /**
+   * 现金约束下这笔买单最多能成交多少。
+   * - 卖单 / 未接现金查询：返回原量（不受约束）；
+   * - 付得起全额：返回原量；
+   * - 只付得起一部分：返回付得起的量（按可用现金折算，含手续费）；
+   * - 连零头都买不起：拒单（返回 null，广播 ORDER_REJECTED）。
+   */
+  private affordableQuantity(intent: OrderIntent, execPrice: number): number | null {
+    if (intent.side !== "BUY" || !this.opts.availableCash) return intent.quantity;
+    const cash = this.opts.availableCash();
+    const required = intent.quantity * execPrice * (1 + this.opts.feeRate);
+    if (required <= cash + 1e-9) return intent.quantity;
+    // 可用现金 ÷ 单价（含费），再留一点点余量抵消浮点误差，保证成交后现金不为负
+    const affordable = (cash / (execPrice * (1 + this.opts.feeRate))) * (1 - 1e-12);
+    if (!(affordable >= 1e-9)) {
+      log.info(
+        "现金不足，买单被驳回: %s 需要 %s，可用 %s",
+        intent.symbol,
+        required.toFixed(2),
+        cash.toFixed(2),
+      );
+      this.bus.publish(Topic.ORDER_REJECTED, {
+        ...intent,
+        reason: `现金不足：需要 ${required.toFixed(2)}，可用 ${cash.toFixed(2)}（现金账户不透支）`,
+      });
+      return null;
+    }
+    log.info(
+      "现金不足，按可用现金成交: %s 由 %s 减为 %s（可用现金 %s）",
+      intent.symbol,
+      intent.quantity.toFixed(6),
+      affordable.toFixed(6),
+      cash.toFixed(2),
+    );
+    return affordable;
   }
 
   /** K 线推进：维护量能/行情窗口、执行到期切片。 */
@@ -317,8 +382,6 @@ export class PaperBroker implements Broker {
     // 每片按自己的金额单独算冲击：拆单省成本的来源就在这一行
     const bps = this.cost.slippageBps(slice.quantity * mid, stats);
     const execPrice = this.cost.execPrice(mid, order.side, bps);
-    const notional = slice.quantity * execPrice;
-    const fee = notional * this.opts.feeRate;
 
     const sliceOrder: OrderIntent = {
       symbol: order.symbol,
@@ -328,14 +391,32 @@ export class PaperBroker implements Broker {
       timestamp: bar?.timestamp ?? intent?.timestamp ?? new Date(),
       reason: intent ? intent.reason : `slice_${order.next - 1 + 1}/${order.plan.length}`,
     };
-    recordSliceFill(order, { quantity: slice.quantity, price: execPrice, fee });
 
-    const fill: Fill = { order: sliceOrder, price: execPrice, fee, timestamp: sliceOrder.timestamp };
+    // 现金账户语义同样适用于逐片成交：这一片买得起多少成交多少（含费）；
+    // 连零头都买不起就终止整单 —— 现金都没了，后面的片只会更买不起。
+    const affordable = this.affordableQuantity(sliceOrder, execPrice);
+    if (affordable === null) {
+      this.pending.delete(order.id);
+      this.pushCompleted(report(order, false));
+      return null;
+    }
+    const filled = Math.min(slice.quantity, affordable);
+    const notional = filled * execPrice;
+    const fee = notional * this.opts.feeRate;
+    recordSliceFill(order, { quantity: filled, price: execPrice, fee });
+
+    const fill: Fill = {
+      order: filled === sliceOrder.quantity ? sliceOrder : { ...sliceOrder, quantity: filled },
+      price: execPrice,
+      fee,
+      timestamp: sliceOrder.timestamp,
+    };
+
     log.debug(
       "PAPER 切片 %s %s %s @ %s（累计 %s / %s）",
       order.side,
       order.symbol,
-      slice.quantity.toFixed(6),
+      filled.toFixed(6),
       execPrice.toFixed(4),
       order.filledQuantity.toFixed(6),
       order.totalQuantity.toFixed(6),

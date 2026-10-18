@@ -4,6 +4,8 @@ import { EventBus, Topic } from "../src/core/eventBus.js";
 import { PortfolioManager } from "../src/portfolio/portfolioManager.js";
 import { RiskRules } from "../src/risk/rules.js";
 import { runComparison } from "../src/bench/comparison.js";
+import { buildPipeline } from "../src/agents/orchestrator.js";
+import { streamBars } from "../src/data/streaming.js";
 import { testAdapter, testConfig } from "./helpers.js";
 import type { Fill, OrderIntent, Side, Bar } from "../src/core/types.js";
 
@@ -98,6 +100,15 @@ test("RiskRules: 单笔金额截断", () => {
   assert.equal(rules.clampDeltaValue(123), 123);
 });
 
+test("RiskRules: 现金账户约束只收缩买单", () => {
+  const rules = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 100000, maxDrawdownPct: 1, minTradeValue: 0 });
+  assert.equal(rules.clampBuyToCash(50_000, 100_000), 50_000, "买得起就原样放行");
+  assert.equal(rules.clampBuyToCash(50_000, 10_000), 9_900, "买不起就收缩到现金的 99%（留 1% 给滑点与手续费）");
+  assert.equal(rules.clampBuyToCash(-50_000, 10_000), -50_000, "卖单不受现金约束（卖出只会回笼现金）");
+  assert.equal(rules.clampBuyToCash(50_000, 0), 0, "现金为 0 时买单收缩为 0，不会产生成交不了的排队单");
+  assert.equal(rules.clampBuyToCash(50_000, -123), 0, "现金为负（不应发生）时买单也不放行");
+});
+
 
 test("RiskRules: 最小调仓额过滤噪声单", () => {
   const strict = new RiskRules({ maxPositionWeight: 1, maxOrderValue: 100000, maxDrawdownPct: 1, minTradeValue: 1000 });
@@ -122,4 +133,44 @@ test("最小调仓额：能显著减少成交笔数", async () => {
   const after = (await run(5000)).results[0]!;
   assert.ok(before.fillCount > 0, "基线本身应产生成交，否则该用例无意义");
   assert.ok(after.fillCount < before.fillCount, `设阈值后成交应减少: ${before.fillCount} -> ${after.fillCount}`);
+});
+
+test("现金账户：多标的各自要满仓，也造不出透支与超权益敞口", async () => {
+  const base = testConfig();
+  const config = {
+    ...base,
+    // 五个走向各要 60% 仓位 = 名义上 3 倍总敞口：不给融资的话根本买不满，
+    // 这正是本用例要压的场景（修复前这里会把现金买成负数）。
+    strategy: { ...base.strategy, maxTargetWeight: 0.6, fastWindow: 5, slowWindow: 20 },
+    risk: { ...base.risk, initialCash: 100_000, maxPositionWeight: 0.6, maxOrderValue: 50_000, minTradeValue: 0 },
+  };
+  const adapter = testAdapter();
+  const pipeline = buildPipeline(config, { adapter, liveTrading: false });
+
+  let minCash = Infinity;
+  let maxGrossRatio = 0;
+  pipeline.bus.subscribe(Topic.FILL, () => {
+    minCash = Math.min(minCash, pipeline.portfolio.cash);
+  });
+  pipeline.bus.subscribe(Topic.BAR, () => {
+    let gross = 0;
+    for (const pos of pipeline.portfolio.positionsSnapshot()) {
+      gross += pos.quantity * (pipeline.portfolio.price(pos.symbol) ?? pos.avgCost);
+    }
+    const equity = pipeline.portfolio.equity();
+    if (equity > 0) maxGrossRatio = Math.max(maxGrossRatio, gross / equity);
+  });
+
+  const symbols = ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"];
+  const groups = await Promise.all(symbols.map((s) => adapter.fetchKlines(s, "1m", 200)));
+  const bars = groups.flat().sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  await streamBars(pipeline.bus, pipeline.book, bars);
+
+  const m = pipeline.portfolio.metrics();
+  assert.ok(m.totalFills > 0, "用例自身必须产生成交，否则什么都没测到");
+  assert.ok(minCash >= -1e-6, `现金不允许透支（模拟不提供融资），最低到过 ${minCash.toFixed(2)}`);
+  assert.ok(
+    maxGrossRatio <= 1 + 1e-9,
+    `总敞口不允许超过权益（现金 ≥ 0 时 gross = 权益 − 现金），最高 ${(maxGrossRatio * 100).toFixed(1)}%`,
+  );
 });

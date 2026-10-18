@@ -1271,8 +1271,11 @@ function summarize(event: Event): string {
       return `${(p as { side: string }).side} ${(p as { symbol: string }).symbol}`;
     case Topic.FILL:
       return `成交 ${(p as { order?: { symbol?: string } })?.order?.symbol ?? ""} @ ${Number((p as { price: number }).price).toFixed(4)}`;
-    case Topic.ORDER_REJECTED:
-      return `拒单 ${(p as { symbol?: string })?.symbol ?? ""}`;
+    case Topic.ORDER_REJECTED: {
+      const symbol = (p as { symbol?: string })?.symbol ?? "";
+      const reason = (p as { reason?: string })?.reason;
+      return `拒单 ${symbol}${reason ? ` · ${reason}` : ""}`;
+    }
     default:
       // 没专门写摘要的事件也要看得懂：返回空串会在事件日志里留下空白行，
       // 用户看到"有事件但什么都没写"，只会以为是坏了。

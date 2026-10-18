@@ -234,3 +234,31 @@ test("多情景胜率：HTTP 路由掷路径不动实时机器人脚下的行情
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("现金账户：组合口径不可能亏穿本金（模拟不提供融资）", async () => {
+  const profile = {
+    id: "t",
+    name: "双均线",
+    decisionSource: "rules",
+    createdAt: "",
+    updatedAt: "",
+    fastWindow: 5,
+    slowWindow: 20,
+    maxTargetWeight: 0.5,
+  } as Parameters<typeof runWinRate>[2];
+  const report = await runWinRate(
+    testConfig(),
+    testAdapter(),
+    profile,
+    ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"],
+    { scenarios: 6, interval: "1d", barCount: 200, seed: 20261018, perRegime: false },
+  );
+  // 1d 是「噪声盖过走向」的世界：趋势策略在这里本来就会亏 —— 但亏损有物理上限：
+  // 现金账户不透支、持仓不为负，期末权益不可能小于 0（收益率不可能 ≤ -100%）。
+  // 修复前这条路径能跑到 -108%（隐式融资 + 大跌），这条断言就是那次事故的哨兵。
+  assert.ok(
+    report.worstReturn > -1,
+    `收益率不可能穿 -100%（权益不可能为负），实际最差 ${(report.worstReturn * 100).toFixed(1)}%`,
+  );
+  assert.ok(report.worstReturn < 0, "这段窗口应当有亏损路径 —— 否则该用例测不到穿负的边界");
+});
