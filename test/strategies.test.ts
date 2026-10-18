@@ -131,6 +131,21 @@ test("策略列表：参数越界自动收敛，非法决策来源退回量化�
   }
 });
 
+test("策略列表：默认参数是实测平台 2/8（改动必须同步文档与胜率下限用例）", () => {
+  const d = dir();
+  try {
+    const store = new StrategyStore(d);
+    const s = store.create({ name: "新策略" });
+    // 这两个数字不是随手的「经典 5/20」：见 docs/architecture.md「设计取舍 · 默认策略参数」，
+    // 它是多情景胜率扫网格测出来的平台中值；功能下限由 test/winRate.test.ts 的同名用例锁住。
+    assert.equal(s.fastWindow, 2);
+    assert.equal(s.slowWindow, 8);
+    assert.ok(s.fastWindow < s.slowWindow);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("策略列表：引用同一策略的两个机器人，改策略两边同时生效", () => {
   const d = dir();
   try {

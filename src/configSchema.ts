@@ -319,8 +319,9 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
         str(raw, ["strategy", "decision_source"], bool(raw, ["llm", "enabled"], false) ? "chat" : "rules"),
       ),
       name: str(raw, ["strategy", "name"], "llm-momentum"),
-      fastWindow: num(raw, ["strategy", "fast_window"], 5),
-      slowWindow: num(raw, ["strategy", "slow_window"], 20),
+      // 默认 2/8：多情景胜率实测平台中值（见 docs/architecture.md「设计取舍 · 默认策略」）
+      fastWindow: num(raw, ["strategy", "fast_window"], 2),
+      slowWindow: num(raw, ["strategy", "slow_window"], 8),
       maxTargetWeight: num(raw, ["strategy", "max_target_weight"], 0.5),
       // 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策）
       selfAllocating: bool(raw, ["strategy", "self_allocating"], false),

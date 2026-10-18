@@ -57,8 +57,12 @@ export const DEFAULT_STRATEGY_ID = "default";
 
 const DEFAULTS = {
   decisionSource: "rules" as DecisionSource,
-  fastWindow: 5,
-  slowWindow: 20,
+  // 默认窗口（2/8）不是拍的「经典 5/20」：它是在多情景胜率上扫窗口网格实测选出的
+  // 平台中值（依据、判定规则与测量表见 docs/architecture.md「设计取舍 · 默认策略」）。
+  // 改这里要同步三处默认值（本文件 / configSchema.ts / config/default.yaml）
+  // 与 test/strategies.test.ts、test/winRate.test.ts 里的锁。
+  fastWindow: 2,
+  slowWindow: 8,
   maxTargetWeight: 0.5,
   selfAllocating: false,
   maxPositions: 3,
