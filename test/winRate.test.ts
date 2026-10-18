@@ -93,8 +93,17 @@ test("多情景胜率：汇总数字能从逐条结果重算出来（不是字�
   // 正收益率占比：期末权益 > 本金（用户口径里的「资金是原本的 100% 以上」）
   const wins = report.outcomes.filter((o) => o.returnPct > 0).length;
   assert.equal(report.winRate, wins / report.outcomes.length, "winRate 必须逐条重算得出");
+  assert.equal(report.positiveRuns, wins, "positiveRuns 与 winRate 同源");
+  // 正/保本/亏三类互斥且穷尽：每条路径恰好归一类
+  assert.equal(
+    report.positiveRuns + report.flatRuns + report.negativeRuns,
+    report.outcomes.length,
+    "正/保本/亏三数之和必须等于场景数（不许有路径没归类）",
+  );
+  assert.equal(report.flatRuns, report.outcomes.filter((o) => o.fills === 0).length, "保本 = 完全没成交");
   for (const o of report.outcomes) {
     assert.equal(o.positive, o.returnPct > 0, "positive 标记与 returnPct 同义");
+    if (o.fills === 0) assert.equal(o.returnPct, 0, "没成交就该一分不动（保本）");
   }
   assert.equal(report.medianReturn, median(report.outcomes.map((o) => o.returnPct)), "median 取中位");
   assert.equal(report.worstReturn, Math.min(...report.outcomes.map((o) => o.returnPct)), "worst 取最差");
@@ -103,6 +112,48 @@ test("多情景胜率：汇总数字能从逐条结果重算出来（不是字�
   assert.equal(report.byRegime.length, 1);
   assert.equal(report.byRegime[0]!.regime, "单边上行");
   assert.equal(report.byRegime[0]!.positiveRuns, wins);
+});
+
+test("多情景胜率：多走向时逐走向各跑一份（组合口径与归因都从同一批种子来）", async () => {
+  const profile = {
+    id: "t",
+    name: "双均线",
+    decisionSource: "rules",
+    createdAt: "",
+    updatedAt: "",
+    fastWindow: 5,
+    slowWindow: 20,
+    maxTargetWeight: 0.5,
+  } as Parameters<typeof runWinRate>[2];
+  const report = await runWinRate(testConfig(), testAdapter(), profile, ["单边上行", "急速跳水"], {
+    scenarios: 3,
+    interval: "1m",
+    barCount: 120,
+    seed: 12345,
+  });
+  assert.equal(report.byRegime.length, 2, "两条走向各有一条归因");
+  assert.deepEqual(
+    report.byRegime.map((r) => r.regime),
+    ["单边上行", "急速跳水"],
+    "归因按传入顺序，不多不少",
+  );
+  for (const r of report.byRegime) {
+    assert.equal(r.runs, report.scenarios, "每条走向归因的条数与总条数一致（同一批种子）");
+  }
+  // perRegime: false 时不额外观测（组合口径不受影响）
+  const lean = await runWinRate(testConfig(), testAdapter(), profile, ["单边上行", "急速跳水"], {
+    scenarios: 3,
+    interval: "1m",
+    barCount: 120,
+    seed: 12345,
+    perRegime: false,
+  });
+  assert.equal(lean.byRegime.length, 0, "关掉就不跑逐走向");
+  assert.deepEqual(
+    lean.outcomes.map((o) => o.seed),
+    report.outcomes.map((o) => o.seed),
+    "开不开逐走向，组合口径跑的是同一批路径",
+  );
 });
 
 test("多情景胜率：同一颗起始种子，两份报告逐条一致（可复现）", async () => {
