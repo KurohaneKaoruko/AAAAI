@@ -76,7 +76,7 @@ export function EquityChart({ curve, initialCash }: { curve: EquityPoint[]; init
             <g key={t}>
               <line x1={pad.left} x2={W - pad.right} y1={geom.y(v)} y2={geom.y(v)} className="grid-line" />
               <text x={pad.left - 10} y={geom.y(v) + 4} className="axis-text" textAnchor="end">
-                {v.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}
+                {money(v, 0)}
               </text>
             </g>
           );

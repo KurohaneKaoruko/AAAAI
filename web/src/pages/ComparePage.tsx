@@ -423,7 +423,7 @@ function CompareChart({ results, initialCash }: { results: RunnerResult[]; initi
             <g key={t}>
               <line x1={pad.left} x2={W - pad.right} y1={y(v)} y2={y(v)} className="grid-line" />
               <text x={pad.left - 10} y={y(v) + 4} className="axis-text" textAnchor="end">
-                {v.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}
+                {money(v, 0)}
               </text>
             </g>
           );
@@ -468,7 +468,7 @@ function RunnerPositions({ result, color }: { result: RunnerResult; color: strin
               <tr key={p.symbol}>
                 <td className="mono">{p.symbol}</td>
                 <td className="num mono">{p.quantity.toFixed(4)}</td>
-                <td className="num mono dim">成本 {p.avgCost.toFixed(2)}</td>
+                <td className="num mono dim">成本 {money(p.avgCost)}</td>
               </tr>
             ))}
           </tbody>

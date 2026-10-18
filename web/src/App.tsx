@@ -13,6 +13,7 @@ import { RiskPage } from "./pages/RiskPage";
 import { LlmPage } from "./pages/LlmPage";
 import { ComparePage } from "./pages/ComparePage";
 import { SystemPage } from "./pages/SystemPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { api } from "./api";
 
@@ -87,6 +88,8 @@ export function App() {
         );
       case "system":
         return <SystemPage store={store} />;
+      case "settings":
+        return <SettingsPage />;
     }
   };
 

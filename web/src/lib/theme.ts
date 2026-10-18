@@ -1,10 +1,18 @@
-/** 主题：暗色 / 亮色（黑白双主题），持久化到 localStorage。 */
+/**
+ * 主题：暗色 / 亮色（黑白双主题），持久化到 localStorage。
+ *
+ * 模块级单例：顶栏快捷开关与设置页各有一个入口，共享同一份状态 ——
+ * 谁改了，另一个立刻跟上（useSyncExternalStore 订阅）。
+ */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "aaaai.theme";
+
+let current: Theme = initialTheme();
+const listeners = new Set<() => void>();
 
 function initialTheme(): Theme {
   if (typeof window === "undefined") return "dark";
@@ -19,8 +27,21 @@ function applyTheme(theme: Theme): void {
   window.localStorage.setItem(STORAGE_KEY, theme);
 }
 
-export function useTheme(): { theme: Theme; toggle: () => void } {
-  const [theme, setTheme] = useState<Theme>(initialTheme);
+function setTheme(next: Theme): void {
+  if (next === current) return;
+  current = next;
+  for (const fn of listeners) fn();
+}
+
+function subscribe(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+export function useTheme(): { theme: Theme; toggle: () => void; setTheme: (t: Theme) => void } {
+  const theme = useSyncExternalStore(subscribe, () => current);
 
   useEffect(() => {
     applyTheme(theme);
@@ -39,8 +60,10 @@ export function useTheme(): { theme: Theme; toggle: () => void } {
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
+    setTheme(current === "dark" ? "light" : "dark");
   }, []);
 
-  return { theme, toggle };
+  const set = useCallback((t: Theme) => setTheme(t), []);
+
+  return { theme, toggle, setTheme: set };
 }

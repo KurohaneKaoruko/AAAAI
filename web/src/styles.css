@@ -20,8 +20,14 @@
   --accent: #4f8ef7;
   --accent-2: #a06ef7;
   --accent-soft: rgba(79, 142, 247, 0.14);
-  --up: #2fbf82;
-  --down: #f0554b;
+  /* 两套颜色，别混：状态色（--green/--red，绿=正常、红=危险）永远不随设置变；
+     行情方向色（--up/--down 及其底色 --up-bg/--down-bg）才是「红涨绿跌」对调的对象。 */
+  --green: #2fbf82;
+  --red: #f0554b;
+  --up: var(--green);
+  --down: var(--red);
+  --up-bg: var(--notice-ok-bg);
+  --down-bg: var(--notice-err-bg);
   --warn: #e3a53c;
   --on-accent: #ffffff;
 
@@ -76,8 +82,8 @@
   --accent: #1f6feb;
   --accent-2: #7c3aed;
   --accent-soft: rgba(31, 111, 235, 0.1);
-  --up: #0f9d63;
-  --down: #d93636;
+  --green: #0f9d63;
+  --red: #d93636;
   --warn: #b7791f;
   --on-accent: #ffffff;
 
@@ -114,6 +120,15 @@
   --topic-intent: #7c3aed;
   --topic-view: #0e7490;
   --spinner-border: rgba(0, 0, 0, 0.2);
+}
+
+/* 「红涨绿跌」：只对调行情方向色，状态色（--green/--red）不动。
+   选择器故意不锁 :root —— 设置页的选项卡片挂同一个属性给自己做真身演示。 */
+[data-updown="red-up"] {
+  --up: var(--red);
+  --down: var(--green);
+  --up-bg: var(--notice-err-bg);
+  --down-bg: var(--notice-ok-bg);
 }
 
 * { box-sizing: border-box; }
@@ -263,9 +278,9 @@ code {
 }
 .chip-sm { font-size: 11px; padding: 1px 6px; }
 .chip-accent { color: var(--accent); border-color: var(--accent-soft); }
-.chip-ok { color: var(--up); border-color: var(--notice-ok-border); }
+.chip-ok { color: var(--green); border-color: var(--notice-ok-border); }
 .chip-off { color: var(--warn); border-color: var(--notice-warn-border); }
-.chip-live { color: var(--down); border-color: var(--notice-err-border); font-weight: 600; }
+.chip-live { color: var(--red); border-color: var(--notice-err-border); font-weight: 600; }
 
 .badge {
   padding: 3px 10px;
@@ -278,9 +293,9 @@ code {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.badge-running { color: var(--up); border-color: var(--notice-ok-border); background: var(--notice-ok-bg); }
+.badge-running { color: var(--green); border-color: var(--notice-ok-border); background: var(--notice-ok-bg); }
 .badge-stopped { color: var(--accent); border-color: var(--accent-soft); }
-.badge-error { color: var(--down); border-color: var(--notice-err-border); background: var(--notice-err-bg); }
+.badge-error { color: var(--red); border-color: var(--notice-err-border); background: var(--notice-err-bg); }
 .badge-idle { color: var(--text-dim); }
 .badge-up { color: var(--up); }
 .badge-down { color: var(--down); }
@@ -341,8 +356,8 @@ code {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ticker-change.up { background: var(--notice-ok-bg); color: var(--up); }
-.ticker-change.down { background: var(--notice-err-bg); color: var(--down); }
+.ticker-change.up { background: var(--up-bg); color: var(--up); }
+.ticker-change.down { background: var(--down-bg); color: var(--down); }
 /* 取不到报价就说取不到，不要留个空格子让人以为价格是 0 */
 .ticker-nodata { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
 
@@ -373,9 +388,9 @@ code {
 .bot-pick-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 /* 复用状态徽章的配色（badge-* 那套），但这里只要颜色，不要它的底与边框 */
 .bot-pick-state.badge-idle { color: var(--text-dim); }
-.bot-pick-state.badge-running { color: var(--up); background: none; }
+.bot-pick-state.badge-running { color: var(--green); background: none; }
 .bot-pick-state.badge-stopped { color: var(--accent); background: none; }
-.bot-pick-state.badge-error { color: var(--down); background: none; }
+.bot-pick-state.badge-error { color: var(--red); background: none; }
 
 /* 主题切换 */
 .theme-toggle {
@@ -549,7 +564,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .toggle input:checked + .toggle-track { background: var(--accent-soft); border-color: var(--accent); }
 .toggle input:checked + .toggle-track::after { transform: translateX(17px); background: var(--accent); }
 .toggle-danger input:checked + .toggle-track { background: var(--danger-btn-bg); border-color: var(--danger-btn-border); }
-.toggle-danger input:checked + .toggle-track::after { background: var(--down); }
+.toggle-danger input:checked + .toggle-track::after { background: var(--red); }
 .toggle-text { font-size: 13px; display: flex; flex-direction: column; }
 .toggle-text em { font-size: 11px; color: var(--text-dim); font-style: normal; }
 
@@ -669,8 +684,8 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .kv-table tr:last-child td { border-bottom: none; }
 
 .side-tag { font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
-.side-buy { background: var(--notice-ok-bg); color: var(--up); }
-.side-sell { background: var(--notice-err-bg); color: var(--down); }
+.side-buy { background: var(--up-bg); color: var(--up); }
+.side-sell { background: var(--down-bg); color: var(--down); }
 
 .tabs { display: flex; gap: 4px; align-items: center; }
 .tab {
@@ -725,7 +740,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 }
 .event-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-strategy\.signal { color: var(--topic-signal); }
-.topic-exec\.fill { color: var(--up); }
+.topic-exec\.fill { color: var(--green); }
 .topic-exec\.order_rejected { color: var(--topic-reject); }
 .topic-exec\.order_intent { color: var(--topic-intent); }
 .topic-agent\.market_view { color: var(--topic-view); }
@@ -763,7 +778,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .adapter-desc { margin: 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.6; flex: 1; }
 .adapter-caps { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; }
 .cap-on, .cap-off { padding: 2px 7px; border-radius: 4px; background: var(--bg-hover); color: var(--text-dim); }
-.cap-on { color: var(--up); background: var(--notice-ok-bg); }
+.cap-on { color: var(--green); background: var(--notice-ok-bg); }
 
 .connection-list { display: flex; flex-direction: column; gap: 10px; }
 .connection-item {
@@ -818,7 +833,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .log-level { font-size: 10.5px; }
 .log-lv-info { color: var(--accent); }
 .log-lv-warn { color: var(--warn); }
-.log-lv-error { color: var(--down); }
+.log-lv-error { color: var(--red); }
 .log-lv-debug { color: var(--text-dim); }
 .log-scope { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
 .log-msg { color: var(--text); word-break: break-all; }
@@ -839,7 +854,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .pipeline-name { font-size: 13px; font-weight: 600; }
 .pipeline-io { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--text-dim); }
 .io.in { color: var(--text-dim); }
-.io.out { color: var(--up); }
+.io.out { color: var(--green); }
 .pipeline-arrow { color: var(--accent); font-size: 15px; margin-left: 4px; }
 /* ---------- 登录页 ---------- */
 
@@ -872,7 +887,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   margin: 14px 0 20px;
 }
 .login-error {
-  color: var(--down);
+  color: var(--red);
   font-size: 12.5px;
   margin-bottom: 12px;
   padding: 8px 10px;
@@ -938,7 +953,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   vertical-align: middle;
 }
 
-.row-winner { background: color-mix(in srgb, var(--up) 8%, transparent); }
+.row-winner { background: color-mix(in srgb, var(--green) 8%, transparent); }
 
 .chart-legend {
   display: flex;
@@ -1077,7 +1092,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--notice-ok-bg);
-  color: var(--up);
+  color: var(--green);
   font-family: var(--mono);
 }
 .decision-tag-off { background: var(--notice-warn-bg); color: var(--warn); }
@@ -1291,7 +1306,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   line-height: 1;
   padding: 0 0 0 5px;
 }
-.chip-x:hover { opacity: 1; color: var(--down); }
+.chip-x:hover { opacity: 1; color: var(--red); }
 
 /* ---------- 混合决策：融合配比 ---------- */
 
@@ -1369,7 +1384,7 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .alloc-cash { background: var(--cash-seg); }
 .alloc-seg-1 { background: var(--accent); }
 .alloc-seg-2 { background: var(--accent-2); }
-.alloc-seg-3 { background: var(--up); }
+.alloc-seg-3 { background: var(--green); }
 .alloc-seg-4 { background: var(--warn); }
 .alloc-seg-5 { background: var(--text-dim); }
 
@@ -1605,3 +1620,9 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .participant-check { margin-left: auto; color: var(--accent); font-weight: 600; font-size: 12px; }
 .participant-meta { display: flex; flex-wrap: wrap; gap: 4px; }
 .participant-reason { color: var(--notice-warn-text); }
+
+/* ---------- 设置页 ---------- */
+.set-note { margin: 10px 0 0; line-height: 1.75; max-width: 900px; }
+.set-symbol { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-symbol input { width: 96px; text-align: center; }
+.set-symbol .small { margin-left: 4px; }
