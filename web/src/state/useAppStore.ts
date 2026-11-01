@@ -1,8 +1,40 @@
 /** 全局状态：引擎快照 + SSE 实时推送 + 配置与连接缓存。 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, subscribeEvents } from "../api";
-import type { AdapterMeta, AppConfig, Broadcast, Connection, EngineState, WatchItem } from "../types";
+import { api, request, subscribeEvents } from "../api";
+import type { AdapterMeta, AppConfig, Bot, Broadcast, Connection, EngineState, WatchItem } from "../types";
+
+/**
+ * 裸 fetch 的统一替换：开发模式打 8787、生产打同源，并自动带上鉴权 Token。
+ * 直接写 fetch("/api/...") 在开发模式会打到 5173（Vite 不代理后端），
+ * 开了鉴权后也会因缺 Authorization 被拦 —— 两边都是"页面数据莫名全空"。
+ */
+export function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+
+/** 轮询机器人列表（顶栏与仪表盘共用）。 */
+export function useBotsPolling(pollMs = 3000): Bot[] {
+  const [bots, setBots] = useState<Bot[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const d = await apiGet<{ bots: Bot[] }>("/api/bots");
+        if (alive && Array.isArray(d.bots)) setBots(d.bots);
+      } catch {
+        /* 服务不可用时保持原样 */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), pollMs);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [pollMs]);
+  return bots;
+}
 
 
 export interface Toast {

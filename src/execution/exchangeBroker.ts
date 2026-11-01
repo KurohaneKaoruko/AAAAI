@@ -26,6 +26,11 @@ export class ExchangeBroker implements Broker {
       symbol: intent.symbol,
       side: intent.side,
       type: "MARKET",
+      // 数量与金额都带上：Gate / OKX 只认数量（quantity），
+      // Binance 市价买优先用金额（quoteOrderQty）、模拟交易所两者皆可。
+      // 只传金额的话，Gate/OKX 会拿到 quantity=0 直接拒单——
+      // 表现为"实盘一单都下不出去"，而模拟盘一切正常，极难察觉。
+      quantity: intent.quantity,
       quoteQty: intent.quantity * intent.price,
     });
     if (result.status !== "filled") {

@@ -163,19 +163,32 @@ export class OkxAdapter implements ExchangeAdapter {
     if (!this.cred.apiKey || !this.secret) {
       return { orderId: "", status: "rejected", filledQty: 0, avgPrice: 0, fee: 0, message: "未配置 API Key" };
     }
+    // OKX 市价单必须二选一给量：sz 配 tgtCcy。
+    // - 买入给金额（quoteQty）时 tgtCcy=quote_ccy（花多少钱）；
+    // - 其余（卖出 / 只有数量）给基础币数量，tgtCcy=base_ccy。
+    // 只认数量的话，Broker 传来的买入金额会被当成"0.00003 个币"这种碎片单被精度校验拒掉。
+    const quote = Number(req.quoteQty ?? 0);
+    const useQuote = req.type === "MARKET" && req.side === "BUY" && quote > 0;
+    const sz = String(useQuote ? quote : (req.quantity ?? 0));
+    if (!(Number(sz) > 0)) {
+      return { orderId: "", status: "rejected", filledQty: 0, avgPrice: 0, fee: 0, message: "下单数量/金额必须大于 0" };
+    }
     const body = JSON.stringify({
       instId: req.symbol,
       tdMode: "cash",
       side: req.side.toLowerCase(),
       ordType: req.type === "LIMIT" ? "limit" : "market",
-      sz: String(req.quantity ?? 0),
+      sz,
+      tgtCcy: useQuote ? "quote_ccy" : "base_ccy",
       ...(req.type === "LIMIT" && req.price ? { px: String(req.price) } : {}),
     });
     const result = await this.signedRequest("POST", "/api/v5/trade/order", body);
     if (!result.ok) {
       return { orderId: "", status: "rejected", filledQty: 0, avgPrice: 0, fee: 0, message: result.message };
     }
-    const data = result.data as { data?: { ordId?: string; fillPx?: string; fillSz?: string; sCode?: string; sMsg?: string }[] };
+    const data = result.data as {
+      data?: { ordId?: string; fillPx?: string; fillSz?: string; fillFee?: string; state?: string; sCode?: string; sMsg?: string }[];
+    };
     const first = data.data?.[0];
     if (!first || first.sCode !== "0") {
       return {
@@ -187,14 +200,20 @@ export class OkxAdapter implements ExchangeAdapter {
         message: first?.sMsg ?? "下单被拒绝",
       };
     }
-    const qty = Number(first.fillSz ?? 0);
+    // fillSz 的币种跟随下单时的 tgtCcy：按金额买入时它是计价币金额，
+    // 要除以成交价换算回基础币数量，否则组合记账会把持仓记大一整个量级。
     const px = Number(first.fillPx ?? 0);
+    const rawSz = Number(first.fillSz ?? 0);
+    const qty = useQuote && px > 0 ? rawSz / px : rawSz;
+    // 手续费优先用交易所回报的 fillFee（负数表示扣减），回报缺失才按 0.1% 估算。
+    const fee = first.fillFee !== undefined ? Math.abs(Number(first.fillFee)) : qty * px * 0.001;
     return {
       orderId: first.ordId ?? "",
-      status: "filled",
-      filledQty: qty,
+      status: qty > 0 ? "filled" : "rejected",
+      filledQty: qty > 0 ? qty : 0,
       avgPrice: px,
-      fee: qty * px * 0.001,
+      fee,
+      message: qty > 0 ? undefined : "已下单但未成交（状态 " + (first.state ?? "?") + "）",
     };
   }
 

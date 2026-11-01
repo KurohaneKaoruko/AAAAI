@@ -37,7 +37,16 @@ export class AuthError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** /api/logs 的行（level 与服务端 logger 对齐）。 */
+export interface LogLineView {
+  time: string;
+  level: "debug" | "info" | "warn" | "error";
+  scope: string;
+  message: string;
+}
+
+/** 带鉴权与 BASE 的请求；apiGet 等外部模块也复用这一条。 */
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = window.localStorage.getItem("aaaai.token");
   const res = await fetch(`${BASE}${path}`, {
     headers: {
@@ -246,6 +255,9 @@ export const api = {
   login: (username: string, password: string) =>
     request<{ ok: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  /** 服务端运行日志（环形缓冲，最新在后）。 */
+  logs: (limit = 300) =>
+    request<{ logs: LogLineView[] }>(`/api/logs?limit=${encodeURIComponent(String(limit))}`),
 
   // 交易所
   exchanges: () => request<{ adapters: AdapterMeta[] }>("/api/exchanges"),

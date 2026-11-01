@@ -47,6 +47,13 @@ export function toGatePair(symbol: string): string {
   return s;
 }
 
+/** 判断 Gate 的 fee_currency 是否为该交易对的计价币（USDT 之于 BTC_USDT）。 */
+export function isQuoteFee(feeCurrency: string, symbol: string): boolean {
+  const quote = toGatePair(symbol).split("_")[1];
+  if (!quote) return false;
+  return feeCurrency.trim().toUpperCase() === quote;
+}
+
 /** 反向：BTC_USDT -> BTCUSDT。 */
 export function fromGatePair(pair: string): string {
   return pair.replace("_", "");
@@ -201,8 +208,13 @@ export class GateAdapter implements ExchangeAdapter {
         message: "未配置 API Key，无法真实下单",
       };
     }
-    // Gate 市价单：amount=交易对数量；quote 买入用金额时需先转数量，这里以数量为准
-    const amount = String(req.quantity ?? 0);
+    // Gate 市价单：amount = 卖出时为基础币数量；买入时若给了金额（quoteQty）
+    // 则按金额下单（Gate 语义：市价买 amount=计价币金额），否则退回数量。
+    // 只认数量的话，Broker 传来的金额会被当成"数量 0.00003 个币"这种碎片单，
+    // 精度校验直接拒单 —— 买不起最小挂单单位。
+    const quote = Number(req.quoteQty ?? 0);
+    const useQuote = req.type === "MARKET" && req.side === "BUY" && quote > 0;
+    const amount = String(useQuote ? quote : (req.quantity ?? 0));
     if (!(Number(amount) > 0)) {
       return {
         orderId: "",
@@ -210,7 +222,7 @@ export class GateAdapter implements ExchangeAdapter {
         filledQty: 0,
         avgPrice: 0,
         fee: 0,
-        message: "下单数量必须大于 0",
+        message: useQuote ? "下单金额必须大于 0" : "下单数量必须大于 0",
       };
     }
     const body = [
@@ -241,16 +253,30 @@ export class GateAdapter implements ExchangeAdapter {
       amount?: string;
       average?: string;
       fee?: string;
+      fee_currency?: string;
     };
-    const filled = Number(req.quantity ?? 0) - Number(data.left ?? 0);
+    // 成交量：IOC 市价单可能部分成交。amount 是下单量，left 是剩余量；
+    // 市价买按金额下单时 amount 是计价币金额，响应里没有"成交了多少基础币"，
+    // 用成交额 / 均价反推（均价缺失时按拒单处理，不猜）。
     const avg = Number(data.average ?? 0);
+    const ordered = Number(useQuote ? req.quantity ?? 0 : amount);
+    const filled = Math.max(ordered - Number(data.left ?? 0), 0);
+    const filledQty = useQuote && avg > 0 ? filled / avg : filled;
     return {
       orderId: data.id ?? "",
-      status: filled > 0 ? "filled" : "rejected",
-      filledQty: filled > 0 ? filled : 0,
+      status: filledQty > 0 ? "filled" : "rejected",
+      filledQty: filledQty > 0 ? filledQty : 0,
       avgPrice: avg,
-      fee: Number(data.fee ?? 0) * avg,
-      message: filled > 0 ? undefined : "未成交（余额/精度不足或价格已变动）",
+      // fee 字段已含币种（fee_currency）：计价币计费时是"金额"（直接用），
+      // 基础币计费时是"数量"（乘均价折算成计价金额）。
+      // 币种未知时退回旧行为（乘均价），不猜币种。
+      fee:
+        avg > 0 && data.fee !== undefined && data.fee_currency
+          ? isQuoteFee(data.fee_currency, req.symbol)
+            ? Number(data.fee)
+            : Number(data.fee) * avg
+          : Number(data.fee ?? 0) * (avg || 0),
+      message: filledQty > 0 ? undefined : "未成交（余额/精度不足或价格已变动）",
     };
   }
 

@@ -93,6 +93,16 @@ export function App() {
     }
   };
 
+  const handleLogout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      /* 服务端会话可能已过期，照样清本地 */
+    }
+    window.localStorage.removeItem("aaaai.token");
+    await checkAuth();
+  }, [checkAuth]);
+
   if (auth?.required && !auth.ok) {
     return <LoginPage username={auth.username} onSuccess={() => void checkAuth()} />;
   }
@@ -111,7 +121,13 @@ export function App() {
         connections={store.connections}
       />
       <div className="app-main">
-        <TopBar store={store} theme={theme} onToggleTheme={toggle} />
+        <TopBar
+          store={store}
+          theme={theme}
+          onToggleTheme={toggle}
+          username={auth?.required ? auth.username : undefined}
+          onLogout={() => void handleLogout()}
+        />
         <main className="content">{render()}</main>
       </div>
       <Toasts store={store} />

@@ -612,6 +612,13 @@ test("运行存档：stop 后写盘，重启进程（重建 BotManager）后历�
     assert.ok(rec.trades.length > 0, "存档应含成交流水");
     assert.ok(rec.equityCurve.length > 0, "存档应含曲线");
     assert.equal(rec.tradesTruncated, false, "未截断必须如实标注 false");
+    // stop 时的最终快照必须与内存里看到的一致（Runtime 摘除顺序错了就会少尾巴）
+    const live = bots.state(bot.id);
+    assert.equal(
+      rec.metrics!.totalFills,
+      live.metrics!.totalFills,
+      "存档成交数应等于停止那一刻的全部成交（最终快照不丢尾巴）",
+    );
 
     // 重启：新建一个 BotManager（模拟进程重启）
     const bots2 = new BotManager(dir, config, connections, new LlmManager(dir));

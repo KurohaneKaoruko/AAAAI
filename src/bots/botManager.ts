@@ -398,6 +398,8 @@ export class BotManager {
     // 反过来（先删后 checkpoint）会被 checkpointRun 的守卫挡掉，
     // 结果是存档永远停在预热那一刻 —— 战绩丢了，界面却显示"已停止"。
     this.checkpointRun(bot, true);
+    // 快照要赶在 Runtime 摘除**之前**做：stop() 会先删 Runtime 再调 endRun，
+    // 顺序反过来 checkpointRun 就拿不到 rt、把上次节流点之后的数据全丢了。
     this.activeRun.delete(bot.id);
     this.runCheckpointAt.delete(bot.id);
     record.status = status;
@@ -718,8 +720,15 @@ export class BotManager {
     const st = this.state(id);
     if (st.status === "running") {
       this.states.set(id, { ...st, status: "stopped", finishedAt: new Date().toISOString() });
+      // endRun 要赶在 Runtime 摘除之前：它内部靠 checkpointRun(bot, true)
+      // 写最终快照，而 checkpointRun 需要 rt 取最新状态 ——
+      // 先摘 Runtime 的话，节流点之后的成交与曲线都不会进存档。
       this.endRun(bot, "stopped");
     }
+    // Runtime 一并摘除：留着的话，下次 start 会用一份带旧 Bus 订阅与旧 portfolio 的
+    // 半旧流水线（slicingOf 等也会读到上一次运行的残留），且随机器人增删越积越多。
+    // stop 之后 rt 为空是正常状态（未在运行的机器人没有 Runtime）。
+    this.runtimes.delete(id);
   }
 
   stopAll(): void {

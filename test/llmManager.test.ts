@@ -91,6 +91,43 @@ test("LlmManager: 配置持久化", () => {
   }
 });
 
+test("LlmManager: 档位与权重必须等长（levels/levelWeights 对齐）", () => {
+  const dir = tmpDir();
+  try {
+    const m = new LlmManager(dir);
+    // 只给 levels：权重应取默认档位权重并截断到等长（?? 与三元漏括号时会拿到 4 个）
+    const two = m.create({
+      label: "两档",
+      baseUrl: "https://a.test/v1",
+      model: "m",
+      apiKey: "k",
+      levels: ["flat", "strong"],
+    });
+    assert.equal(two.levels.length, 2);
+    assert.equal(two.levelWeights.length, 2, "只给 levels 时权重数应与档位数一致");
+    assert.deepEqual(two.levelWeights, [0, 0.25], "应取默认权重的前两位，而不是 4 个默认");
+
+    // levels 与 levelWeights 都给但长度不一致：按档位数对齐（缺的补 0）
+    const ragged = m.create({
+      label: "错位",
+      baseUrl: "https://b.test/v1",
+      model: "m",
+      apiKey: "k",
+      levels: ["a", "b", "c"],
+      levelWeights: [0.1, 0.9],
+    });
+    assert.equal(ragged.levelWeights.length, 3, "权重应补齐到档位数");
+    assert.deepEqual(ragged.levelWeights, [0.1, 0.9, 0], "缺的档位补 0（默认不建仓）");
+
+    // update 改档位数后同样要对齐
+    const resized = m.update(ragged.id, { levels: ["x", "y", "z", "w"] });
+    assert.equal(resized.levelWeights.length, 4, "改档位后权重跟着对齐");
+    assert.deepEqual(resized.levelWeights, [0.1, 0.9, 0, 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("负载均衡 · 轮询：均匀分配", () => {
   const dir = tmpDir();
   try {

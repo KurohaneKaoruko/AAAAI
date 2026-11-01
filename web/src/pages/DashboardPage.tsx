@@ -15,6 +15,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
+import { useBotsPolling } from "../state/useAppStore";
 import { EquityChart } from "../components/EquityChart";
 import { EventLog } from "../components/EventLog";
 import { Button, Empty, Panel } from "../components/ui";
@@ -30,28 +31,11 @@ const STATUS: Record<string, { text: string; cls: string }> = {
 
 export function DashboardPage({ store, onNavigate }: { store: AppStore; onNavigate?: (page: "bots" | "strategy") => void }) {
   const state = store.state;
-  const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBot, setSelectedBot] = useState<string>("");
   const [tab, setTab] = useState<"positions" | "trades" | "events">("positions");
 
-  // 机器人状态本来就在交易机器人页轮询；这里同样轮询，保证两个页面看到的是同一份数据
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const d = await fetch("/api/bots").then((r) => r.json());
-        if (alive && Array.isArray(d.bots)) setBots(d.bots);
-      } catch {
-        /* 服务不可用时保持原样 */
-      }
-    };
-    void load();
-    const t = setInterval(() => void load(), 3000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
+  // 机器人状态轮询：走统一的 apiGet（带 BASE 与鉴权），保证与机器人页看到同一份数据
+  const bots = useBotsPolling();
 
   const withData = useMemo(() => bots.filter((b) => b.state.metrics), [bots]);
   const selected = useMemo(

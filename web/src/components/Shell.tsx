@@ -1,9 +1,8 @@
 /** 侧边导航 + 顶栏 + 行情跑马灯 + 主题切换 + 提示条。 */
 
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { AppStore } from "../state/useAppStore";
-import type { Bot } from "../types";
+import { useBotsPolling } from "../state/useAppStore";
 import type { Theme } from "../lib/theme";
 import { Badge } from "./ui";
 import { ASSET_LABEL } from "../lib/format";
@@ -100,31 +99,19 @@ export function TopBar({
   store,
   theme,
   onToggleTheme,
+  username,
+  onLogout,
 }: {
   store: AppStore;
   theme: Theme;
   onToggleTheme: () => void;
+  /** 鉴权已启用时传入：undefined = 未启用鉴权（不显示退出入口），空串 = 仅 Token 模式 */
+  username?: string;
+  onLogout?: () => void;
 }) {
   const state = store.state;
-  // 顶栏反映的是"现在到底在跑什么" = 机器人（单账户引擎已删除）
-  const [bots, setBots] = useState<Bot[]>([]);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const d = await fetch("/api/bots").then((r) => r.json());
-        if (alive && Array.isArray(d.bots)) setBots(d.bots);
-      } catch {
-        /* 忽略 */
-      }
-    };
-    void load();
-    const t = setInterval(() => void load(), 3000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
+  // 机器人状态轮询：走统一的 apiGet（带 BASE 与鉴权），与交易机器人页看到同一份数据
+  const bots = useBotsPolling();
   const running = bots.filter((b) => b.state.status === "running");
   const liveCount = running.filter((b) => b.state.liveTrading).length;
   const execMode = state?.config?.execution?.mode ?? "paper";
@@ -150,6 +137,17 @@ export function TopBar({
       </div>
       <div className="topbar-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        {/* username 传 undefined = 鉴权未启用；传空串 = 仅 Token 模式（没有用户名），也显示退出 */}
+        {username !== undefined && onLogout && (
+          <button
+            type="button"
+            className="chip"
+            title="退出登录（清除本地 Token 并结束服务端会话）"
+            onClick={() => void onLogout()}
+          >
+            {username !== "" ? `${username} · 退出` : "退出登录"}
+          </button>
+        )}
       </div>
     </header>
   );

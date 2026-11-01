@@ -94,7 +94,7 @@ npm run typecheck # 服务端 + WebUI 全量类型检查
 ## 接入真实行情
 
 1. 进入 **交易所连接** 页 → 新建连接 → 选择 `Binance 币安`（或东财 / Stooq）→ 保存；
-2. 进入 **自选标的** 页 → 选择该连接 → 搜索 `BTC` / `BTCUSDT` / `AAPL` → 加入自选；
+2. 进入 **策略 → 候选池** 标签 → 选择该连接 → 搜索 `BTC` / `BTCUSDT` / `AAPL` → 加入候选池；
    （Gate.io 的 `BTC_USDT` 与其它家的 `BTCUSDT` 写法不同，搜索结果已统一成无下划线形式）
 3. 进 **交易机器人** 页 → 新建机器人 → 选连接、选标的、选策略 → 「启动」。
 
@@ -128,7 +128,7 @@ AAAAI/
 ├── data/                   # 运行时数据（已 gitignore）
 │   ├── connections.json    #   交易所连接元信息
 │   ├── secrets.json        #   API 密钥（0600）
-│   └── watchlist.json      #   自选标的
+│   └── watchlist.json      #   自选标的（候选池）
 ├── src/
 │   ├── core/               # 内核：类型 / 事件总线 / 日志环形缓冲
 │   ├── exchanges/          # 交易所适配层
@@ -136,13 +136,18 @@ AAAAI/
 │   │   ├── registry.ts     #   适配器注册与工厂
 │   │   ├── connectionManager.ts # 连接 CRUD + 密钥保管
 │   │   ├── simulated.ts / binance.ts / gate.ts / okx.ts / (removed).ts / stooq.ts
-│   ├── agents/             # 智能体：analyst / strategist / riskGuard / orchestrator
-│   ├── strategies/         # 策略：momentum / llmStrategy
+│   ├── agents/             # 智能体：analyst / strategist / riskGuard / allocator / orchestrator
+│   ├── strategies/         # 策略：momentum / llmStrategy / hybrid / allocator / 策略档案
 │   ├── data/streaming.ts   # 价格簿、K 线归并、实时轮询
 │   ├── risk/               # 风控规则
-│   ├── portfolio/          # 组合记账（现金/持仓/权益曲线/流水）
-│   ├── execution/          # 执行：paperBroker / exchangeBroker
-│   ├── llm/                # LLM：协议 / OpenAI 兼容 / 空实现
+│   ├── portfolio/          # 组合记账（现金/持仓/权益曲线/流水）+ 优化器
+│   ├── execution/          # 执行：paperBroker / exchangeBroker / 拆单
+│   ├── llm/                # LLM：协议 / OpenAI 兼容 / 多实例管理器 / 工具调用
+│   ├── news/               # 新闻：RSS 抓取 / 情感打分
+│   ├── validation/         # 稳健性体检：前推验证 / 多情景胜率
+│   ├── evolution/          # 决策留痕 + 自适应调参
+│   ├── bench/              # 模拟对照：参赛者装配 / 并行对比
+│   ├── bots/               # 交易机器人（多实例并行，唯一的运行入口）
 │   ├── backtest/           # 回测引擎（多标的）
 │   ├── server/             # HTTP API + SSE + 配置/策略/对照控制器
 │   ├── watchlist.ts        # 自选管理
@@ -162,8 +167,13 @@ AAAAI/
 | GET | `/api/exchanges` | 交易所目录 |
 | GET/POST/PUT/DELETE | `/api/connections[/:id]` | 连接管理 |
 | POST | `/api/connections/:id/test` | 连通性测试 |
-| GET | `/api/markets/search` | 标的搜索 |
-| GET/POST/DELETE | `/api/watchlist[/:id]` | 自选管理 |
+| GET | `/api/markets/search` `/api/markets/popular` | 标的搜索 / 常用标的 |
+| GET/POST/DELETE | `/api/watchlist[/:id]` | 自选（候选池）管理 |
+| GET/POST/PUT/DELETE | `/api/strategies[/:id]` | 策略档案（含复制 / 设默认） |
+| GET/POST/PUT/DELETE | `/api/bots[/:id]` | 交易机器人（唯一运行入口，含启停） |
+| POST | `/api/backtest` `/api/validation/*` `/api/bench/*` | 回测 / 稳健性体检 / 模拟对照 |
+| GET/POST | `/api/llm/profiles[/:id]` `/api/llm/*` | 模型多实例管理与测试 |
+| GET/POST | `/api/news` `/api/evolution` `/api/auth/*` | 新闻 / 自我进化 / 鉴权 |
 | POST | `/api/llm/test` `/api/tickers/refresh` | LLM 测试 / 候选池行情刷新 |
 | GET | `/api/events` | SSE：状态与事件流 |
 

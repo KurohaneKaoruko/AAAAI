@@ -1,18 +1,13 @@
 /** 系统页：运行信息、配置持久化、服务端日志。 */
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, type LogLineView } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { Bot } from "../types";
 import { Button, Notice, Panel } from "../components/ui";
 import { dateTime } from "../lib/format";
 
-interface LogLine {
-  time: string;
-  level: "debug" | "info" | "warn" | "error";
-  scope: string;
-  message: string;
-}
+type LogLine = LogLineView;
 
 export function SystemPage({ store }: { store: AppStore }) {
   const state = store.state;
@@ -25,8 +20,8 @@ export function SystemPage({ store }: { store: AppStore }) {
 
   const loadLogs = useCallback(async () => {
     try {
-      const res = await fetch(`${import.meta.env.DEV ? "http://localhost:8787" : ""}/api/logs?limit=300`);
-      const data = (await res.json()) as { logs: LogLine[] };
+      // request 自带 BASE（开发模式打 8787）与鉴权头；裸 fetch 会被 401 拦下
+      const data = await api.logs(300);
       setLogs(data.logs);
     } catch {
       /* 服务未就绪时忽略 */

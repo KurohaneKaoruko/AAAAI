@@ -4,19 +4,20 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ WebUI (React+Vite)      web/src/pages   7 个独立页面               │  界面
+│ WebUI (React+Vite)      web/src/pages   10 个独立页面 + 登录/详情  │  界面
 ├──────────────────────────────────────────────────────────────────┤
 │ Server                  src/server      REST + SSE + 配置/策略/对照控制器 │  接入层
 ├──────────────────────────────────────────────────────────────────┤
-│ Agents                  src/agents      分析/策略/风控/装配          │  智能体
-│ Strategies              src/strategies  动量 / LLM 决策              │
+│ Agents                  src/agents      分析/策略/风控/配置/装配      │  智能体
+│ Strategies              src/strategies  动量 / LLM / 混合 / 配置器    │
 │ Risk                    src/risk        仓位与熔断规则               │
-│ Portfolio               src/portfolio   记账、流水、权益曲线          │
-│ Execution               src/execution   paper / exchange 券商       │
+│ Portfolio               src/portfolio   记账、流水、权益曲线、优化器    │
+│ Execution               src/execution   paper / exchange 券商 / 拆单  │
+│ Bots                    src/bots        交易机器人（唯一运行入口）     │
 │ Backtest                src/backtest    多标的回测                   │
 ├──────────────────────────────────────────────────────────────────┤
 │ Exchanges               src/exchanges   适配器 + 连接管理 + 密钥       │  数据/交易
-│ Watchlist               src/watchlist   自选标的                      │
+│ Watchlist               src/watchlist   自选标的（候选池）            │
 ├──────────────────────────────────────────────────────────────────┤
 │ Core                    src/core        事件总线 / 类型 / 日志        │  内核
 └──────────────────────────────────────────────────────────────────┘
@@ -58,8 +59,14 @@ interface ExchangeAdapter {
 - 密钥 → `data/secrets.json`（0600，`data/` 已在 `.gitignore`）
 - `ConnectionView` 只暴露 `hasKey/hasSecret`，API 响应永远不含明文密钥
 
+**下单金额约定**：`OrderRequest.quantity`（基础币数量）与 `quoteQty`（计价币金额）任选其一，
+`ExchangeBroker` 两者都传。适配器取舍：Binance 市价买优先金额（`quoteOrderQty`）、其余用数量；
+Gate / OKX 市价买有金额时按金额下单（Gate `amount` / OKX `tgtCcy=quote_ccy`），卖出用数量。
+模拟交易所两者皆认。适配器自己处理精度/最小下单量，不足时返回 `rejected` 并带原因。
+
 **实盘降级链**：`execution.mode=live` 且适配器 `supportsTrading` 且已配 Key → `ExchangeBroker`；
 否则自动使用 `PaperBroker`，并在日志中告警、界面顶栏显示「模拟成交」。
+（机器人是例外：实时模式条件不满足时直接拒绝启动并说明缺哪条，绝不悄悄降级。）
 
 ## 通信约定
 
@@ -69,9 +76,10 @@ Agent 之间不允许直接引用对方实例（装配层除外），一律经 E
 | --- | --- | --- | --- |
 | `market.bar` | `Bar` | `streamBars` / `LivePoller` | Analyst / Strategist / Portfolio |
 | `agent.market_view` | `MarketView` | `MarketAnalystAgent` | `StrategistAgent` |
-| `strategy.signal` | `Signal` | `StrategistAgent` | `RiskGuardAgent` |
+| `strategy.signal` | `Signal` | `StrategistAgent` / `AllocatorAgent` | `RiskGuardAgent` |
+| `strategy.allocation` | `Allocation` | `AllocatorAgent` | 机器人事件流（决策留痕） |
 | `exec.order_intent` | `OrderIntent` | `RiskGuardAgent` | Broker |
-| `exec.order_rejected` | `Signal \| OrderIntent` | 各处 | 监控（预留） |
+| `exec.order_rejected` | `Signal \| OrderIntent` | 风控 / Broker | 机器人事件流（面板展示拒单原因） |
 | `exec.fill` | `Fill` | Broker | `PortfolioManager` |
 
 - `publish` 同步派发；`publishAsync` 顺序 await 每个处理器，流水线统一用后者保证顺序确定。
@@ -101,12 +109,12 @@ web/src/
 ├── App.tsx                 # 壳：侧边导航 + 顶栏 + 页面路由（state 驱动，无路由库）
 ├── state/useAppStore.ts    # 全局状态：配置/行情/对照 + SSE + 连接/自选缓存 + Toast
 ├── api.ts                  # REST 客户端 + EventSource 订阅
-├── pages/                  # dashboard / markets / exchanges / strategy / llm / risk / system
+├── pages/                  # dashboard / bots / exchanges / strategy / llm / compare / backtest / risk / system / settings（+ login / 机器人详情）
 ├── components/             # Shell / 图表 / 表格 / 事件流 / 运行控制 / UI 原子组件
 └── lib/format.ts           # 金额、百分比、数量、时间的统一格式化
 ```
 
-- 实时性靠 SSE：`state` 事件整体刷新，`event` 事件增量追加到事件流（保留最近 300 条）。
+- 实时性靠 SSE：`state` 事件整体刷新（机器人的运行数据不在这里，见 `/api/bots`）。
 - 所有页面共享同一个 `useAppStore`，切换页面不丢状态、不重复请求。
 
 ## 安全与一致性

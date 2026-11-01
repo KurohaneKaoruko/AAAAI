@@ -188,9 +188,22 @@ export class LlmManager implements LLMClient {
       enabled: input.enabled ?? true,
       createdAt: new Date().toISOString(),
       levels: input.levels?.length ? input.levels : [...DEFAULT_LEVELS],
-      levelWeights: normalizeWeights(input.levelWeights ?? input.levels?.length ? DEFAULT_LEVEL_WEIGHTS : undefined),
+      // 注意优先级：input.levelWeights ?? (input.levels?.length ? DEFAULT : undefined)。
+      // 少了括号时解析成 (input.levelWeights ?? input.levels?.length) ? DEFAULT : undefined，
+      // 只给 levels 不给 levelWeights 的调用会拿到 4 个默认权重配 2 个档位。
+      levelWeights: normalizeWeights(
+        input.levelWeights ?? (input.levels?.length ? DEFAULT_LEVEL_WEIGHTS : undefined),
+      ),
       instructions: input.instructions?.trim() || DEFAULT_INSTRUCTIONS,
     };
+    // 档位数与权重数必须一致：parseScoreAnswer 按 levelWeights[i] 取值，
+    // 长度错位会把"强"档位配到"平"的权重上（或取 undefined 当 0）。
+    // 多余截断、不足补 0（新档位默认不建仓，保守）。
+    if (profile.levelWeights.length !== profile.levels.length) {
+      profile.levelWeights = normalizeWeights(
+        profile.levels.map((_, i) => profile.levelWeights[i] ?? 0),
+      );
+    }
     this.profiles.push(profile);
     this.secrets.set(this.key(profile.id), { apiKey: input.apiKey ?? "", apiSecret: "" });
     this.persist();
@@ -209,7 +222,15 @@ export class LlmManager implements LLMClient {
     if (patch.timeoutMs !== undefined) profile.timeoutMs = patch.timeoutMs;
     if (patch.weight !== undefined) profile.weight = clampWeight(patch.weight);
     if (patch.enabled !== undefined) profile.enabled = patch.enabled;
-    if (patch.levels && patch.levels.length > 0) profile.levels = [...patch.levels];
+    if (patch.levels && patch.levels.length > 0) {
+      profile.levels = [...patch.levels];
+      // 档位变了而权重没跟着给：旧权重长度对不上会错位取值，
+      // 这里按新档位数截断/补齐（补 0 = 新档位默认不建仓，保守）。
+      if (profile.levelWeights.length !== profile.levels.length) {
+        const next = profile.levels.map((_, i) => profile.levelWeights[i] ?? 0);
+        profile.levelWeights = normalizeWeights(next);
+      }
+    }
     if (patch.levelWeights) profile.levelWeights = normalizeWeights(patch.levelWeights);
     if (patch.instructions) profile.instructions = patch.instructions;
     if (patch.apiKey) this.secrets.patch(this.key(id), { apiKey: patch.apiKey });
