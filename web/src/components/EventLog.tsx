@@ -18,6 +18,15 @@ const FILTERS: { id: string; label: string }[] = [
 export function EventLog({ events }: { events: EngineEventLine[] }) {
   const [filter, setFilter] = useState("all");
   const boxRef = useRef<HTMLDivElement>(null);
+  // 记住上一轮的最新 seq：新一轮推送里比它新的行就是"刚到的"，高亮一下
+  const lastSeqRef = useRef<number>(-1);
+  const freshSeq = events[0]?.seq ?? -1;
+  const prevSeq = lastSeqRef.current;
+  if (freshSeq !== prevSeq) {
+    // 渲染期同步记录（不进 effect）：严格模式下 effect 会跑两次，ref 在这里语义恰好正确
+    lastSeqRef.current = freshSeq;
+  }
+  const freshBoundary = prevSeq >= 0 ? prevSeq : -1;
 
   const list = useMemo(
     () => (filter === "all" ? events : events.filter((e) => e.topic === filter)),
@@ -46,7 +55,10 @@ export function EventLog({ events }: { events: EngineEventLine[] }) {
       <div className="event-log" ref={boxRef}>
         {list.length === 0 && <Empty>等待引擎事件…</Empty>}
         {list.map((e) => (
-          <div className="event-row" key={`${e.seq}-${e.topic}`}>
+          <div
+            className={`event-row ${e.seq > freshBoundary ? "event-fresh" : ""}`}
+            key={`${e.seq}-${e.topic}`}
+          >
             <span className="event-time mono">{time(e.timestamp)}</span>
             <span className={`event-topic topic-${e.topic}`}>{TOPIC_LABEL[e.topic] ?? e.topic}</span>
             <span className="event-summary mono">{e.summary}</span>

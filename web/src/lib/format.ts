@@ -46,6 +46,28 @@ export const weightRemainder = (weights: number[]): number => {
 export const signed = (v: number, digits = 2): string =>
   `${v >= 0 ? "+" : ""}${money(v, digits)}`;
 
+/**
+ * 带符号的百分比：盈亏类百分比永远带 +/− 与颜色配合使用。
+ * 「3.20%」看不出方向，「+3.20%」一眼就是涨 —— 量化界面里省掉的每个符号都要用颜色补回来。
+ */
+export const signedPct = (v: number, digits = 2): string =>
+  `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
+
+/**
+ * 运行时长：秒 → 人话（45s / 3分12秒 / 2时05分 / 1天3时）。
+ * 机器人列表与详情共用：长跑的机器人显示成 12345s 没法读。
+ */
+export const duration = (ms: number): string => {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}分${String(s % 60).padStart(2, "0")}秒`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}时${String(m % 60).padStart(2, "0")}分`;
+  return `${Math.floor(h / 24)}天${h % 24}时`;
+};
+
 export const qty = (v: number, precision = 6): string => {
   if (Math.abs(v) >= 1000) return v.toFixed(2);
   return v.toFixed(Math.min(precision, 6)).replace(/0+$/, "").replace(/\.$/, "") || "0";

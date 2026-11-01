@@ -1,6 +1,6 @@
 /** 共享 UI 原子组件：面板、表单、按钮、徽章、表格、空态、提示条。 */
 
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { Select, type SelectOption } from "./Select";
 
 export function Panel({
@@ -198,6 +198,7 @@ export function Button({
   type = "button",
   small = false,
   title,
+  domRef,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -207,9 +208,11 @@ export function Button({
   type?: "button" | "submit";
   small?: boolean;
   title?: string;
+  domRef?: Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={domRef}
       type={type}
       className={`btn btn-${variant} ${small ? "btn-sm" : ""}`}
       onClick={onClick}

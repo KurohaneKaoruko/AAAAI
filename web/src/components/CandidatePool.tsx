@@ -12,7 +12,7 @@ import type { AppStore } from "../state/useAppStore";
 import type { PopularSymbol, SymbolInfo } from "../types";
 import { AssetBadge } from "./Shell";
 import { Button, Empty, Notice, Panel, TextField } from "./ui";
-import { money, pct } from "../lib/format";
+import { money, signedPct } from "../lib/format";
 
 export function CandidatePool({ store }: { store: AppStore }) {
   const { connections, watchlist, state } = store;
@@ -216,7 +216,7 @@ export function CandidatePool({ store }: { store: AppStore }) {
                     <span className="mono">
                       {money(p.price, p.price > 100 ? 2 : 4)}
                       {p.changePct !== null && (
-                        <span className={p.changePct >= 0 ? "up" : "down"}> {pct(p.changePct)}</span>
+                        <span className={p.changePct >= 0 ? "up" : "down"}> {signedPct(p.changePct)}</span>
                       )}
                     </span>
                   ) : (
@@ -314,8 +314,7 @@ export function CandidatePool({ store }: { store: AppStore }) {
                       <span
                         className={`ticker-change mono ${q.changePct >= 0 ? "up" : "down"}`}
                       >
-                        {q.changePct >= 0 ? "+" : ""}
-                        {pct(q.changePct)}
+                        {signedPct(q.changePct)}
                       </span>
                     </>
                   ) : (

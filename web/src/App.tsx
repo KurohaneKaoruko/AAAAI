@@ -119,6 +119,7 @@ export function App() {
           }
         }}
         connections={store.connections}
+        connected={store.connected}
       />
       <div className="app-main">
         <TopBar

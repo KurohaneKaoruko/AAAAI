@@ -6,6 +6,7 @@ import type { AppStore } from "../state/useAppStore";
 import type { AdapterMeta, Connection } from "../types";
 import { AssetBadge } from "../components/Shell";
 import { Button, Empty, Notice, Panel, SelectField, TextField, Toggle } from "../components/ui";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ASSET_LABEL, dateTime } from "../lib/format";
 
 export function ExchangesPage({ store }: { store: AppStore }) {
@@ -14,6 +15,16 @@ export function ExchangesPage({ store }: { store: AppStore }) {
   const [editing, setEditing] = useState<Connection | null>(null);
   const [testing, setTesting] = useState<Record<string, "loading" | "ok" | "fail">>({});
   const [results, setResults] = useState<Record<string, string>>({});
+  /** 待确认删除的连接 */
+  const [confirmDel, setConfirmDel] = useState<Connection | null>(null);
+
+  const doDelete = async () => {
+    if (!confirmDel) return;
+    await api.deleteConnection(confirmDel.id);
+    setConfirmDel(null);
+    await store.reloadConnections();
+    store.toast("info", "连接已删除");
+  };
 
   const defaultConnectionId = state?.config?.execution?.connectionId ?? "";
 
@@ -84,6 +95,9 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                     <span className="dim small">{c.adapter.name}</span>
                     {c.testnet && <span className="chip chip-sm">测试网</span>}
                     {defaultConnectionId === c.id && <span className="chip chip-sm chip-accent">默认</span>}
+                    {/* 连接健康一眼可见：最近一次测试通过 = OK，失败 = 异常，没测过不打分 */}
+                    {testing[c.id] === "ok" && <span className="chip chip-sm chip-ok">连通</span>}
+                    {testing[c.id] === "fail" && <span className="chip chip-sm chip-live">异常</span>}
                   </div>
                   <div className="dim small">
                     ID {c.id} · 创建于 {dateTime(c.createdAt)} · 密钥 {c.hasKey ? "已配置" : "未配置"}
@@ -108,13 +122,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                   <Button
                     small
                     variant="danger"
-                    onClick={async () => {
-                      if (confirm(`确定删除连接「${c.label}」？`)) {
-                        await api.deleteConnection(c.id);
-                        await store.reloadConnections();
-                        store.toast("info", "连接已删除");
-                      }
-                    }}
+                    onClick={() => setConfirmDel(c)}
                   >
                     删除
                   </Button>
@@ -125,6 +133,16 @@ export function ExchangesPage({ store }: { store: AppStore }) {
         )}
         {editing && <ConnectionForm store={store} editing={editing} onDone={() => setEditing(null)} />}
       </Panel>
+
+      {/* 删除连接不可撤销：机器人可能还挂在上面。自绘弹窗把后果说清再让用户按。 */}
+      <ConfirmDialog
+        open={confirmDel !== null}
+        title={`删除连接「${confirmDel?.label ?? ""}」？`}
+        message="删除后引用这条连接的机器人将无法拉取行情，需要重新配置。此操作不可恢复。"
+        confirmText="删除连接"
+        onConfirm={() => void doDelete()}
+        onCancel={() => setConfirmDel(null)}
+      />
     </div>
   );
 }

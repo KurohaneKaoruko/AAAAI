@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { BalanceStrategy, LlmOverview, LlmProfile } from "../types";
 import { Badge, Button, Empty, Notice, NumberField, Panel, SelectField, TextField } from "../components/ui";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ASSET_LABEL } from "../lib/format";
 
 /** System One 预设地址/模型（与后端 SYSTEM_ONE_PRESETS 保持一致） */
@@ -63,6 +64,8 @@ export function LlmPage({ store }: { store: AppStore }) {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [results, setResults] = useState<Record<string, string>>({});
+  /** 待确认删除的实例（自绘二次确认） */
+  const [confirmDel, setConfirmDel] = useState<LlmProfile | null>(null);
 
   const usable = useMemo(() => profiles.filter((p) => p.enabled && p.hasKey), [profiles]);
   const kindList = useMemo(
@@ -232,23 +235,34 @@ export function LlmPage({ store }: { store: AppStore }) {
             <div className="card">
               <div className="card-label">可用实例</div>
               <div className="card-value">
-                {overview.available}
+                <span className={overview.available === 0 ? "down" : overview.available < overview.total ? "" : "up"}>
+                  {overview.available}
+                </span>
                 <span className="dim" style={{ fontSize: 13 }}> / {overview.total}</span>
               </div>
             </div>
             <div className="card">
               <div className="card-label">累计调用</div>
-              <div className="card-value">{overview.calls}</div>
+              <div className="card-value">{overview.calls.toLocaleString("zh-CN")}</div>
             </div>
             <div className="card">
               <div className="card-label">成功率</div>
               <div className={`card-value ${successRate > 0.9 ? "up" : successRate > 0.5 ? "" : "down"}`}>
                 {(successRate * 100).toFixed(1)}%
               </div>
+              {/* 失败次数不该藏在成功率里：>0 就要让用户看见还有几次没成 */}
+              {overview.calls - overview.success > 0 && (
+                <div className="card-label dim" style={{ marginTop: 2 }}>
+                  失败 {overview.calls - overview.success} 次
+                </div>
+              )}
             </div>
             <div className="card">
               <div className="card-label">平均延迟</div>
-              <div className="card-value">{overview.avgLatencyMs} ms</div>
+              <div className="card-value">
+                {overview.avgLatencyMs.toLocaleString("zh-CN")}
+                <span className="dim" style={{ fontSize: 13 }}> ms</span>
+              </div>
             </div>
             <div className="card">
               <div className="card-label">调度自检</div>
@@ -398,9 +412,7 @@ export function LlmPage({ store }: { store: AppStore }) {
                   void api.updateLlm(x.id, { enabled: !x.enabled } as Record<string, unknown>).then(reload)
                 }
                 onReset={(x) => void api.resetLlmStats(x.id).then(reload)}
-                onDelete={(x) => {
-                  if (confirm(`删除实例「${x.label}」？`)) void api.deleteLlm(x.id).then(reload);
-                }}
+                onDelete={(x) => setConfirmDel(x)}
               />
             ))}
           </div>
@@ -422,6 +434,19 @@ export function LlmPage({ store }: { store: AppStore }) {
         </div>
       </Panel>
       )}
+
+      {/* 删除模型实例：删了之后引用它的机器人会找不到决策模型，必须说清再删 */}
+      <ConfirmDialog
+        open={confirmDel !== null}
+        title={`删除实例「${confirmDel?.label ?? ""}」？`}
+        message="引用这个实例的机器人将失去决策模型（混合决策只缺一个也跑不起来），删除不可恢复。"
+        confirmText="删除实例"
+        onConfirm={() => {
+          if (confirmDel) void api.deleteLlm(confirmDel.id).then(reload);
+          setConfirmDel(null);
+        }}
+        onCancel={() => setConfirmDel(null)}
+      />
     </div>
   );
 }
@@ -454,6 +479,8 @@ function ProfileCard({
         <div className="connection-title">
           <span className="strong">{p.label}</span>
           <span className="mono dim small">{p.model}</span>
+          {/* 健康一眼判：绿=可用；黄=冷却/缺钥；灰=停用。供 5s 轮询刷新。 */}
+          {p.enabled && p.hasKey && !cooling && <span className="chip chip-sm chip-ok">可用</span>}
           {p.kind === "systemone" && <Badge tone="accent">决策模型</Badge>}
           {cooling && <Badge tone="down">熔断中</Badge>}
           {!p.hasKey && <Badge tone="warn">缺密钥</Badge>}

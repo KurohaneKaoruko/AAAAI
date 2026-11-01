@@ -13,14 +13,16 @@
  * 自己的 paperTrading，界面用 chip 显示，这里不重复断言。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppStore } from "../state/useAppStore";
 import { useBotsPolling } from "../state/useAppStore";
 import { EquityChart } from "../components/EquityChart";
 import { EventLog } from "../components/EventLog";
+import { Sparkline } from "../components/Sparkline";
 import { Button, Empty, Panel } from "../components/ui";
 import type { Bot } from "../types";
-import { dateTime, money, pct, symbolColumnLabel } from "../lib/format";
+import { dateTime, money, pct, signed, signedPct, symbolColumnLabel } from "../lib/format";
+import { useFlash } from "../lib/useFlash";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
   idle: { text: "待机", cls: "badge-idle" },
@@ -82,24 +84,30 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
         ) : (
           <>
             <div className="cards">
+              {/* 总权益：等宽大数 + 变化闪烁；迷你曲线取各机器人曲线的等权叠加，
+                  没有曲线就没有暗示（宁缺勿假） */}
+              <EquityCard equity={withData.length > 0 ? totalEquity : null} curves={withData.map((b) => b.state.equityCurve)} />
               <div className="card">
-                <div className="card-label">总权益（各机器人合计）</div>
-                <div className="card-value">{withData.length > 0 ? money(totalEquity) : "—"}</div>
+                <div className="card-label">运行中 / 总数</div>
+                <div className="card-value">
+                  <span className={runningCount > 0 ? "up" : ""}>{runningCount}</span>
+                  <span className="dim" style={{ fontSize: 13 }}> / {bots.length}</span>
+                </div>
               </div>
               <div className="card">
-                <div className="card-label">运行中</div>
-                <div className="card-value">{runningCount}</div>
+                <div className="card-label">本次盈亏（已实现合计）</div>
+                <div className="card-value">{sessionPnlCard(withData)}</div>
               </div>
               <div className="card">
                 <div className="card-label">最好</div>
                 <div className={`card-value ${best && best.r >= 0 ? "up" : "down"}`}>
-                  {best ? (allEqual ? "持平" : `${best.b.name} ${pct(best.r)}`) : "—"}
+                  {best ? (allEqual ? "持平" : `${best.b.name} ${signedPct(best.r)}`) : "—"}
                 </div>
               </div>
               <div className="card">
                 <div className="card-label">最差</div>
                 <div className={`card-value ${worst && worst.r < 0 ? "down" : "up"}`}>
-                  {worst ? (allEqual ? "持平" : `${worst.b.name} ${pct(worst.r)}`) : "—"}
+                  {worst ? (allEqual ? "持平" : `${worst.b.name} ${signedPct(worst.r)}`) : "—"}
                 </div>
               </div>
             </div>
@@ -115,10 +123,15 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
                       type="button"
                       className={`bot-pick ${on ? "bot-pick-on" : ""}`}
                       onClick={() => setSelectedBot(b.id)}
-                      title={`${b.name} · ${st.text}`}
+                      title={`${b.name} · ${st.text}${b.state.metrics ? ` · 收益 ${signedPct(b.state.metrics.totalReturn)}` : ""}`}
                       aria-pressed={on}
                     >
                       <span className="bot-pick-name">{b.name}</span>
+                      {b.state.metrics && (
+                        <span className={`bot-pick-ret mono ${b.state.metrics.totalReturn >= 0 ? "up" : "down"}`}>
+                          {signedPct(b.state.metrics.totalReturn)}
+                        </span>
+                      )}
                       <span className={`bot-pick-state ${st.cls}`}>
                         <span className="bot-pick-dot" />
                         {st.text}
@@ -172,7 +185,14 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
           </div>
 
           <div className="col">
-            <Panel title="权益曲线" subtitle={selected.symbols.join(" / ")}>
+            <Panel
+              title="权益曲线"
+              subtitle={
+                selected.state.metrics
+                  ? `${selected.symbols.join(" / ")} · 收益 ${signedPct(selected.state.metrics.totalReturn)} · 回撤 ${pct(selected.state.metrics.maxDrawdownPct)}`
+                  : selected.symbols.join(" / ")
+              }
+            >
               {selected.state.equityCurve.length > 1 ? (
                 <EquityChart curve={selected.state.equityCurve} initialCash={selected.risk.initialCash} />
               ) : (
@@ -217,8 +237,7 @@ function BotPositions({ bot, symLabel }: { bot: Bot; symLabel: string }) {
               <td className="num mono">{money(h.marketValue)}</td>
               <td className="num mono">{pct(h.weight)}</td>
               <td className={`num mono ${h.unrealizedPnl >= 0 ? "up" : "down"}`}>
-                {h.unrealizedPnl >= 0 ? "+" : ""}
-                {money(h.unrealizedPnl)}
+                {signed(h.unrealizedPnl)}
               </td>
             </tr>
           ))}
@@ -248,7 +267,7 @@ function BotTrades({ bot }: { bot: Bot }) {
       </div>
       <div className="card">
         <div className="card-label">收益率</div>
-        <div className={`card-value ${m.totalReturn >= 0 ? "up" : "down"}`}>{pct(m.totalReturn)}</div>
+        <div className={`card-value ${m.totalReturn >= 0 ? "up" : "down"}`}>{signedPct(m.totalReturn)}</div>
       </div>
       <div className="card">
         <div className="card-label">成交笔数</div>
@@ -260,7 +279,7 @@ function BotTrades({ bot }: { bot: Bot }) {
       </div>
       <div className="card">
         <div className="card-label">已实现盈亏</div>
-        <div className={`card-value ${m.realizedPnl >= 0 ? "up" : "down"}`}>{money(m.realizedPnl)}</div>
+        <div className={`card-value ${m.realizedPnl >= 0 ? "up" : "down"}`}>{signed(m.realizedPnl)}</div>
       </div>
       <div className="card">
         <div className="card-label">持仓数</div>
@@ -270,6 +289,56 @@ function BotTrades({ bot }: { bot: Bot }) {
   );
 }
 
+/** 总权益卡：数值闪烁 + 各机器人权益曲线等权叠加成一条迷你走势（宁缺勿假）。 */
+function EquityCard({ equity, curves }: { equity: number | null; curves: { timestamp: string; equity: number }[][] }) {
+  const flash = useFlash(equity ?? 0);
+  // 各曲线长度不一：按点序号对齐取平均，短曲线出界就不参与那一段 —— 汇总图的形状仍由真实数据决定
+  const maxLen = curves.reduce((a, c) => Math.max(a, c.length), 0);
+  const merged: number[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    let sum = 0;
+    let n = 0;
+    for (const c of curves) {
+      if (c[i]) {
+        sum += c[i]!.equity;
+        n++;
+      }
+    }
+    if (n > 0) merged.push(sum / n);
+  }
+  if (equity === null) {
+    return (
+      <div className="card">
+        <div className="card-label">总权益（各机器人合计）</div>
+        <div className="card-value dim">—</div>
+      </div>
+    );
+  }
+  return (
+    <div className="card">
+      <div className="card-label">总权益（各机器人合计）</div>
+      <div className="card-value">
+        <span className={flash}>{money(equity)}</span>
+        {merged.length > 1 && (
+          <span className="card-spark"><Sparkline values={merged.slice(-60)} /></span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 本次盈亏卡：带符号与方向色；金额与百分比都给，别让用户自己除。 */
+function sessionPnlCard(bots: Bot[]): ReactNode {
+  const pnl = bots.reduce((a, b) => a + (b.state.metrics?.realizedPnl ?? 0), 0);
+  const base = bots.reduce((a, b) => a + (b.risk.initialCash || 0), 0);
+  const p = base > 0 ? pnl / base : 0;
+  const cls = pnl > 0 ? "up" : pnl < 0 ? "down" : "dim";
+  return (
+    <span className={cls}>
+      {signed(pnl)} <span className="dim" style={{ fontSize: 12 }}>({signedPct(p)})</span>
+    </span>
+  );
+}
 function BotEvents({ bot }: { bot: Bot }) {
   if (bot.state.events.length === 0) return <div className="dim small">暂无事件</div>;
   return (

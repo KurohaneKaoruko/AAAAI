@@ -5,7 +5,7 @@ import type { AppStore } from "../state/useAppStore";
 import { useBotsPolling } from "../state/useAppStore";
 import type { Theme } from "../lib/theme";
 import { Badge } from "./ui";
-import { ASSET_LABEL } from "../lib/format";
+import { ASSET_LABEL, money, signed, signedPct } from "../lib/format";
 
 export type PageId =
   | "dashboard"
@@ -39,10 +39,13 @@ export function Sidebar({
   page,
   onNavigate,
   connections,
+  connected,
 }: {
   page: PageId;
   onNavigate: (p: PageId) => void;
   connections: AppStore["connections"];
+  /** SSE 实时通道状态：底部活性灯据此变色 */
+  connected: boolean;
 }) {
   const groups = [...new Set(NAV.map((n) => n.group))];
   return (
@@ -71,11 +74,25 @@ export function Sidebar({
         </div>
       ))}
       <div className="sidebar-foot">
-        <span className="dot dot-live" /> 模拟盘优先
+        <LiveDot connected={connected} /> {connected ? "数据实时" : "通道断开"}
         <br />
         <small>Ai-Agent-Auto-Asset-Investment</small>
       </div>
     </nav>
+  );
+}
+
+/**
+ * 侧边栏底部的引擎活性灯：
+ *   绿点呼吸 = SSE 实时通道连着；灰点 = 断开（数据可能已过期）。
+ * 以前这颗点永远亮着，通道断了它还装活 —— 状态可见性恰恰坏在这里。
+ */
+export function LiveDot({ connected }: { connected: boolean }) {
+  return (
+    <span
+      className={`dot ${connected ? "dot-live" : "dot-dead"}`}
+      title={connected ? "实时通道已连接，数据为最新" : "实时通道断开，以下数据可能过期"}
+    />
   );
 }
 
@@ -113,8 +130,16 @@ export function TopBar({
   // 机器人状态轮询：走统一的 apiGet（带 BASE 与鉴权），与交易机器人页看到同一份数据
   const bots = useBotsPolling();
   const running = bots.filter((b) => b.state.status === "running");
+  const errored = bots.filter((b) => b.state.status === "error");
   const liveCount = running.filter((b) => b.state.liveTrading).length;
   const execMode = state?.config?.execution?.mode ?? "paper";
+  const withData = bots.filter((b) => b.state.metrics);
+  const totalEquity = withData.reduce((a, b) => a + (b.state.metrics!.finalEquity), 0);
+  // 「本次盈亏」口径：各机器人本次运行已实现盈亏合计（服务端没有按自然日切分的字段，
+  // 这里如实标注为「本次盈亏」，别让用户以为按日历日算）。百分比按这些机器人的初始资金合计。
+  const sessionPnl = withData.reduce((a, b) => a + (b.state.metrics!.realizedPnl), 0);
+  const initialTotal = withData.reduce((a, b) => a + (b.risk.initialCash || 0), 0);
+  const pnlPct = initialTotal > 0 ? sessionPnl / initialTotal : 0;
 
   return (
     <header className="topbar">
@@ -128,12 +153,37 @@ export function TopBar({
         ) : (
           <span className="badge badge-idle">待机</span>
         )}
+        {errored.length > 0 && (
+          <span className="chip chip-live" title={errored.map((b) => `${b.name}: ${b.state.error ?? "未知错误"}`).join("\n")}>
+            {errored.length} 个异常
+          </span>
+        )}
         <span className={`chip ${execMode === "live" ? "chip-live" : ""}`}>
           {execMode === "live" ? "真实下单" : "模拟成交"}
         </span>
         <span className={`chip ${store.connected ? "chip-ok" : "chip-off"}`}>
           {store.connected ? "实时通道 OK" : "通道断开"}
         </span>
+
+        {/* 账户摘要条：总权益 + 本次盈亏。有数据才显示，别拿 0 冒充账户。 */}
+        {withData.length > 0 && (
+          <div className="acct-strip">
+            <div className="acct-item">
+              <span className="acct-label">总权益</span>
+              <span className="acct-value">{money(totalEquity)}</span>
+              <span className="acct-sub">{withData.length} 个账户</span>
+            </div>
+            <div className="acct-item">
+              <span className="acct-label">本次盈亏</span>
+              <span className={`acct-value ${sessionPnl > 0 ? "up" : sessionPnl < 0 ? "down" : ""}`}>
+                {signed(sessionPnl)}
+              </span>
+              <span className={`acct-sub ${pnlPct > 0 ? "up" : pnlPct < 0 ? "down" : ""}`}>
+                {signedPct(pnlPct)}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
       <div className="topbar-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />

@@ -239,7 +239,12 @@ code {
 .sidebar-foot { margin-top: auto; font-size: 11px; color: var(--text-dim); padding: 0 10px; }
 .sidebar-foot small { font-size: 10px; opacity: 0.7; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
-.dot-live { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.dot-live { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: badge-breathe 2s ease-in-out infinite; }
+/* 断连：灰色静止。亮着但实际断了的灯比灭着的灯危害大。 */
+.dot-dead { background: var(--text-dim); opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) {
+  .dot-live { animation: none; }
+}
 
 .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .content { padding: 16px 20px 28px; }
@@ -282,6 +287,34 @@ code {
 .chip-off { color: var(--warn); border-color: var(--notice-warn-border); }
 .chip-live { color: var(--red); border-color: var(--notice-err-border); font-weight: 600; }
 
+/* ---------- 顶栏权益摘要（量化终端的「账户条」） ----------
+   一眼三件事：总权益多少、今天赚没赚、系统活着没有。
+   数字用等宽大字，标签用小字灰 —— 与主内容区的卡片拉开层级。 */
+.acct-strip {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-left: 8px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-soft);
+}
+.acct-item { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.acct-label { font-size: 10.5px; color: var(--text-dim); letter-spacing: 0.4px; }
+.acct-value {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.acct-value.up { color: var(--up); }
+.acct-value.down { color: var(--down); }
+.acct-sub { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.acct-sub.up { color: var(--up); }
+.acct-sub.down { color: var(--down); }
+
+@media (max-width: 1100px) { .acct-strip { display: none; } }
+
 .badge {
   padding: 3px 10px;
   border-radius: 999px;
@@ -301,6 +334,50 @@ code {
 .badge-down { color: var(--down); }
 .badge-warn { color: var(--warn); }
 .badge-accent { color: var(--accent); }
+
+/* ---------- 专业状态呈现 ----------
+   呼吸灯：运行中的机器人在动，「死的」一动不动 —— 一眼分清活没活着。
+   状态徽章前的小圆点由 data-pulse 挂在徽章文本前。 */
+.badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.badge-running::before {
+  /* 呼吸动画只给「运行中」：待机/停止是静默态，动反而误导 */
+  animation: badge-breathe 2s ease-in-out infinite;
+  opacity: 1;
+}
+.badge-error::before { opacity: 1; }
+@keyframes badge-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  50% { opacity: 0.45; box-shadow: 0 0 0 3px transparent; }
+}
+/* 用户的系统 reduced-motion 时退化为常亮点，不闪 */
+@media (prefers-reduced-motion: reduce) {
+  .badge-running::before { animation: none; }
+}
+
+/* 数值闪烁：SSE/轮询新值到达时高亮一下再淡出（方向色由 JS 挂 flash-up/flash-down） */
+.flash-up { animation: flash-up 0.9s ease-out; }
+.flash-down { animation: flash-down 0.9s ease-out; }
+@keyframes flash-up {
+  0% { color: var(--up); text-shadow: 0 0 8px color-mix(in srgb, var(--up) 55%, transparent); }
+  100% { text-shadow: none; }
+}
+@keyframes flash-down {
+  0% { color: var(--down); text-shadow: 0 0 8px color-mix(in srgb, var(--down) 55%, transparent); }
+  100% { text-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down { animation: none; }
+}
 
 /* ---------- 候选池行情（策略页） ---------- */
 .quote-block { margin-top: 14px; }
@@ -378,6 +455,8 @@ code {
 .bot-pick:hover { border-color: var(--accent); }
 .bot-pick-on { border-color: var(--accent); background: var(--accent-soft); }
 .bot-pick-on .bot-pick-name { color: var(--accent); font-weight: 600; }
+/* 选择器里的收益：等宽 + 方向色，扫一行选择器就知道谁在赚 */
+.bot-pick-ret { font-size: 12px; font-variant-numeric: tabular-nums; }
 .bot-pick-state {
   display: inline-flex;
   align-items: center;
@@ -391,6 +470,11 @@ code {
 .bot-pick-state.badge-running { color: var(--green); background: none; }
 .bot-pick-state.badge-stopped { color: var(--accent); background: none; }
 .bot-pick-state.badge-error { color: var(--red); background: none; }
+/* 选择器自己画点（不带徽章的 ::before），运行中的点同样呼吸 */
+.bot-pick-state.badge-running .bot-pick-dot { animation: badge-breathe 2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .bot-pick-state.badge-running .bot-pick-dot { animation: none; }
+}
 
 /* 主题切换 */
 .theme-toggle {
@@ -659,24 +743,31 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   flex-direction: column;
 }
 .card-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 3px; }
-.card-value { font-family: var(--mono); font-size: 17px; font-weight: 600; margin-top: auto; }
+.card-value { font-family: var(--mono); font-size: 17px; font-weight: 600; margin-top: auto; font-variant-numeric: tabular-nums; }
+/* 卡片右下角的迷你走势：主数值旁的一点趋势提示，弱化到不抢数字 */
+.card-spark { float: right; opacity: 0.8; margin-top: 4px; }
 
 /* ---------- 表格 ---------- */
 
 .table-scroll { overflow-x: auto; }
 .table-scroll-tall { max-height: 420px; overflow-y: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .table th {
   position: sticky; top: 0;
   background: var(--bg-panel);
   text-align: left; color: var(--text-dim); font-weight: 500;
-  padding: 8px 10px; border-bottom: 1px solid var(--border);
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
   white-space: nowrap; z-index: 1;
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
 }
 .table th.num { text-align: right; }
-.table td { padding: 8px 10px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+.table td { padding: 5px 10px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+.table tbody tr:nth-child(even) { background: var(--row-alt); }
 .table tbody tr:hover { background: var(--row-alt-hover); }
 .table tbody tr:last-child td { border-bottom: none; }
+/* 数字列统一等宽字体 + 表格数字（tabular-nums）：上下行个位对齐才扫得快 */
+.table td.mono, .table td.num { font-variant-numeric: tabular-nums; }
 
 .kv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .kv-table td { padding: 7px 0; border-bottom: 1px solid var(--border-soft); }
@@ -716,6 +807,37 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   padding: 5px 9px; border-radius: 6px; font-size: 12px; font-family: var(--mono);
 }
 
+/* ---------- 迷你走势图（Sparkline）----------
+   卡片/表格里塞不下一张图，但一条 24×40 的曲线足以传达「最近在涨还是在跌」。 */
+.spark { display: block; }
+.spark-line { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.spark-fill { opacity: 0.14; }
+
+/* ---------- 确认弹窗（危险操作二次确认）---------- */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: confirm-in 0.14s ease-out;
+}
+@keyframes confirm-in { from { opacity: 0; } to { opacity: 1; } }
+.confirm-box {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 400px;
+  padding: 18px 20px;
+  animation: confirm-pop 0.16s ease-out;
+}
+@keyframes confirm-pop { from { transform: scale(0.96); opacity: 0.6; } to { transform: scale(1); opacity: 1; } }
+.confirm-title { font-size: 14.5px; font-weight: 600; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.confirm-title .confirm-mark { color: var(--red); font-size: 16px; }
+.confirm-msg { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 0 0 16px; white-space: pre-line; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* ---------- 事件流 ---------- */
 
 .filter-bar { display: flex; gap: 5px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
@@ -733,6 +855,15 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   align-items: baseline; padding: 4px 6px; border-radius: 5px; font-size: 12px;
 }
 .event-row:nth-child(odd) { background: var(--row-alt); }
+/* 新事件到达：左侧短暂高亮后淡出，眼睛顺着颜色找到最新一条 */
+.event-fresh { animation: event-in 1.6s ease-out; }
+@keyframes event-in {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .event-fresh { animation: none; }
+}
 .event-time { color: var(--text-dim); }
 .event-topic {
   text-align: center; border-radius: 4px; padding: 1px 0;
@@ -1440,12 +1571,16 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   display: flex;
   flex-direction: column;
   gap: 2px;
+  background: var(--bg-elev);
 }
-.stat-label { font-size: 11.5px; color: var(--text-dim); }
-.stat-value { font-size: 18px; font-weight: 600; }
+.stat-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.3px; }
+.stat-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stat-value em { font-size: 12px; font-style: normal; }
 .stat-note { font-size: 11.5px; color: var(--text-dim); }
 .stat-inline { font-size: 12.5px; color: var(--text-dim); }
+/* 指标卡内的迷你走势图：贴右下角，不挤主数值 */
+.stat-tile { position: relative; overflow: hidden; }
+.stat-spark { position: absolute; right: 6px; bottom: 5px; opacity: 0.85; }
 
 .evo-log { margin-top: 10px; }
 .evo-row {

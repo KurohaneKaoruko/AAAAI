@@ -5,9 +5,11 @@ import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { Bot, BotAllocation, BotInput, Connection, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
 import { StrategyPicker, describe } from "../components/StrategyProfiles";
-import { money, pct, qty, signed, time, wPct, weightRemainder } from "../lib/format";
+import { money, pct, qty, signed, signedPct, time, duration, wPct, weightRemainder } from "../lib/format";
+import { useFlash } from "../lib/useFlash";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
   idle: { text: "待机", cls: "badge-idle" },
@@ -33,6 +35,9 @@ export function BotsPage({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Bot | null>(null);
+  /** 待确认删除的机器人（自绘二次确认弹窗） */
+  const [confirmDel, setConfirmDel] = useState<Bot | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [pendingEdit, setPendingEdit] = useState<string | null>(null);
   // 详情页点「编辑」-> 回列表并打开该机器人的表单
@@ -94,6 +99,18 @@ export function BotsPage({
   const stopAll = async () => {
     await api.stopAllBots();
     await reload();
+  };
+
+  const doDelete = async () => {
+    if (!confirmDel) return;
+    setDeleting(true);
+    try {
+      await api.deleteBot(confirmDel.id).catch(() => undefined);
+      setConfirmDel(null);
+      await reload();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const runningCount = bots.filter((b) => b.state.status === "running").length;
@@ -164,10 +181,8 @@ export function BotsPage({
                 onStop={() => void stop(b.id)}
                 onEdit={() => { setEditing(b); setCreating(false); }}
                 onDelete={async () => {
-                  if (confirm(`删除机器人「${b.name}」？`)) {
-                    await api.deleteBot(b.id).catch(() => undefined);
-                    void reload();
-                  }
+                  // 删除不可撤销且会连着战绩一起没：自绘弹窗二次确认（替代 window.confirm）
+                  setConfirmDel(b);
                 }}
                 onToggle={async (v) => {
                   await api.updateBot(b.id, { enabled: v });
@@ -179,6 +194,16 @@ export function BotsPage({
           </div>
         )}
       </Panel>
+
+      <ConfirmDialog
+        open={confirmDel !== null}
+        title={`删除机器人「${confirmDel?.name ?? ""}」？`}
+        message={`将删除这台机器人及其全部运行存档（${confirmDel?.history.length ?? 0} 次运行记录），不可恢复。正在运行的话会先停止。`}
+        confirmText="删除"
+        busy={deleting}
+        onConfirm={() => void doDelete()}
+        onCancel={() => setConfirmDel(null)}
+      />
     </div>
   );
 }
@@ -223,6 +248,8 @@ function BotCard({
   const m = bot.state.metrics;
   const a = bot.state.allocation;
   const running = bot.state.status === "running";
+  // 权益每 3s 轮询一次，变化时闪一下方向色：扫一列卡片时先看到谁动了
+  const equityFlash = useFlash(m?.finalEquity ?? 0);
 
   return (
     <div className="bot-card">
@@ -260,7 +287,7 @@ function BotCard({
           <Button small variant="primary" onClick={onStart} disabled={running} busy={busy}>
             {running ? "运行中" : "启动"}
           </Button>
-          <Button small variant="danger" onClick={onStop} disabled={!running}>
+          <Button small variant="danger" onClick={onStop} disabled={!running} busy={busy && !running}>
             停止
           </Button>
           <Button small onClick={onEdit}>编辑</Button>
@@ -302,17 +329,17 @@ function BotCard({
 
       {m ? (
         <div className="bot-stats">
-          <span>权益 <b className="mono">{money(m.finalEquity)}</b></span>
+          <span>权益 <b className={`mono ${equityFlash}`}>{money(m.finalEquity)}</b></span>
           <span className={m.totalReturn >= 0 ? "up" : "down"}>
-            收益 <b className="mono">{(m.totalReturn * 100).toFixed(2)}%</b>
+            收益 <b className="mono">{signedPct(m.totalReturn)}</b>
           </span>
+          <span>已实现 <b className="mono">{signed(m.realizedPnl)}</b></span>
           <span>成交 <b className="mono">{m.totalFills}</b></span>
           <span>回撤 <b className="mono">{pct(m.maxDrawdownPct)}</b></span>
           <span>持仓 <b className="mono">{m.openPositions}</b></span>
           <span className="dim">
             {/* 实时 K 线与预热历史分开数：合在一起会让人以为启动就处理了一大段行情 */}
-            实时 {bot.state.bars} 根 · 预热 {bot.state.warmupBars} 根 ·{" "}
-            {(bot.state.durationMs / 1000).toFixed(0)}s
+            实时 {bot.state.bars} 根 · 预热 {bot.state.warmupBars} 根 · 运行 {duration(bot.state.durationMs)}
           </span>
         </div>
       ) : (

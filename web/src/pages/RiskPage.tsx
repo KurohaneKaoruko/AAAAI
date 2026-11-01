@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
 import type { RiskSection } from "../types";
 import { Button, Notice, NumberField, Panel, SelectField } from "../components/ui";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { money, pct } from "../lib/format";
 
 export function RiskPage({ store }: { store: AppStore }) {
   const config = store.state?.config;
   const [form, setForm] = useState<RiskSection | undefined>(config?.risk);
   const [saving, setSaving] = useState(false);
+  /** 「真实下单」确认弹窗（全站最危险的开关，切之前必须二次确认） */
+  const [confirmLive, setConfirmLive] = useState(false);
+  const [savingLive, setSavingLive] = useState(false);
 
   useEffect(() => {
     if (config?.risk) setForm(config.risk);
@@ -39,9 +43,11 @@ export function RiskPage({ store }: { store: AppStore }) {
             { value: "paper", label: "模拟成交（本地撮合，不动真钱）" },
             { value: "live", label: "真实下单（需交易所 API Key，危险）" },
           ]}
-          onChange={(v) =>
-            void store.patchConfig({ execution: { ...exec!, mode: v as "paper" | "live" } })
-          }
+          onChange={(v) => {
+            // 切「真实下单」是全站最危险的一个开关：先在弹窗里把后果说清，确认了才写配置
+            if (v === "live") setConfirmLive(true);
+            else void store.patchConfig({ execution: { ...exec!, mode: "paper" } });
+          }}
         />
         {live ? (
           <Notice tone="warn">
@@ -52,6 +58,26 @@ export function RiskPage({ store }: { store: AppStore }) {
           <Notice tone="info">当前为模拟成交：所有订单在本地撮合，不涉及真实资金。</Notice>
         )}
         <div className="hint-line">已保存。正在运行的引擎继续使用启动时的设置，重新启动后生效。</div>
+
+        <ConfirmDialog
+          open={confirmLive}
+          title="切换到真实下单？"
+          message="之后机器人发出的订单会通过交易所 API 进入真实市场，使用真实资金成交。\n请确认：连接的 API Key 具备交易权限、机器人策略经过模拟验证。"
+          confirmText="切换到真实下单"
+          busy={savingLive}
+          onConfirm={() => {
+            setSavingLive(true);
+            void store
+              .patchConfig({ execution: { ...exec!, mode: "live" } })
+              .then(() => store.toast("error", "已切换为真实下单 —— 请确认风控参数"))
+              .catch(() => undefined)
+              .finally(() => {
+                setSavingLive(false);
+                setConfirmLive(false);
+              });
+          }}
+          onCancel={() => setConfirmLive(false)}
+        />
       </Panel>
 
       <Panel

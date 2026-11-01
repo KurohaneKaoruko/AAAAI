@@ -16,7 +16,7 @@ import type { AppStore } from "../state/useAppStore";
 import type { ComparisonResult, Participant, RunnerResult } from "../types";
 import { Button, Empty, Notice, NumberField, Panel } from "../components/ui";
 import { Badge } from "../components/ui";
-import { money, pct, signed, time } from "../lib/format";
+import { money, pct, signed, signedPct, time } from "../lib/format";
 
 const PALETTE = ["#4f8ef7", "#2fbf82", "#e3a53c", "#c699f0", "#f0554b", "#57b6c9", "#a06ef7", "#94a3b8"];
 
@@ -361,9 +361,9 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
                       <td className="small mono dim">
                         {r.params.fastWindow}/{r.params.slowWindow} · ≤{Math.round(Number(r.params.maxTargetWeight) * 100)}%
                       </td>
-                      <td className={`mono num ${r.totalReturn >= 0 ? "up" : "down"}`}>{pct(r.totalReturn)}</td>
+                      <td className={`mono num ${r.totalReturn >= 0 ? "up" : "down"}`}>{signedPct(r.totalReturn)}</td>
                       <td className="num mono">{money(r.finalEquity)}</td>
-                      <td className="num mono dim">{pct(r.maxDrawdownPct)}</td>
+                      <td className={`num mono ${r.maxDrawdownPct > 0.15 ? "down" : "dim"}`}>{pct(r.maxDrawdownPct)}</td>
                       <td className="num mono">{r.winRate > 0 ? pct(r.winRate, 0) : "—"}</td>
                       <td className="num mono">{Number.isFinite(r.profitFactor) ? r.profitFactor.toFixed(2) : "∞"}</td>
                       <td className="num mono">{r.fillCount}</td>
@@ -401,6 +401,8 @@ function CompareChart({ results, initialCash }: { results: RunnerResult[]; initi
   const W = 900;
   const H = 300;
   const pad = { top: 18, right: 20, bottom: 26, left: 64 };
+  // 悬停十字线：多条线同屏时更要能对齐读数 —— 十字线 + 各选手同一横截面的权益
+  const [hover, setHover] = useState<number | null>(null);
 
   const series = results.filter((r) => r.equityCurve.length > 1);
   if (series.length === 0) return <Empty>暂无权益数据</Empty>;
@@ -416,7 +418,19 @@ function CompareChart({ results, initialCash }: { results: RunnerResult[]; initi
 
   return (
     <div className="chart-wrap">
-      <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="权益曲线对比">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="chart"
+        role="img"
+        aria-label="权益曲线对比"
+        onMouseMove={(e) => {
+          const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+          const rel = ((e.clientX - rect.left) / rect.width) * W;
+          const i = Math.round(((rel - pad.left) / (W - pad.left - pad.right)) * (maxLen - 1));
+          setHover(i >= 0 && i < maxLen ? i : null);
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
         {[0, 0.25, 0.5, 0.75, 1].map((t) => {
           const v = min + span * t;
           return (
@@ -436,13 +450,51 @@ function CompareChart({ results, initialCash }: { results: RunnerResult[]; initi
             .join(" ");
           return <path key={r.id} d={d} fill="none" stroke={color} strokeWidth={2} />;
         })}
+        {hover !== null && (
+          <>
+            <line
+              x1={pad.left + ((W - pad.left - pad.right) * hover) / (maxLen - 1)}
+              x2={pad.left + ((W - pad.left - pad.right) * hover) / (maxLen - 1)}
+              y1={pad.top}
+              y2={H - pad.bottom}
+              className="cursor-line"
+            />
+            {series.map((r, idx) => {
+              if (hover >= r.equityCurve.length) return null;
+              const p = r.equityCurve[hover]!;
+              return (
+                <circle
+                  key={r.id}
+                  cx={x(hover, r.equityCurve.length)}
+                  cy={y(p.equity)}
+                  r={3.5}
+                  fill={PALETTE[idx % PALETTE.length]}
+                />
+              );
+            })}
+          </>
+        )}
       </svg>
+      {hover !== null && (
+        <div className="chart-tooltip">
+          <div className="dim" style={{ fontSize: 11 }}>第 {hover + 1} / {maxLen} 点</div>
+          {series.map((r) =>
+            hover < r.equityCurve.length ? (
+              <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span className="runner-dot" style={{ background: PALETTE[series.indexOf(r) % PALETTE.length] }} />
+                <span className="small">{r.label}</span>
+                <span className="mono small" style={{ marginLeft: "auto" }}>{money(r.equityCurve[hover]!.equity)}</span>
+              </div>
+            ) : null,
+          )}
+        </div>
+      )}
       <div className="chart-legend">
         {series.map((r, idx) => (
           <span className="legend-item" key={r.id}>
             <span className="runner-dot" style={{ background: PALETTE[idx % PALETTE.length] }} />
             {r.label}
-            <b className={r.totalReturn >= 0 ? "up" : "down"}>{pct(r.totalReturn)}</b>
+            <b className={r.totalReturn >= 0 ? "up" : "down"}>{signedPct(r.totalReturn)}</b>
           </span>
         ))}
         <span className="legend-item dim">共 {maxLen} 个数据点</span>

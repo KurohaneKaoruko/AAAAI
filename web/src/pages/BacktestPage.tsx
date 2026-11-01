@@ -13,8 +13,9 @@ import { api } from "../api";
 import { useAppStore, type AppStore } from "../state/useAppStore";
 import { Button, Empty, Notice, NumberField, Panel, SelectField } from "../components/ui";
 import { EquityChart } from "../components/EquityChart";
+import { Sparkline } from "../components/Sparkline";
 import { TradesTable } from "../components/TradesTable";
-import { money, pct, signed } from "../lib/format";
+import { money, pct, signed, signedPct } from "../lib/format";
 import type { BacktestResult, Connection, StrategyProfile, WatchItem } from "../types";
 
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
@@ -272,11 +273,11 @@ export function BacktestPage() {
             </Notice>
           )}
           <div className="grid-4">
-            <Stat label="期末权益" value={money(result.metrics.finalEquity, 2)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />
-            <Stat label="收益率" value={signed(result.metrics.totalReturn * 100) + "%"} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />
+            <Stat label="期末权益" value={money(result.metrics.finalEquity, 2)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} spark={result.equityCurve.map((p) => p.equity)} />
+            <Stat label="收益率" value={signedPct(result.metrics.totalReturn)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />
             <Stat label="已实现盈亏" value={signed(result.metrics.realizedPnl)} tone={result.metrics.realizedPnl >= 0 ? "up" : "down"} />
             <Stat label="成交笔数" value={String(result.metrics.totalFills)} />
-            <Stat label="最大回撤" value={pct(result.metrics.maxDrawdownPct)} />
+            <Stat label="最大回撤" value={pct(result.metrics.maxDrawdownPct)} tone={result.metrics.maxDrawdownPct > 0.1 ? "down" : undefined} />
             <Stat label="期末持仓" value={String(result.metrics.openPositions)} />
           </div>
 
@@ -340,11 +341,16 @@ export function BacktestPage() {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
+function Stat({ label, value, tone, spark }: { label: string; value: string; tone?: "up" | "down"; spark?: number[] }) {
   return (
     <div className="stat-tile">
       <span className="stat-label">{label}</span>
       <span className={`stat-value mono ${tone ?? ""}`}>{value}</span>
+      {spark && spark.length > 1 && (
+        <span className="stat-spark">
+          <Sparkline values={spark.slice(-60)} width={64} height={22} />
+        </span>
+      )}
     </div>
   );
 }

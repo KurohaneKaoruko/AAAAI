@@ -11,9 +11,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { Button, Empty, Panel } from "../components/ui";
+import { Sparkline } from "../components/Sparkline";
 import { describe } from "../components/StrategyProfiles";
 import { EquityChart } from "../components/EquityChart";
-import { money, pct, qty, signed, time, wPct, dateTime, symbolColumnLabel, TOPIC_LABEL } from "../lib/format";
+import { money, pct, qty, signed, signedPct, time, duration, wPct, dateTime, symbolColumnLabel, TOPIC_LABEL } from "../lib/format";
 import type { AppStore } from "../state/useAppStore";
 import type { Bot, BotAction, StrategyProfile } from "../types";
 
@@ -172,7 +173,7 @@ export function BotDetailPage({
             <em>启动于</em> <b className="mono">{dateTime(st.startedAt)}</b>
           </span>
           <span>
-            <em>运行时长</em> <b className="mono">{(st.durationMs / 1000).toFixed(0)}s</b>
+            <em>运行时长</em> <b className="mono">{duration(st.durationMs)}</b>
           </span>
           <span>
             <em>实时 K 线</em> <b className="mono">{st.bars}</b>
@@ -188,13 +189,13 @@ export function BotDetailPage({
         subtitle="只统计实时收到的 K 线；预热历史只喂指标，不产生成交。成交按决策的下一根 K 线开盘价模拟，已计手续费与滑点"
       >
         <div className="grid-4">
-          <Stat label="权益" value={m ? money(m.finalEquity) : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} />
-          <Stat label="收益率" value={m ? `${signed(m.totalReturn * 100)}%` : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} />
+          <Stat label="权益" value={m ? money(m.finalEquity) : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} spark={st.equityCurve.map((p) => p.equity)} />
+          <Stat label="收益率" value={m ? signedPct(m.totalReturn) : "—"} tone={(m?.totalReturn ?? 0) >= 0 ? "up" : "down"} />
           <Stat label="已实现盈亏" value={m ? signed(m.realizedPnl) : "—"} tone={(m?.realizedPnl ?? 0) >= 0 ? "up" : "down"} />
           <Stat label="浮动盈亏" value={a ? signed(a.holdings.reduce((s, h) => s + h.unrealizedPnl, 0)) : "—"} tone={a && a.holdings.reduce((s, h) => s + h.unrealizedPnl, 0) >= 0 ? "up" : "down"} />
           <Stat label="成交笔数" value={m ? String(m.totalFills) : "—"} />
           <Stat label="持仓数" value={m ? String(m.openPositions) : "—"} />
-          <Stat label="最大回撤" value={m ? pct(m.maxDrawdownPct) : "—"} />
+          <Stat label="最大回撤" value={m ? pct(m.maxDrawdownPct) : "—"} tone={(m?.maxDrawdownPct ?? 0) > 0.1 ? "down" : undefined} />
           <Stat label="现金" value={a ? money(a.cash) : "—"} />
         </div>
         {st.equityCurve.length > 1 && (
@@ -365,13 +366,13 @@ export function BotDetailPage({
                         )}
                       </td>
                       <td className={`num mono ${ret > 0 ? "up" : ret < 0 ? "down" : "dim"}`}>
-                        {r.metrics ? `${signed(ret * 100)}%` : "—"}
+                        {r.metrics ? signedPct(ret) : "—"}
                       </td>
                       <td className="num mono">{r.metrics ? r.metrics.totalFills : "—"}</td>
                       <td className={`num mono ${(r.metrics?.realizedPnl ?? 0) >= 0 ? "up" : "down"}`}>
                         {r.metrics ? signed(r.metrics.realizedPnl) : "—"}
                       </td>
-                      <td className="num mono dim">{(r.durationMs / 1000).toFixed(0)}s</td>
+                      <td className="num mono dim">{duration(r.durationMs)}</td>
                     </tr>
                   );
                 })}
@@ -477,11 +478,16 @@ function ActionRow({ a }: { a: BotAction }) {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
+function Stat({ label, value, tone, spark }: { label: string; value: string; tone?: "up" | "down"; spark?: number[] }) {
   return (
     <div className="stat-tile">
       <span className="stat-label">{label}</span>
       <span className={`stat-value mono ${tone ?? ""}`}>{value}</span>
+      {spark && spark.length > 1 && (
+        <span className="stat-spark">
+          <Sparkline values={spark.slice(-60)} width={64} height={22} />
+        </span>
+      )}
     </div>
   );
 }

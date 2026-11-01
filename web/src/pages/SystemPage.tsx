@@ -92,7 +92,12 @@ export function SystemPage({ store }: { store: AppStore }) {
               </tr>
               <tr>
                 <td>交易机器人</td>
-                <td>{bots.length} 个 · {runningBots} 个运行中{liveBots > 0 ? ` · ${liveBots} 个实盘` : ""}</td>
+                <td>
+                  {/* 状态用颜色语义：绿=有活着的、红=有出错的，别让「2 个运行中」埋在灰字里 */}
+                  {bots.length} 个 ·{" "}
+                  <span className={runningBots > 0 ? "up" : "dim"}>{runningBots} 个运行中</span>
+                  {liveBots > 0 && <span className="down"> · {liveBots} 个实盘</span>}
+                </td>
               </tr>
               <tr>
                 <td>默认连接</td>
@@ -104,7 +109,7 @@ export function SystemPage({ store }: { store: AppStore }) {
               </tr>
               <tr>
                 <td>实时通道</td>
-                <td>{store.connected ? "正常" : "断开"}</td>
+                <td className={store.connected ? "up" : "down"}>{store.connected ? "正常" : "断开（数据可能过期）"}</td>
               </tr>
             </tbody>
           </table>

@@ -40,16 +40,23 @@ export function EquityChart({ curve, initialCash }: { curve: EquityPoint[]; init
   const color = up ? "var(--up)" : "var(--down)";
   const hovered = hover === null ? null : curve[hover];
   const totalPnl = initialCash > 0 ? (last - initialCash) / initialCash : 0;
+  // 区间跨度：一天以内只给时分秒，跨天带上日期 —— 用户该知道这条线覆盖多长的时间
+  const t0 = new Date(curve[0]!.timestamp);
+  const t1 = new Date(curve[curve.length - 1]!.timestamp);
+  const spanMs = t1.getTime() - t0.getTime();
+  const spanText = spanMs < 24 * 3600 * 1000
+    ? `${t0.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} ~ ${t1.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    : `${t0.toLocaleDateString("zh-CN")} ~ ${t1.toLocaleDateString("zh-CN")}`;
 
   return (
     <div className="chart-wrap">
       <div className="chart-headline">
         <span className={`chart-pnl ${up ? "up" : "down"}`}>
-          {up ? "+" : ""}
+          {totalPnl >= 0 ? "+" : ""}
           {money(last - initialCash)}（{(totalPnl * 100).toFixed(2)}%）
         </span>
         <span className="chart-meta">
-          {curve.length} 个数据点 · 区间 {money(geom.min)} ~ {money(geom.max)}
+          {curve.length} 点 · {spanText}
         </span>
       </div>
       <svg
@@ -105,7 +112,12 @@ export function EquityChart({ curve, initialCash }: { curve: EquityPoint[]; init
       </svg>
       {hovered && hover !== null && (
         <div className="chart-tooltip">
-          {new Date(hovered.timestamp).toLocaleString("zh-CN")} · 权益 {money(hovered.equity)}
+          <div className="dim" style={{ fontSize: 11 }}>{new Date(hovered.timestamp).toLocaleString("zh-CN")}</div>
+          <div>权益 {money(hovered.equity)}</div>
+          <div className={hovered.equity >= initialCash ? "up" : "down"} style={{ fontSize: 11.5 }}>
+            {hovered.equity >= initialCash ? "+" : ""}
+            {money(hovered.equity - initialCash)}（{initialCash > 0 ? `${((hovered.equity - initialCash) / initialCash * 100).toFixed(2)}%` : "—"}）
+          </div>
         </div>
       )}
     </div>
