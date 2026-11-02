@@ -137,9 +137,8 @@ export function useAppStore(): AppStore {
 
     const off = subscribeEvents((b: Broadcast) => {
       // 引擎已删除，SSE 只推送全局状态；事件流改为按机器人从 /api/bots 拉取
-      setConnected(true);
       setState(b.data);
-    });
+    }, setConnected);
     return off;
   }, [reloadState, reloadConnections, reloadAdapters, reloadWatchlist]);
 

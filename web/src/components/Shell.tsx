@@ -40,19 +40,27 @@ export function Sidebar({
   onNavigate,
   connections,
   connected,
+  open,
+  onClose,
 }: {
   page: PageId;
   onNavigate: (p: PageId) => void;
   connections: AppStore["connections"];
   /** SSE 实时通道状态：底部活性灯据此变色 */
   connected: boolean;
+  /** 窄屏抽屉是否展开 */
+  open: boolean;
+  onClose: () => void;
 }) {
   const groups = [...new Set(NAV.map((n) => n.group))];
   return (
-    <nav className="sidebar">
+    <nav className={`sidebar ${open ? "sidebar-open" : ""}`} aria-label="主导航">
       <div className="brand">
         <span className="logo">AAAAI</span>
         <span className="brand-sub">多智能体投研</span>
+        <button type="button" className="sidebar-close" aria-label="关闭导航菜单" onClick={onClose}>
+          ×
+        </button>
       </div>
       {groups.map((g) => (
         <div className="nav-group" key={g}>
@@ -63,7 +71,11 @@ export function Sidebar({
               type="button"
               data-tour={`nav-${n.id}`}
               className={`nav-item ${page === n.id ? "nav-active" : ""}`}
-              onClick={() => onNavigate(n.id)}
+              aria-current={page === n.id ? "page" : undefined}
+              onClick={() => {
+                onNavigate(n.id);
+                onClose();
+              }}
             >
               <span className="nav-icon">{n.icon}</span>
               {n.label}
@@ -117,6 +129,8 @@ export function TopBar({
   store,
   theme,
   onToggleTheme,
+  onMenu,
+  navOpen,
   username,
   onLogout,
   onTourRestart,
@@ -124,6 +138,9 @@ export function TopBar({
   store: AppStore;
   theme: Theme;
   onToggleTheme: () => void;
+  /** 窄屏打开/关闭导航抽屉 */
+  onMenu: () => void;
+  navOpen: boolean;
   /** 鉴权已启用时传入：undefined = 未启用鉴权（不显示退出入口），空串 = 仅 Token 模式 */
   username?: string;
   onLogout?: () => void;
@@ -148,6 +165,15 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-main">
+        <button
+          type="button"
+          className="nav-burger"
+          aria-label="打开导航菜单"
+          aria-expanded={navOpen}
+          onClick={onMenu}
+        >
+          ☰
+        </button>
         {running.length > 0 ? (
           <>
             <span className="badge badge-running">{running.length} 个机器人运行中</span>

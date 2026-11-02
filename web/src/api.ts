@@ -298,17 +298,58 @@ export const api = {
   removeWatch: (id: string) => request<{ removed: string }>(`/api/watchlist/${id}`, { method: "DELETE" }),
 };
 
-/** 订阅引擎广播；返回取消订阅函数。 */
-export function subscribeEvents(onMessage: (b: Broadcast) => void): () => void {
+/**
+ * SSE 订阅。
+ *
+ * 两个坑都在这里处理：
+ * 1. onStatus 必须同时接住 onopen/onerror —— 只在 onmessage 里置 true 的话，
+ *    断线后界面会一直显示“实时”，把过期数据当实时比没有数据更危险。
+ * 2. 浏览器原生 EventSource 的自动重连在部分环境里不会重新触发 onopen；
+ *    这里显式关闭并按 3 秒重建，服务重启后界面能自己恢复。
+ */
+export function subscribeEvents(
+  onMessage: (b: Broadcast) => void,
+  onStatus?: (connected: boolean) => void,
+): () => void {
   const token = window.localStorage.getItem("aaaai.token");
   const url = token ? `${BASE}/api/events?token=${encodeURIComponent(token)}` : `${BASE}/api/events`;
-  const es = new EventSource(url, { withCredentials: true });
-  es.onmessage = (ev) => {
-    try {
-      onMessage(JSON.parse(ev.data) as Broadcast);
-    } catch {
-      /* 忽略心跳 */
-    }
+  let es: EventSource | null = null;
+  let timer: number | null = null;
+  let closed = false;
+
+  const connect = () => {
+    if (closed) return;
+    es = new EventSource(url, { withCredentials: true });
+    es.onopen = () => {
+      if (!closed) onStatus?.(true);
+    };
+    es.onmessage = (ev) => {
+      if (closed) return;
+      try {
+        onMessage(JSON.parse(ev.data) as Broadcast);
+        onStatus?.(true);
+      } catch {
+        /* 忽略心跳 */
+      }
+    };
+    es.onerror = () => {
+      if (closed) return;
+      onStatus?.(false);
+      // 主动重建：关掉原生连接，避免和浏览器的自动重连叠在一起
+      es?.close();
+      es = null;
+      if (closed || timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        connect();
+      }, 3000);
+    };
   };
-  return () => es.close();
+
+  connect();
+  return () => {
+    closed = true;
+    if (timer !== null) window.clearTimeout(timer);
+    es?.close();
+  };
 }

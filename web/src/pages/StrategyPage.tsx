@@ -65,10 +65,29 @@ function visibleAgents(selfAllocating: boolean): AgentNode[] {
 
 export type StrategyTab = "strategy" | "pool" | "intel" | "validate";
 
-export function StrategyPage({ store, initialTab }: { store: AppStore; initialTab?: StrategyTab }) {
+export function StrategyPage({
+  store,
+  initialTab,
+  onTabChange,
+}: {
+  store: AppStore;
+  initialTab?: StrategyTab;
+  /** 标签切换同步给 App，写进 URL（刷新/前进后退能落回同一标签） */
+  onTabChange?: (tab: StrategyTab) => void;
+}) {
   const config = store.state?.config;
   const running = false; // 机器人各自独立运行，策略配置随时可改（下次该机器人启动时生效）
   const [tab, setTab] = useState<StrategyTab>(initialTab ?? "strategy");
+
+  // App 的哈希路由变化（浏览器前进/后退、页内跳转）时同步当前标签
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
+
+  const changeTab = (next: StrategyTab) => {
+    setTab(next);
+    onTabChange?.(next);
+  };
 
   const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
   const [defaultId, setDefaultId] = useState("");
@@ -151,18 +170,18 @@ export function StrategyPage({ store, initialTab }: { store: AppStore; initialTa
   return (
     <div className="page page-strategy">
       <div className="page-tabs">
-        <button type="button" className={`page-tab ${tab === "strategy" ? "page-tab-on" : ""}`} onClick={() => setTab("strategy")}>
+        <button type="button" className={`page-tab ${tab === "strategy" ? "page-tab-on" : ""}`} onClick={() => changeTab("strategy")}>
           策略
           <span className="page-tab-count">{strategies.length}</span>
         </button>
-        <button type="button" className={`page-tab ${tab === "pool" ? "page-tab-on" : ""}`} onClick={() => setTab("pool")}>
+        <button type="button" className={`page-tab ${tab === "pool" ? "page-tab-on" : ""}`} onClick={() => changeTab("pool")}>
           候选池
           <span className="page-tab-count">{poolCount}</span>
         </button>
-        <button type="button" className={`page-tab ${tab === "intel" ? "page-tab-on" : ""}`} onClick={() => setTab("intel")}>
+        <button type="button" className={`page-tab ${tab === "intel" ? "page-tab-on" : ""}`} onClick={() => changeTab("intel")}>
           情报
         </button>
-        <button type="button" className={`page-tab ${tab === "validate" ? "page-tab-on" : ""}`} onClick={() => setTab("validate")}>
+        <button type="button" className={`page-tab ${tab === "validate" ? "page-tab-on" : ""}`} onClick={() => changeTab("validate")}>
           验证与进化
         </button>
       </div>
