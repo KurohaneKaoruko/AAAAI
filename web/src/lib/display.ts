@@ -6,8 +6,8 @@
  * 「换个颜色」变成一件要写文件的事。
  *
  * 涨跌颜色两档：
- *   green-up（默认）绿涨红跌 —— 国际 / 加密行情软件习惯；
- *   red-up          红涨绿跌 —— 中国大陆行情软件习惯。
+ *   red-up（默认）红涨绿跌 —— 中国大陆行情软件习惯；
+ *   green-up        绿涨红跌 —— 国际 / 加密行情软件习惯。
  * 只对调「行情方向色」（涨跌、盈亏、买卖方向、新闻情绪）。运行中 / 报错
  * 这类系统状态色永远绿=正常、红=危险，不随设置变（见 styles.css 顶部注释）。
  *
@@ -22,7 +22,7 @@ export interface DisplayPrefs {
   priceSymbol: string;
 }
 
-export const DEFAULT_DISPLAY: DisplayPrefs = { upDown: "green-up", priceSymbol: "" };
+export const DEFAULT_DISPLAY: DisplayPrefs = { upDown: "red-up", priceSymbol: "" };
 
 /** 价格符号最长 4 个字符：够 ¥ / $ / USDT 这类写法，又不至于把表格撑变形。 */
 export const PRICE_SYMBOL_MAX = 4;
@@ -42,7 +42,8 @@ export function sanitizePriceSymbol(raw: unknown): string {
 export function parseDisplayPrefs(raw: unknown): DisplayPrefs {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
-    upDown: o.upDown === "red-up" ? "red-up" : "green-up",
+    // 默认红涨绿跌；只有用户明确保存过 green-up 才保留绿涨红跌
+    upDown: o.upDown === "green-up" ? "green-up" : "red-up",
     priceSymbol: sanitizePriceSymbol(o.priceSymbol),
   };
 }

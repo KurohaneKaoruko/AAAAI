@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { money, pct, signed } from "../web/src/lib/format.js";
-import { getDisplayPrefs, parseDisplayPrefs, setDisplayPrefs, subscribeDisplayPrefs } from "../web/src/lib/display.js";
+import { DEFAULT_DISPLAY, getDisplayPrefs, parseDisplayPrefs, setDisplayPrefs, subscribeDisplayPrefs } from "../web/src/lib/display.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -40,15 +40,17 @@ test("价格符号：只加前缀，符号顺序不乱，不设符号时与从�
 });
 
 test("偏好解析：坏值逐字段回退默认，符号长度与类型都有闸", () => {
-  assert.deepEqual(parseDisplayPrefs(null), { upDown: "green-up", priceSymbol: "" });
-  assert.deepEqual(parseDisplayPrefs("天知道"), { upDown: "green-up", priceSymbol: "" });
+  assert.equal(DEFAULT_DISPLAY.upDown, "red-up", "默认涨跌色是红涨绿跌");
+  assert.deepEqual(parseDisplayPrefs(null), { upDown: "red-up", priceSymbol: "" });
+  assert.deepEqual(parseDisplayPrefs("天知道"), { upDown: "red-up", priceSymbol: "" });
   assert.deepEqual(parseDisplayPrefs({ upDown: "rainbow", priceSymbol: 42 }), {
-    upDown: "green-up",
+    upDown: "red-up",
     priceSymbol: "",
   });
   assert.equal(parseDisplayPrefs({ priceSymbol: "USDT超长" }).priceSymbol, "USDT");
   assert.equal(parseDisplayPrefs({ priceSymbol: "  ¥  " }).priceSymbol, "¥");
   assert.equal(parseDisplayPrefs({ upDown: "red-up" }).upDown, "red-up");
+  assert.equal(parseDisplayPrefs({ upDown: "green-up" }).upDown, "green-up", "用户明确选过绿涨红跌要保留");
 });
 
 test("变更通知：订阅者每次 set 都收到，退订后不再收", () => {
@@ -62,7 +64,7 @@ test("变更通知：订阅者每次 set 都收到，退订后不再收", () => 
   try {
     assert.deepEqual(seen, ["red-up:", "red-up:$"]);
   } finally {
-    setDisplayPrefs({ upDown: "green-up", priceSymbol: "" });
+    setDisplayPrefs({ upDown: "red-up", priceSymbol: "" });
   }
 });
 
