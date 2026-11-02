@@ -61,6 +61,7 @@ export function Sidebar({
             <button
               key={n.id}
               type="button"
+              data-tour={`nav-${n.id}`}
               className={`nav-item ${page === n.id ? "nav-active" : ""}`}
               onClick={() => onNavigate(n.id)}
             >
@@ -118,6 +119,7 @@ export function TopBar({
   onToggleTheme,
   username,
   onLogout,
+  onTourRestart,
 }: {
   store: AppStore;
   theme: Theme;
@@ -125,6 +127,8 @@ export function TopBar({
   /** 鉴权已启用时传入：undefined = 未启用鉴权（不显示退出入口），空串 = 仅 Token 模式 */
   username?: string;
   onLogout?: () => void;
+  /** 重看使用指引 */
+  onTourRestart: () => void;
 }) {
   const state = store.state;
   // 机器人状态轮询：走统一的 apiGet（带 BASE 与鉴权），与交易机器人页看到同一份数据
@@ -187,6 +191,17 @@ export function TopBar({
       </div>
       <div className="topbar-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        {/* 使用指引：初次访问自动播放过，这里随时重看 */}
+        <button
+          type="button"
+          data-tour="tour-restart"
+          className="chip"
+          title="重新查看使用指引"
+          aria-label="使用指引"
+          onClick={onTourRestart}
+        >
+          ?
+        </button>
         {/* username 传 undefined = 鉴权未启用；传空串 = 仅 Token 模式（没有用户名），也显示退出 */}
         {username !== undefined && onLogout && (
           <button

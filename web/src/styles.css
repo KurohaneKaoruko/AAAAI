@@ -1761,3 +1761,34 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .set-symbol { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .set-symbol input { width: 96px; text-align: center; }
 .set-symbol .small { margin-left: 4px; }
+
+/* ---------- 使用指引（Tour） ---------- */
+.tour-root { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
+.tour-mask { position: absolute; background: color-mix(in srgb, var(--bg) 72%, transparent); pointer-events: auto; }
+.tour-spot {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  pointer-events: none;
+  animation: tour-breathe 2.2s ease-in-out infinite;
+}
+.tour-bubble {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  padding: 14px 16px 12px;
+  pointer-events: auto;
+}
+.tour-step { font-size: 11px; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 6px; }
+.tour-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.tour-body { font-size: 12.5px; line-height: 1.7; color: var(--fg-soft, var(--fg)); }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+@keyframes tour-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot { animation: none; }
+}

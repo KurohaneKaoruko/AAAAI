@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Sidebar, Toasts, TopBar } from "./components/Shell";
+import { Tour } from "./components/Tour";
 import { useAppStore } from "./state/useAppStore";
 import { useTheme } from "./lib/theme";
 import type { PageId } from "./components/Shell";
@@ -27,6 +28,8 @@ export function App() {
   const [botDetail, setBotDetail] = useState<string | null>(null);
   const [botEditId, setBotEditId] = useState<string | null>(null);
   const [auth, setAuth] = useState<{ required: boolean; username: string; ok: boolean } | null>(null);
+  // 使用指引：首访自动播；顶栏 ? 递增此 key 重播
+  const [tourKey, setTourKey] = useState(0);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -128,10 +131,12 @@ export function App() {
           onToggleTheme={toggle}
           username={auth?.required ? auth.username : undefined}
           onLogout={() => void handleLogout()}
+          onTourRestart={() => setTourKey((k) => k + 1)}
         />
         <main className="content">{render()}</main>
       </div>
       <Toasts store={store} />
+      <Tour onNavigate={setPage} forceKey={tourKey} />
     </div>
   );
 }
