@@ -241,10 +241,15 @@ export const api = {
   },
 
   // 模拟对照：参赛者 = 机器人 / 策略 / 模型 / 基线
-  participants: () => request<{ participants: Participant[] }>("/api/bench/participants"),
+  participants: (connectionId?: string) =>
+    request<{ participants: Participant[]; target: EngineState["runTarget"] }>(
+      `/api/bench/participants${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`,
+    ),
   runComparison: (body: {
     /** 参赛者 key 列表 */
     keys: string[];
+    /** 对照连接（不填 = 全局默认） */
+    connectionId?: string;
     symbols?: string[];
     bars?: number;
     interval?: string;

@@ -17,6 +17,9 @@ const log = getLogger("portfolio");
 
 export type { TradeRecord };
 
+/** 组合记账模式：现货现金账户 / 合约保证金账户。 */
+export type PortfolioMode = "spot" | "futures";
+
 export class PortfolioManager {
   cash: number;
   private positions = new Map<string, Position>();
@@ -30,6 +33,8 @@ export class PortfolioManager {
   constructor(
     private readonly bus: EventBus,
     initialCash: number,
+    /** 缺省 spot：所有老调用保持原语义，合约模式必须显式开启 */
+    private readonly mode: PortfolioMode = "spot",
   ) {
     this.cash = initialCash;
     this.peak = initialCash;
@@ -48,30 +53,67 @@ export class PortfolioManager {
     const pos = this.positions.get(order.symbol) ?? { symbol: order.symbol, quantity: 0, avgCost: 0 };
     const signed = order.side === "BUY" ? order.quantity : -order.quantity;
     const notional = Math.abs(signed) * fill.price;
-    this.cash += (order.side === "BUY" ? -notional : notional) - fill.fee;
-
     let realizedPnl = 0;
-    const newQty = pos.quantity + signed;
-    if (Math.abs(newQty) < 1e-9) {
-      // 清仓：轧差结算
-      if (order.side === "SELL") realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
-      this.positions.delete(order.symbol);
-    } else {
-      const sameDirection = pos.quantity === 0 || Math.sign(pos.quantity) === Math.sign(signed);
-      if (sameDirection) {
-        // 加仓：滚动均价
-        const total = Math.abs(pos.quantity) * pos.avgCost + Math.abs(signed) * fill.price;
-        pos.avgCost = total / Math.abs(newQty);
+    const oldQty = pos.quantity;
+    const newQty = oldQty + signed;
+
+    if (this.mode === "spot") {
+      this.cash += (order.side === "BUY" ? -notional : notional) - fill.fee;
+      if (Math.abs(newQty) < 1e-9) {
+        // 清仓：轧差结算
+        if (order.side === "SELL") realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
+        this.positions.delete(order.symbol);
       } else {
-        // 减仓：已实现盈亏，均价不变
-        realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
-        pos.avgCost = pos.avgCost;
+        const sameDirection = oldQty === 0 || Math.sign(oldQty) === Math.sign(signed);
+        if (sameDirection) {
+          // 加仓：滚动均价
+          const total = Math.abs(oldQty) * pos.avgCost + Math.abs(signed) * fill.price;
+          pos.avgCost = total / Math.abs(newQty);
+        } else {
+          // 减仓：已实现盈亏，均价不变（现金账户不允许卖穿，正常不会 flip）
+          realizedPnl = (fill.price - pos.avgCost) * Math.abs(signed) - fill.fee;
+        }
+        pos.quantity = newQty;
+        this.positions.set(order.symbol, pos);
       }
-      pos.quantity = newQty;
-      this.positions.set(order.symbol, pos);
+    } else {
+      /**
+       * 合约账户：
+       * - 开仓/加仓不产生现金流，只把手续费从保证金现金里扣掉；
+       * - 平仓/减仓才结算已实现盈亏（多头 = 价差，空头 = 反价差）；
+       * - 反手时先结清旧仓，剩余数量按本次成交价开新仓。
+       *
+       * 权益 = 现金 + Σ (最新价 − 开仓均价) × 有符号数量，
+       * 所以空头数量为负时，价格下跌会自然产生正权益。
+       */
+      this.cash -= fill.fee;
+      if (Math.abs(oldQty) < 1e-9) {
+        pos.avgCost = fill.price;
+        pos.quantity = newQty;
+        this.positions.set(order.symbol, pos);
+      } else if (Math.sign(oldQty) === Math.sign(signed)) {
+        const total = Math.abs(oldQty) * pos.avgCost + Math.abs(signed) * fill.price;
+        pos.avgCost = total / Math.abs(newQty);
+        pos.quantity = newQty;
+        this.positions.set(order.symbol, pos);
+      } else {
+        const closeQty = Math.min(Math.abs(oldQty), Math.abs(signed));
+        realizedPnl = (fill.price - pos.avgCost) * closeQty * Math.sign(oldQty);
+        this.cash += realizedPnl;
+        if (Math.abs(newQty) < 1e-9) {
+          this.positions.delete(order.symbol);
+        } else {
+          // 反手：剩余仓位是本次新开的，成本就是成交价
+          pos.quantity = newQty;
+          if (Math.sign(newQty) !== Math.sign(oldQty)) pos.avgCost = fill.price;
+          this.positions.set(order.symbol, pos);
+        }
+      }
     }
     this.fills += 1;
     this.tradeSeq += 1;
+    // 流水里的已实现盈亏对合约是毛口径（手续费已单独从现金扣除），
+    // 与现货口径的差异在界面/文档里要说明；胜率统计看价格方向。
     this.trades.push({
       id: this.tradeSeq,
       timestamp: fill.timestamp.toISOString(),
@@ -80,7 +122,7 @@ export class PortfolioManager {
       quantity: order.quantity,
       price: fill.price,
       fee: fill.fee,
-      realizedPnl,
+      realizedPnl: this.mode === "futures" ? realizedPnl - (realizedPnl !== 0 ? fill.fee : 0) : realizedPnl,
       reason: order.reason ?? "",
     });
     if (this.trades.length > 500) this.trades.shift();
@@ -109,7 +151,22 @@ export class PortfolioManager {
     let total = this.cash;
     for (const [symbol, pos] of this.positions) {
       const price = this.prices.get(symbol) ?? pos.avgCost;
-      total += pos.quantity * price;
+      if (this.mode === "futures") {
+        // 合约权益 = 保证金现金 + 未实现盈亏；不是「现金 + 名义市值」
+        total += (price - pos.avgCost) * pos.quantity;
+      } else {
+        total += pos.quantity * price;
+      }
+    }
+    return total;
+  }
+
+  /** 组合总名义敞口（绝对值之和）；现货合约都用它算集中度。 */
+  grossExposure(): number {
+    let total = 0;
+    for (const [symbol, pos] of this.positions) {
+      const price = this.prices.get(symbol) ?? pos.avgCost;
+      total += Math.abs(pos.quantity) * price;
     }
     return total;
   }

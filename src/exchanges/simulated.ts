@@ -266,6 +266,8 @@ export class SimulatedAdapter implements ExchangeAdapter {
     requiresKeys: false,
     supportsTrading: true,
     supportsTestnet: false,
+    tradingMode: "spot",
+    marketData: "simulated",
     klineIntervals: ["1s", "5s", "15s", "30s", "1m", "5m", "15m", "1h", "4h", "1d"],
     keyFields: [],
     defaultSymbols: SANDBOX_SYMBOLS,

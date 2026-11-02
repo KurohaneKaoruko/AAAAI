@@ -27,6 +27,8 @@ export interface StrategyProfile {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  /** 合约模式下是否允许做空（现货忽略） */
+  allowShort: boolean;
   selfAllocating: boolean;
   maxPositions: number;
   maxGrossExposure: number;
@@ -44,6 +46,7 @@ export interface StrategyProfileInput {
   fastWindow?: number;
   slowWindow?: number;
   maxTargetWeight?: number;
+  allowShort?: boolean;
   selfAllocating?: boolean;
   maxPositions?: number;
   maxGrossExposure?: number;
@@ -64,6 +67,8 @@ const DEFAULTS = {
   fastWindow: 2,
   slowWindow: 8,
   maxTargetWeight: 0.5,
+  // 合约默认双向；现货风控会拒绝负权重，所以不会误开空
+  allowShort: true,
   selfAllocating: false,
   maxPositions: 3,
   maxGrossExposure: 1,
@@ -135,6 +140,7 @@ export class StrategyStore {
       fastWindow: Math.max(2, Number(raw.fastWindow ?? DEFAULTS.fastWindow)),
       slowWindow: Math.max(3, Number(raw.slowWindow ?? DEFAULTS.slowWindow)),
       maxTargetWeight: Math.min(Math.max(Number(raw.maxTargetWeight ?? DEFAULTS.maxTargetWeight), 0.01), 1),
+      allowShort: Boolean(raw.allowShort ?? DEFAULTS.allowShort),
       selfAllocating: Boolean(raw.selfAllocating ?? DEFAULTS.selfAllocating),
       maxPositions: Math.max(1, Number(raw.maxPositions ?? DEFAULTS.maxPositions)),
       maxGrossExposure: Math.min(Math.max(Number(raw.maxGrossExposure ?? DEFAULTS.maxGrossExposure), 0.05), 1),
@@ -275,6 +281,7 @@ export function strategyFields(p: StrategyProfile): Record<string, unknown> {
     fastWindow: p.fastWindow,
     slowWindow: p.slowWindow,
     maxTargetWeight: p.maxTargetWeight,
+    allowShort: p.allowShort,
     selfAllocating: p.selfAllocating,
     maxPositions: p.maxPositions,
     maxGrossExposure: p.maxGrossExposure,

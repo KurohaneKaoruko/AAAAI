@@ -56,9 +56,10 @@ export function BacktestPage() {
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   const strategy = strategies.find((s) => s.id === strategyId);
   const local = strategy ? strategy.decisionSource === "rules" : true;
-  // 模拟交易所 = 随机行情。结果必须自己先说清楚，不能让用户拿去当证据。
-  const simulatedConnection =
-    connections.find((c) => c.id === connectionId)?.adapterId === "simulated";
+  // 模拟行情 = 随机行情。结果必须自己先说清楚，不能让用户拿去当证据。
+  const selectedConnection = connections.find((c) => c.id === connectionId);
+  const simulatedConnection = selectedConnection?.adapter.marketData === "simulated";
+  const futuresConnection = selectedConnection?.adapter.tradingMode === "futures";
   /**
    * 没有标的、只有自带走向的交易所（模拟交易所）：没有"选标的"这一步，
    * 用哪几条走向由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几条。
@@ -187,6 +188,14 @@ export function BacktestPage() {
             )}
           </div>
 
+          {futuresConnection && (
+            <Notice tone="info">
+              当前连接是<b>合约模式</b>：策略可以做空（需在「策略」里开启「允许做空」），
+              组合按保证金账户记账（权益 = 现金 + 未实现盈亏），总名义敞口仍受单标的/组合上限约束。
+              本地撮合<b>不模拟资金费、维持保证金、逐仓强平</b>；真实合约下单未开放。
+              回测里的负持仓就是空头，不是记账错误。
+            </Notice>
+          )}
           {simulatedConnection && (
             <Notice tone="warn">
               当前连接是「模拟交易所」：它没有标的，只有几条本地生成的走向
@@ -254,8 +263,14 @@ export function BacktestPage() {
       {result && (
         <Panel
           title={`回测结果 · ${result.strategyName}`}
-          subtitle={`${result.symbols.join(" / ")} · ${result.interval} · ${result.bars} 根 · 耗时 ${(result.durationMs / 1000).toFixed(1)}s`}
+          subtitle={`${result.symbols.join(" / ")} · ${result.interval} · ${result.bars} 根 · ${result.tradingMode === "futures" ? "合约模式 · " : ""}耗时 ${(result.durationMs / 1000).toFixed(1)}s`}
         >
+          {result.tradingMode === "futures" && (
+            <Notice tone="info">
+              本次为<b>合约模式</b>：负数量是空头，权益按保证金账户计算（现金 + 未实现盈亏）。
+              本地撮合不模拟资金费、维持保证金与强平；结果只用于验证方向与仓位逻辑。
+            </Notice>
+          )}
           {result.marketData === "simulated" ? (
             <Notice tone="error">
               这份结果跑在<b>本地生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：

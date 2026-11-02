@@ -63,6 +63,7 @@ strategy:
   fast_window: 2             # 快线窗口
   slow_window: 8             # 慢线窗口（须大于快线）
   max_target_weight: 0.5     # 逐标的模式下单个标的的目标仓上限（占总权益）
+  allow_short: true          # 合约模式允许做空；现货连接一律忽略，不会误开空单
   # 资产配置：让 AI/规则在「候选池」里自己选标的、配权重（关闭 = 人指定标的，模型只定仓位）
   self_allocating: false
   max_positions: 3           # 最多同时持有几个资产

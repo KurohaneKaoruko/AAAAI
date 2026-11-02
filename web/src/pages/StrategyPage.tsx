@@ -253,6 +253,13 @@ export function StrategyPage({
               )}
 
               <Toggle
+                label="允许做空（仅合约连接生效）"
+                hint="现货连接会忽略；合约连接遇到向下强趋势时输出负仓位"
+                checked={form.allowShort}
+                onChange={(v) => setForm({ ...form, allowShort: v })}
+              />
+
+              <Toggle
                 label="AI 自主选资产（关闭：按候选池逐个标的定仓位）"
                 checked={form.selfAllocating}
                 onChange={(v) => setForm({ ...form, selfAllocating: v })}
@@ -436,6 +443,7 @@ interface StrategyForm {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  allowShort: boolean;
   selfAllocating: boolean;
   maxPositions: number;
   maxGrossExposure: number;
@@ -452,6 +460,7 @@ function toForm(s: StrategyProfile): StrategyForm {
     fastWindow: s.fastWindow,
     slowWindow: s.slowWindow,
     maxTargetWeight: s.maxTargetWeight,
+    allowShort: s.allowShort,
     selfAllocating: s.selfAllocating,
     maxPositions: s.maxPositions,
     maxGrossExposure: s.maxGrossExposure,
@@ -469,6 +478,7 @@ function fromForm(form: StrategyForm): Partial<StrategyProfile> {
     fastWindow: form.fastWindow,
     slowWindow: form.slowWindow,
     maxTargetWeight: form.maxTargetWeight,
+    allowShort: form.allowShort,
     selfAllocating: form.selfAllocating,
     maxPositions: form.maxPositions,
     maxGrossExposure: form.maxGrossExposure,

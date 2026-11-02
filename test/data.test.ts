@@ -73,10 +73,10 @@ test("SimulatedAdapter: 模拟成交含手续费", async () => {
   assert.equal(bad.status, "rejected");
 });
 
-test("适配器元信息完整：5 家交易所", () => {
+test("适配器元信息完整：现货与合约适配器", () => {
   const metas = listAdapterMetas();
   const ids = metas.map((m) => m.id);
-  assert.deepEqual(ids.sort(), ["binance", "gate", "okx", "simulated", "stooq"]);
+  assert.deepEqual(ids.sort(), ["binance", "gate", "gate-futures", "okx", "simulated", "simulated-futures", "stooq"]);
   for (const m of metas) {
     assert.ok(m.name.length > 0, `${m.id} 缺少名称`);
     assert.ok(m.description.length > 0, `${m.id} 缺少描述`);
@@ -88,6 +88,10 @@ test("适配器元信息完整：5 家交易所", () => {
   assert.equal(metas.find((m) => m.id === "binance")!.supportsTrading, true);
   assert.equal(metas.find((m) => m.id === "okx")!.supportsTrading, true);
   assert.equal(metas.find((m) => m.id === "gate")!.supportsTrading, true);
+  assert.equal(metas.find((m) => m.id === "gate-futures")!.supportsTrading, false, "Gate 合约只提供行情，真实下单未开放");
+  assert.equal(metas.find((m) => m.id === "gate-futures")!.tradingMode, "futures");
+  assert.equal(metas.find((m) => m.id === "simulated-futures")!.tradingMode, "futures");
+  assert.equal(metas.find((m) => m.id === "simulated")!.tradingMode, "spot");
 });
 
 test("createAdapter 按连接创建对应实例", () => {
@@ -208,16 +212,17 @@ test("常用标的：股票源覆盖美股代码", async () => {
   assert.ok(byId.get("binance")!.defaultSymbols!.some((s) => s.symbol.endsWith("USDT")));
   assert.ok(byId.get("okx")!.defaultSymbols!.some((s) => s.symbol.includes("-")));
   assert.ok(byId.get("gate")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
+  assert.ok(byId.get("gate-futures")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
 });
 
-test("标的由交易所自带：只有模拟交易所是这种（界面据此不再要求挑标的）", async () => {
+test("标的由交易所自带：模拟现货/合约是这种（界面据此不再要求挑标的）", async () => {
   const { listAdapterMetas } = await import("../src/exchanges/registry.js");
   const metas = listAdapterMetas();
   const builtin = metas.filter((m) => m.builtinSymbols);
   assert.deepEqual(
     builtin.map((m) => m.id),
-    ["simulated"],
-    "自带标的 = 用户不需要挑的连接，目前只有模拟交易所",
+    ["simulated", "simulated-futures"],
+    "自带标的 = 用户不需要挑的连接：模拟现货与模拟合约",
   );
   // 标了自带就必须真有一套清单，否则"自带"就是空话
   for (const m of builtin) {

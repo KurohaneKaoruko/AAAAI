@@ -131,6 +131,11 @@ export interface StrategySection {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  /**
+   * 合约模式是否允许做空。
+   * 现货模式一律忽略：负目标权重会被风控拒绝，不会偷偷做空。
+   */
+  allowShort: boolean;
   /** 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策） */
   selfAllocating: boolean;
   /** 最多同时持有几个资产 */
@@ -323,6 +328,8 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
       fastWindow: num(raw, ["strategy", "fast_window"], 2),
       slowWindow: num(raw, ["strategy", "slow_window"], 8),
       maxTargetWeight: num(raw, ["strategy", "max_target_weight"], 0.5),
+      // 合约模式默认允许做空；现货模式风控会拒绝负权重，因此不会误开空单
+      allowShort: bool(raw, ["strategy", "allow_short"], true),
       // 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策）
       selfAllocating: bool(raw, ["strategy", "self_allocating"], false),
       maxPositions: Math.max(1, Math.round(num(raw, ["strategy", "max_positions"], 3))),
@@ -419,6 +426,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       fast_window: config.strategy.fastWindow,
       slow_window: config.strategy.slowWindow,
       max_target_weight: config.strategy.maxTargetWeight,
+      allow_short: config.strategy.allowShort,
       self_allocating: config.strategy.selfAllocating,
       max_positions: config.strategy.maxPositions,
       max_gross_exposure: config.strategy.maxGrossExposure,

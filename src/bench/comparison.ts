@@ -19,6 +19,8 @@ import type { EquityPoint, Position, TradeRecord } from "../core/types.js";
 import type { AppConfig, DecisionSource } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline } from "../agents/orchestrator.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
+import { isSimulatedMarket } from "../exchanges/types.js";
+import type { TradingMode } from "../exchanges/types.js";
 import type { LLMClient } from "../llm/llmClient.js";
 import { getLogger } from "../core/logger.js";
 
@@ -80,6 +82,8 @@ export interface ComparisonResult {
    * 跑在随机行情上时，这次名次只代表"在这条随机路径上谁更强"，界面必须标出来。
    */
   marketData: "real" | "simulated";
+  /** 本次对照的交易模式；合约模式允许负仓位与保证金记账 */
+  tradingMode: TradingMode;
   /** 行情连接名 */
   connectionLabel?: string;
   symbols: string[];
@@ -169,7 +173,8 @@ export async function runComparison(
   const results = contexts.map((ctx) => summarize(ctx, initialCash));
   const ranked = [...results].filter((r) => r.ok).sort((a, b) => b.totalReturn - a.totalReturn);
   const result: ComparisonResult = {
-    marketData: options.adapter.meta.id === "simulated" ? "simulated" : "real",
+    marketData: isSimulatedMarket(options.adapter) ? "simulated" : "real",
+    tradingMode: options.adapter.meta.tradingMode ?? "spot",
     symbols: options.symbols,
     bars: bars.length,
     ...(scenarioSeed !== undefined ? { scenarioSeed } : {}),
@@ -205,6 +210,7 @@ function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
       maxTargetWeight: strategy.maxTargetWeight,
       maxPositions: strategy.maxPositions,
       selfAllocating: strategy.selfAllocating,
+      allowShort: strategy.allowShort,
     },
     ...(spec.origin ? { origin: spec.origin } : {}),
     ...(spec.model ? { model: spec.model } : {}),
@@ -225,9 +231,9 @@ function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
   return { ...base, winRate: winRate(trades), profitFactor: profitFactor(trades) };
 }
 
-/** 仅卖出（含减仓）会产生已实现盈亏，用它统计胜率与盈亏比。 */
+/** 仅平仓/减仓会产生已实现盈亏；用它统计胜率与盈亏比（多空都算）。 */
 function closedTrades(trades: TradeRecord[]): TradeRecord[] {
-  return trades.filter((t) => t.side === "SELL" && t.realizedPnl !== 0);
+  return trades.filter((t) => t.realizedPnl !== 0);
 }
 
 function winRate(trades: TradeRecord[]): number {

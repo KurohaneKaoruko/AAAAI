@@ -9,6 +9,7 @@ import type { Broker } from "../execution/broker.js";
 import { PaperBroker } from "../execution/paperBroker.js";
 import { ExchangeBroker } from "../execution/exchangeBroker.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
+import { tradingModeOf } from "../exchanges/types.js";
 import { MarketAnalystAgent } from "./marketAnalyst.js";
 import { RiskGuardAgent } from "./riskGuard.js";
 import { StrategistAgent } from "./strategist.js";
@@ -92,13 +93,16 @@ export function buildPipeline(
 ): Pipeline {
   const bus = new EventBus();
   const book = new PriceBook();
-  const portfolio = new PortfolioManager(bus, config.risk.initialCash);
+  const tradingMode = tradingModeOf(options.adapter);
+  const portfolio = new PortfolioManager(bus, config.risk.initialCash, tradingMode);
 
   const source: DecisionSource = sourceOverride ?? config.strategy.decisionSource;
   const momentum = new MomentumStrategy(
     config.strategy.fastWindow,
     config.strategy.slowWindow,
     config.strategy.maxTargetWeight,
+    // 只有合约模式才把空头信号交给策略；现货即使配置了 allowShort 也不会做空
+    tradingMode === "futures" && config.strategy.allowShort,
   );
 
   const chatClient = options.hybrid?.chat ?? options.llm ?? null;
@@ -250,9 +254,12 @@ export function buildPipeline(
       maxOrderValue: config.risk.maxOrderValue,
       maxDrawdownPct: config.risk.maxDrawdownPct,
       minTradeValue: config.risk.minTradeValue,
+      grossCap: config.strategy.maxGrossExposure,
+      mode: tradingMode,
     }),
     portfolio,
     book,
+    tradingMode,
   ).attach();
 
   const broker: Broker =
@@ -264,9 +271,10 @@ export function buildPipeline(
           impactK: config.cost.impactK,
           maxSlippageBps: config.cost.maxSlippageBps,
           interval: config.market.interval,
-          // 现金账户语义：模拟成交与真实券商同一道底线 —— 花不起的钱买不了。
-          // 借款上线时要改这里（现实里融资账户才允许现金为负）。
-          availableCash: () => portfolio.cash,
+          // 现货：模拟成交与真实券商同一道底线 —— 花不起的钱买不了。
+          // 合约：开仓不占用全额现金，靠 RiskGuard 的总名义敞口上限兜底；
+          // 绝不能把现货的“现金不足”逻辑套到合约上，否则空单和保证金交易全被拒。
+          ...(tradingMode === "spot" ? { availableCash: () => portfolio.cash } : {}),
           slicing: {
             algo: config.execution.slicingAlgo,
             slices: config.execution.slicingSlices,

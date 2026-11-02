@@ -2,8 +2,10 @@
 
 import { BinanceAdapter } from "./binance.js";
 import { GateAdapter } from "./gate.js";
+import { GateFuturesAdapter } from "./gateFutures.js";
 import { OkxAdapter } from "./okx.js";
 import { SimulatedAdapter } from "./simulated.js";
+import { SimulatedFuturesAdapter } from "./simulatedFutures.js";
 import { StooqAdapter } from "./stooq.js";
 import type { AdapterMeta, Connection, ExchangeAdapter } from "./types.js";
 
@@ -18,8 +20,10 @@ export class UnsupportedAdapterError extends Error {
 export function listAdapterMetas(): AdapterMeta[] {
   return [
     new SimulatedAdapter().meta,
+    new SimulatedFuturesAdapter().meta,
     new BinanceAdapter().meta,
     new GateAdapter().meta,
+    new GateFuturesAdapter().meta,
     new OkxAdapter().meta,
     new StooqAdapter().meta,
   ];
@@ -34,10 +38,14 @@ export function createAdapter(connection: Connection, cred: { apiKey: string; ap
   switch (connection.adapterId) {
     case "simulated":
       return new SimulatedAdapter();
+    case "simulated-futures":
+      return new SimulatedFuturesAdapter();
     case "binance":
       return new BinanceAdapter();
     case "gate":
       return new GateAdapter();
+    case "gate-futures":
+      return new GateFuturesAdapter();
     case "okx":
       return new OkxAdapter();
     case "stooq":

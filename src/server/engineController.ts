@@ -14,6 +14,7 @@ import { redactConfig } from "../configSchema.js";
 import { getLogger } from "../core/logger.js";
 import { strategyFields, StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
+import { isSimulatedMarket, tradingModeOf } from "../exchanges/types.js";
 
 /**
  * 候选池行情：交易所行情 + 它来自哪个连接。
@@ -63,6 +64,10 @@ export interface RunTarget {
   connectionLabel: string | null;
   /** 适配器 id（如 simulated）：界面据此说明"这次跑在随机行情上" */
   connectionAdapterId: string | null;
+  /** spot 现货 / futures 合约；界面据此显示做空、保证金相关提示 */
+  tradingMode: "spot" | "futures";
+  /** real 真实行情 / simulated 本地随机行情 */
+  marketData: "real" | "simulated";
   interval: string;
   symbols: string[];
   /** 解析不出标的时的原因（能跑则为 null） */
@@ -309,8 +314,8 @@ export class EngineController {
    * 参赛者清单：机器人 / 量化策略 / 模型实例 / 动量基线，摊平成一张表。
    * 界面只勾 key，能勾哪些、为什么不能勾都由这里说了算 —— 避免"勾了跑不了"。
    */
-  listParticipants(): Participant[] {
-    const target = this.safeRunTarget();
+  listParticipants(connectionId?: string): Participant[] {
+    const target = this.safeRunTarget(connectionId);
     return buildParticipants({
       defaultStrategy: this.strategies.default(),
       strategies: this.strategies.list(),
@@ -322,14 +327,22 @@ export class EngineController {
     });
   }
 
+  /** 对照页当前连接/标的（支持页面显式选连接，而不是永远用全局默认）。 */
+  benchTarget(connectionId?: string): RunTarget {
+    return this.safeRunTarget(connectionId);
+  }
+
   /** 解析不出标的也不抛异常：参赛者清单要照常返回，只是把原因带出去。 */
-  private safeRunTarget(): RunTarget {
+  private safeRunTarget(connectionId?: string): RunTarget {
     try {
-      const t = this.resolveRunTarget();
+      const t = this.resolveRunTarget(connectionId);
+      const adapter = this.connections.adapter(t.connection.id);
       return {
         connectionId: t.connection.id,
         connectionLabel: t.connection.label,
         connectionAdapterId: t.connection.adapterId,
+        tradingMode: tradingModeOf(adapter),
+        marketData: isSimulatedMarket(adapter) ? "simulated" : "real",
         interval: t.interval,
         symbols: t.symbols,
         error: null,
@@ -340,6 +353,8 @@ export class EngineController {
         connectionId: null,
         connectionLabel: null,
         connectionAdapterId: null,
+        tradingMode: "spot",
+        marketData: "real",
         interval: this.config.market.interval,
         symbols: [],
         error: (err as Error).message,
@@ -355,6 +370,8 @@ export class EngineController {
   async runSimulationComparison(options: {
     /** 参赛者 key 列表（baseline / bot:… / strategy:… / model:…） */
     keys: string[];
+    /** 对照连接（页面显式选择；不填 = 全局默认连接） */
+    connectionId?: string;
     bars?: number;
     symbols?: string[];
     interval?: string;
@@ -376,7 +393,7 @@ export class EngineController {
     // 以前解析标的在 try 之外，失败一次就把 comparing 永久留在 true ——
     // 表现为"第一次失败后，这个功能再也点不动了，直到重启服务"。
     try {
-      const target = this.resolveRunTarget(undefined, options.symbols);
+      const target = this.resolveRunTarget(options.connectionId, options.symbols);
       const runners = resolveRunners(keys, {
         defaultStrategy: this.strategies.default(),
         strategies: this.strategies.list(),

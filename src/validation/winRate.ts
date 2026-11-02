@@ -25,6 +25,7 @@
 import { runBacktest } from "../backtest/runner.js";
 import type { StrategyProfile } from "../strategies/profileStore.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
+import { isSimulatedMarket } from "../exchanges/types.js";
 import { getLogger } from "../core/logger.js";
 
 const log = getLogger("scenario-winrate");
@@ -182,9 +183,9 @@ export async function runWinRate(
   symbols: string[],
   options: WinRateOptions = {},
 ): Promise<WinRateReport> {
-  if (adapter.meta.id !== "simulated") {
+  if (!isSimulatedMarket(adapter)) {
     throw new Error(
-      "多情景胜率只在模拟交易所上跑：它需要反复掷新的随机路径，真实行情给不出「不同场景」。",
+      "多情景胜率只在模拟行情上跑：它需要反复掷新的随机路径，真实行情给不出「不同场景」。",
     );
   }
   if (symbols.length === 0) throw new Error("至少要有一条走向/标的");

@@ -189,7 +189,7 @@ test("多情景胜率：非模拟连接直接拒绝（真实行情给不出「�
   const profile = { id: "t", name: "x", decisionSource: "rules" } as Parameters<typeof runWinRate>[2];
   await assert.rejects(
     () => runWinRate(testConfig(), fake, profile, ["AAPL"], {}),
-    /只在模拟交易所/,
+    /只在模拟行情/,
     "拒绝文案要说清原因，而不是静默给出一个假胜率",
   );
 });

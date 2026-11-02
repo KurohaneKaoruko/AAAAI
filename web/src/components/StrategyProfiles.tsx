@@ -18,6 +18,7 @@ export function describe(s: StrategyProfile): string {
   const parts: string[] = [];
   if (s.decisionSource === "rules") parts.push(`量化交易 · 双均线 ${s.fastWindow}/${s.slowWindow}`);
   else parts.push(SOURCE_ZH[s.decisionSource]);
+  if (s.allowShort) parts.push("双向（仅合约）");
   if (s.selfAllocating) parts.push(`AI 选资产 ≤${s.maxPositions}`);
   return parts.join(" · ");
 }
@@ -65,6 +66,7 @@ export function StrategyList({
               fastWindow: base.fastWindow,
               slowWindow: base.slowWindow,
               maxTargetWeight: base.maxTargetWeight,
+              allowShort: base.allowShort,
               selfAllocating: base.selfAllocating,
               maxPositions: base.maxPositions,
               maxGrossExposure: base.maxGrossExposure,

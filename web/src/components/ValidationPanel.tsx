@@ -12,7 +12,7 @@
 import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
-import { Button, Empty, Notice, Panel } from "./ui";
+import { Button, Empty, Notice, Panel, SelectField } from "./ui";
 import { pct } from "../lib/format";
 
 interface FoldResult {
@@ -67,6 +67,15 @@ export function ValidationPanel({ store }: { store: AppStore }) {
   const [winRate, setWinRate] = useState<WinRateReport | null>(null);
   const [busy, setBusy] = useState<"wf" | "rb" | "wr" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 多情景胜率可跑在模拟现货或模拟合约上；默认优先模拟合约（双向策略才有意义） */
+  const simConnections = store.connections.filter((c) => c.adapter.marketData === "simulated" && c.enabled);
+  const [wrConnId, setWrConnId] = useState("");
+  const effectiveWrConn =
+    wrConnId ||
+    simConnections.find((c) => c.adapter.tradingMode === "futures")?.id ||
+    simConnections[0]?.id ||
+    "";
+  const wrConnection = simConnections.find((c) => c.id === effectiveWrConn);
 
   const run = async (which: "wf" | "rb" | "wr", seed?: number) => {
     setBusy(which);
@@ -79,17 +88,16 @@ export function ValidationPanel({ store }: { store: AppStore }) {
       } else if (which === "rb") {
         setReport(await api.robustness());
       } else {
-        // 多情景胜率只在模拟交易所上有意义：它需要反复掷新的随机路径，
-        // 真实行情给不出「不同场景」。取第一个模拟连接；没有就明确说不可用。
-        const sim = store.connections.find((c) => c.adapterId === "simulated" && c.enabled);
-        if (!sim) {
-          setError("多情景胜率需要模拟交易所连接：它靠反复掷新的随机路径统计「多少场景盈利为正」，真实行情只有一条历史，给不出这个数。");
+        // 多情景胜率只在模拟行情上有意义：它需要反复掷新的随机路径，
+        // 真实行情给不出「不同场景」。优先模拟合约，其次模拟现货。
+        if (!wrConnection) {
+          setError("多情景胜率需要模拟行情连接（模拟现货或模拟合约）：它靠反复掷新的随机路径统计「多少场景盈利为正」，真实行情只有一条历史，给不出这个数。");
           return;
         }
         // 不传种子 = 掷新的一批路径；传了 = 用那颗起始种子复跑同一份报告
         setWinRate(
           await api.scenarioWinRate({
-            connectionId: sim.id,
+            connectionId: wrConnection.id,
             scenarios: 24,
             ...(seed !== undefined ? { seed } : {}),
           }),
@@ -134,12 +142,39 @@ export function ValidationPanel({ store }: { store: AppStore }) {
             这是在<b>本地生成的行情</b>上统计的：走向形状是编的、噪声是随机的。
             它回答「这套参数换个噪声还赚不赚、换个走向亏不亏」，不构成真实市场收益的预期。
           </Notice>
+          <div className="grid-2">
+            <SelectField
+              label="胜率连接"
+              value={effectiveWrConn}
+              options={simConnections.map((c) => ({
+                value: c.id,
+                label: `${c.label} · ${c.adapter.tradingMode === "futures" ? "合约（可做空）" : "现货（只做多）"}`,
+              }))}
+              onChange={(v) => {
+                setWrConnId(v);
+                setWinRate(null);
+              }}
+            />
+            <div className="field">
+              <span className="field-label">当前口径</span>
+              <div className="dim small" style={{ marginTop: 8 }}>
+                {wrConnection?.adapter.tradingMode === "futures"
+                  ? "合约保证金账户：允许负仓位；不模拟资金费/强平，结果只用于参数稳健性比较。"
+                  : "现货现金账户：只做多；买单不能超过可用现金。"}
+              </div>
+            </div>
+          </div>
           <div className="grid-3" style={{ marginTop: 8 }}>
             <div className="stat-tile">
               <span className="stat-label">正收益场景占比（{winRate.scenarios} 条）</span>
               <span className={`stat-value mono ${winRate.winRate >= 0.5 ? "up" : "down"}`}>
                 {pct(winRate.winRate)}
               </span>
+              {winRate.winRate >= 0.9 ? (
+                <span className="chip chip-sm chip-ok">达到 90% 目标</span>
+              ) : (
+                <span className="chip chip-sm chip-off">低于 90% 目标</span>
+              )}
               <span className="stat-note">
                 正 {winRate.positiveRuns} · 保本 {winRate.flatRuns} · 亏 {winRate.negativeRuns}（期末资金 vs 本金）
               </span>
@@ -189,7 +224,9 @@ export function ValidationPanel({ store }: { store: AppStore }) {
             <span>
               以上面数字为组合口径：{winRate.symbols.join(" + ")} 一起跑。表格每行是该走向<b>单独</b>跑的成绩
               （同一批种子），组合里赚的钱不拆到各走向头上。保本 = 完全没成交、资金原封不动。
-              买单只能用账上现金（现金账户，不透支），所以组合总敞口不会超过权益。
+              {wrConnection?.adapter.tradingMode === "futures"
+                ? "合约按保证金账户记账（权益 = 现金 + 未实现盈亏），负仓位就是空头；不模拟资金费与强平。"
+                : "买单只能用账上现金（现金账户，不透支），所以组合总敞口不会超过权益。"}
               {winRate.interval} · {winRate.barCount} 根/条 · 起始种子 {winRate.seed}。
             </span>
             <Button small onClick={() => run("wr", winRate.seed)} busy={busy === "wr"}>

@@ -24,6 +24,8 @@ export interface ParticipantParams {
   maxTargetWeight: number;
   maxPositions: number;
   selfAllocating: boolean;
+  /** 合约模式下是否允许做空 */
+  allowShort: boolean;
 }
 
 export interface Participant {
@@ -66,6 +68,7 @@ function paramsOf(p: Partial<StrategyProfile>): ParticipantParams {
     maxTargetWeight: p.maxTargetWeight ?? 0.5,
     maxPositions: p.maxPositions ?? 3,
     selfAllocating: p.selfAllocating ?? false,
+    allowShort: p.allowShort ?? true,
   };
 }
 

@@ -29,6 +29,7 @@ import type { LlmManager, LlmProfile, ModelKind } from "../llm/llmManager.js";
 import { StrategyStore, type StrategyProfile } from "../strategies/profileStore.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
+import { isSimulatedMarket } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type {
   BotAction,
@@ -109,6 +110,7 @@ export class BotManager {
         fastWindow: config.strategy.fastWindow,
         slowWindow: config.strategy.slowWindow,
         maxTargetWeight: config.strategy.maxTargetWeight,
+        allowShort: config.strategy.allowShort,
         selfAllocating: config.strategy.selfAllocating,
         maxPositions: config.strategy.maxPositions,
         maxGrossExposure: config.strategy.maxGrossExposure,
@@ -864,6 +866,7 @@ export class BotManager {
         fastWindow: strategy.fastWindow,
         slowWindow: strategy.slowWindow,
         maxTargetWeight: strategy.maxTargetWeight,
+        allowShort: strategy.allowShort,
         selfAllocating: strategy.selfAllocating,
         maxPositions: strategy.maxPositions,
         maxGrossExposure: strategy.maxGrossExposure,
@@ -1084,6 +1087,7 @@ export class BotManager {
     if (!target) return [];
     const equity = alloc.equity;
     if (!(equity > 0)) return [];
+    const futures = this.tradingModeOf(bot) === "futures";
     const bySymbol = new Map(alloc.holdings.map((h) => [h.symbol, h]));
     const symbols = new Set([...Object.keys(target.weights), ...bySymbol.keys()]);
     const actions: BotAction[] = [];
@@ -1091,7 +1095,10 @@ export class BotManager {
       const price = alloc.prices[symbol];
       const holding = bySymbol.get(symbol);
       const currentWeight = holding?.weight ?? 0;
-      const targetWeight = Math.max(0, Math.min(1, target.weights[symbol] ?? 0));
+      // 合约允许负目标；现货仍然只接受 0~1
+      const targetWeight = futures
+        ? Math.max(-1, Math.min(1, target.weights[symbol] ?? 0))
+        : Math.max(0, Math.min(1, target.weights[symbol] ?? 0));
       const holdingQty = holding?.quantity ?? 0;
       // 目标持仓：目标权重对应的股数（供人对照"买到多少算到位"）
       const targetQty = price ? (targetWeight * equity) / price : 0;
@@ -1118,7 +1125,7 @@ export class BotManager {
       if (Math.abs(deltaValue) < minTrade || quantity <= 0) {
         // 不给操作，但必须说清是哪种"不操作"：
         // 空仓观望（目标与当前都是 0）和"差额太小不值得动"是两回事。
-        const flat = currentWeight < 1e-6 && targetWeight < 1e-6;
+        const flat = Math.abs(currentWeight) < 1e-6 && Math.abs(targetWeight) < 1e-6;
         const note = flat
           ? "目标空仓，无需操作"
           : `差额小于最小调仓额 ${round2(minTrade)}，无需操作`;
@@ -1224,11 +1231,30 @@ export class BotManager {
       ...bot,
       state: this.state(bot.id),
       modelLabels: labels,
-      marketData: this.connections.get(bot.connectionId)?.adapterId === "simulated" ? "simulated" : "real",
+      marketData: this.marketDataOf(bot),
+      tradingMode: this.tradingModeOf(bot),
       history: this.historyOf(bot.id),
       totals: this.totalsOf(bot.id),
       ...this.slicingOf(bot),
     };
+  }
+
+  /** 该机器人连接的行情来源；连接不可用时按真实处理，避免把数据问题说成随机行情。 */
+  private marketDataOf(bot: BotConfig): "real" | "simulated" {
+    try {
+      return isSimulatedMarket(this.connections.adapter(bot.connectionId)) ? "simulated" : "real";
+    } catch {
+      return "real";
+    }
+  }
+
+  /** 该机器人连接的交易模式；取不到时按现货（更保守）。 */
+  private tradingModeOf(bot: BotConfig): "spot" | "futures" {
+    try {
+      return this.connections.adapter(bot.connectionId).meta.tradingMode ?? "spot";
+    } catch {
+      return "spot";
+    }
   }
 }
 

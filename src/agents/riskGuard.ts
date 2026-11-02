@@ -19,6 +19,8 @@ export class RiskGuardAgent extends Agent {
     private readonly rules: RiskRules,
     private readonly portfolio: PortfolioManager,
     private readonly book: PriceBook,
+    /** 缺省 spot；合约模式允许负目标权重并检查总名义敞口 */
+    private readonly mode: "spot" | "futures" = "spot",
   ) {
     super(bus);
   }
@@ -53,13 +55,43 @@ export class RiskGuardAgent extends Agent {
       logger.debug("调仓金额 %s 低于最小调仓额，忽略", rawDelta.toFixed(2));
       return;
     }
-    // 先截单笔上限，再按现金账户约束收缩买单：
-    // 现金花完时的买单直接没了（低于 1 个单位即跳过），既不产生永远成交不了的
-    // 排队单，也不会让现金透支 —— 真实现金账户里本来也买不了。
-    const deltaValue = this.rules.clampBuyToCash(this.rules.clampDeltaValue(rawDelta), this.portfolio.cash);
 
-    // 调仓金额不足 1 个单位则跳过，避免噪声单
-    if (Math.abs(deltaValue) < price) return;
+    let deltaValue = this.rules.clampDeltaValue(rawDelta);
+    if (this.mode === "futures") {
+      /**
+       * 合约模式的最后一道总敞口闸：
+       * 单标的上限只能防一个标的，防不住「5 个标的各 50%」叠成 2.5 倍。
+       * 这里用有符号持仓算当前总名义敞口，再按本单成交后的贡献做上限裁剪。
+       * 减仓/平仓不受此限制。
+       */
+      const gross = this.portfolio.grossExposure();
+      const cap = equity * (this.rules.limits.grossCap ?? 1);
+      const candidateValue = currentValue + deltaValue;
+      const oldContribution = Math.abs(currentValue);
+      const newContribution = Math.abs(candidateValue);
+      if (newContribution > oldContribution + 1e-9) {
+        const room = cap - (gross - oldContribution);
+        if (!(room > 1e-9)) {
+          this.bus.publish(Topic.ORDER_REJECTED, {
+            ...signal,
+            reason: `组合总敞口已达上限 ${(cap / equity * 100).toFixed(0)}%，拒绝继续加仓`,
+          });
+          return;
+        }
+        if (newContribution > room) {
+          const clipped = Math.sign(candidateValue) * room;
+          deltaValue = clipped - currentValue;
+        }
+      }
+    } else {
+      // 现货：买单最多花掉手上的现金，绝不透支
+      deltaValue = this.rules.clampBuyToCash(deltaValue, this.portfolio.cash);
+    }
+
+    // 调仓金额不足 1 个报价单位则跳过，避免噪声单。
+    // 不能拿「金额 < 单价」当门槛：BTC 单价 8 万时，20k 的正常订单会被误判成零碎单，
+    // 表现为真实行情上永远不成交，而模拟走向（单价几百）一切正常。
+    if (Math.abs(deltaValue) < 1) return;
 
     const side: Side = deltaValue > 0 ? "BUY" : "SELL";
     const intent: OrderIntent = {

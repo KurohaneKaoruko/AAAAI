@@ -7,6 +7,15 @@ import type { Bar, Side } from "../core/types.js";
 
 export type AssetClass = "crypto" | "stock";
 
+/**
+ * 交易品种类型。
+ * - spot：现货，现金账户，只做多；
+ * - futures：永续/合约，保证金账户，允许做空（由策略的 allowShort 决定）。
+ *
+ * 默认 spot，老适配器不需要改动。
+ */
+export type TradingMode = "spot" | "futures";
+
 /** 标的元信息。 */
 export interface SymbolInfo {
   /** 本适配器内的代码：BTCUSDT / ETHUSDT / AAPL */
@@ -19,6 +28,10 @@ export interface SymbolInfo {
   lotSize: number;
   pricePrecision: number;
   qtyPrecision: number;
+  /** 合约面值：1 张 = 多少基础币（仅合约标的；现货为 undefined） */
+  contractSize?: number;
+  /** 交易所允许的最高杠杆（仅合约；只做展示/校验，不改变仓位算法） */
+  maxLeverage?: number;
 }
 
 /** 实时快照。 */
@@ -88,6 +101,13 @@ export interface AdapterMeta {
   requiresKeys: boolean;
   supportsTrading: boolean;
   supportsTestnet: boolean;
+  /** 现货/合约；缺省按 spot 处理，兼容所有老适配器 */
+  tradingMode?: TradingMode;
+  /**
+   * 行情来源：real = 真实交易所/数据商；simulated = 本地生成。
+   * 缺省按 real 处理；界面据此决定是否显示“随机行情，不构成证据”的警告。
+   */
+  marketData?: "real" | "simulated";
   klineIntervals: string[];
   /** 密钥字段（UI 表单渲染） */
   keyFields: KeyField[];
@@ -141,4 +161,14 @@ export interface ExchangeAdapter {
    * 返回情景种子，会被记进结果，用于复现。
    */
   newScenario?(seed?: number): number;
+}
+
+/** 适配器实际交易模式；老适配器缺省为现货。 */
+export function tradingModeOf(adapter: ExchangeAdapter): TradingMode {
+  return adapter.meta.tradingMode ?? "spot";
+}
+
+/** 是否是本地生成行情（随机行情不能当作策略表现的证据）。 */
+export function isSimulatedMarket(adapter: ExchangeAdapter): boolean {
+  return adapter.meta.marketData === "simulated" || adapter.meta.id === "simulated";
 }

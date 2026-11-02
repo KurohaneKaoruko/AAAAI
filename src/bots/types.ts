@@ -21,6 +21,8 @@ export interface BotStrategy {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  /** 合约模式允许做空（现货会忽略） */
+  allowShort?: boolean;
   /** 由 AI 在候选池里自行选资产并配权重 */
   selfAllocating: boolean;
   /** 最多同时持有几个资产 */
@@ -103,7 +105,7 @@ export interface BotAllocation {
   /** 持仓数 / 候选数 */
   heldCount: number;
   /**
-   * 最新目标权重（symbol -> 0~1，未出现 = 0）。
+   * 最新目标权重（symbol -> 权重）。现货为 0~1，合约可为 -1~1（负 = 做空）。
    * 来自最新一次决策（AI 配置或信号的目标权重）—— 有了它才能算出
    * "还要买卖多少才到位"，也就是人工模仿需要的操作指引。
    */
@@ -304,6 +306,8 @@ export interface BotView extends BotConfig {
    * 与规则的产物，不是任何真实市场的结果。
    */
   marketData: "real" | "simulated";
+  /** 交易模式：现货 / 合约（合约允许做空与保证金记账） */
+  tradingMode: "spot" | "futures";
 }
 
 /** 新建机器人的输入。 */

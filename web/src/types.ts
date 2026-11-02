@@ -12,6 +12,10 @@ export interface AdapterMeta {
   requiresKeys: boolean;
   supportsTrading: boolean;
   supportsTestnet: boolean;
+  /** 现货/合约；缺省按现货处理 */
+  tradingMode?: "spot" | "futures";
+  /** 行情来源：真实 / 本地生成 */
+  marketData?: "real" | "simulated";
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
@@ -43,6 +47,10 @@ export interface SymbolInfo {
   lotSize: number;
   pricePrecision: number;
   qtyPrecision: number;
+  /** 合约面值：1 张 = 多少基础币 */
+  contractSize?: number;
+  /** 交易所允许的最高杠杆 */
+  maxLeverage?: number;
 }
 
 /** 常用标的可选项（内置清单 + 尽力补上的实时价） */
@@ -198,6 +206,7 @@ export interface Participant {
     maxTargetWeight: number;
     maxPositions: number;
     selfAllocating: boolean;
+    allowShort: boolean;
   };
   models: string[];
   /** 不能参赛的原因；为空即可参赛 */
@@ -257,6 +266,8 @@ export interface BotAction {
 export interface BacktestResult {
   /** real = 真实行情；simulated = 本地随机生成的演示行情（不构成任何证据） */
   marketData: "real" | "simulated";
+  /** 现货 / 合约 */
+  tradingMode: "spot" | "futures";
   connectionLabel?: string;
   symbols: string[];
   interval: string;
@@ -319,6 +330,8 @@ export interface Bot {
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
+    /** 合约模式下允许做空（现货忽略） */
+    allowShort?: boolean;
     selfAllocating: boolean;
     maxPositions: number;
     maxGrossExposure: number;
@@ -337,6 +350,8 @@ export interface Bot {
   modelLabels: string[];
   /** 行情来源：real = 真实行情；simulated = 模拟交易所的随机行情 */
   marketData: "real" | "simulated";
+  /** 现货 / 合约 */
+  tradingMode: "spot" | "futures";
   /** 拆单执行统计（paper 券商且开了拆单时才有） */
   slicing?: {
     algo: "none" | "twap" | "vwap";
@@ -443,6 +458,8 @@ export interface StrategyProfile {
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
+  /** 合约模式下是否允许做空 */
+  allowShort: boolean;
   selfAllocating: boolean;
   maxPositions: number;
   maxGrossExposure: number;
@@ -470,6 +487,7 @@ export interface BotInput {
     fastWindow?: number;
     slowWindow?: number;
     maxTargetWeight?: number;
+    allowShort?: boolean;
     selfAllocating?: boolean;
     maxPositions?: number;
     maxGrossExposure?: number;
@@ -514,6 +532,8 @@ export interface RunnerResult {
 export interface ComparisonResult {
   /** real = 真实行情；simulated = 本地随机行情（名次只在这条随机路径上成立） */
   marketData: "real" | "simulated";
+  /** 现货 / 合约：合约模式下负仓位代表做空 */
+  tradingMode: "spot" | "futures";
   connectionLabel?: string;
   symbols: string[];
   bars: number;
@@ -557,6 +577,7 @@ export interface AppConfig {
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
+    allowShort: boolean;
     /** AI 在候选池里自行选资产并配权重 */
     selfAllocating: boolean;
     maxPositions: number;
@@ -609,6 +630,10 @@ export interface EngineState {
     connectionLabel: string | null;
     /** 适配器 id（simulated = 随机行情），界面据此标注 */
     connectionAdapterId: string | null;
+    /** 现货 / 合约 */
+    tradingMode: "spot" | "futures";
+    /** 真实 / 本地生成行情 */
+    marketData: "real" | "simulated";
     interval: string;
     symbols: string[];
     error: string | null;

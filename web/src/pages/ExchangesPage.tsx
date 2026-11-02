@@ -67,8 +67,13 @@ export function ExchangesPage({ store }: { store: AppStore }) {
               </div>
               <p className="adapter-desc">{a.description}</p>
               <div className="adapter-caps">
+                {a.tradingMode === "futures" && <span className="cap-on">合约</span>}
                 <span className={a.supportsTrading ? "cap-on" : "cap-off"}>
-                  {a.supportsTrading ? "支持下单" : "仅行情"}
+                  {a.supportsTrading
+                    ? "支持下单"
+                    : a.tradingMode === "futures"
+                      ? "仅行情 · 本地撮合"
+                      : "仅行情"}
                 </span>
                 {a.requiresKeys && <span className="cap-off">需 API Key</span>}
                 {a.supportsTestnet && <span className="cap-on">支持测试网</span>}
@@ -93,6 +98,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                   <div className="connection-title">
                     <span className="strong">{c.label}</span>
                     <span className="dim small">{c.adapter.name}</span>
+                    {c.adapter.tradingMode === "futures" && <span className="chip chip-sm chip-accent">合约</span>}
                     {c.testnet && <span className="chip chip-sm">测试网</span>}
                     {defaultConnectionId === c.id && <span className="chip chip-sm chip-accent">默认</span>}
                     {/* 连接健康一眼可见：最近一次测试通过 = OK，失败 = 异常，没测过不打分 */}
@@ -224,6 +230,12 @@ function ConnectionForm({
                 <li key={n}>{n}</li>
               ))}
             </ul>
+          )}
+          {adapter.tradingMode === "futures" && (
+            <Notice tone="warn">
+              合约模式：可用真实合约行情做本地模拟撮合，也支持策略做空（在「策略」里启用）。
+              当前<b>不发送真实合约订单</b>，也不模拟资金费、维持保证金与强平；不要拿模拟结果当作真实收益证据。
+            </Notice>
           )}
           {adapter.keyFields.map((f) => (
             <TextField

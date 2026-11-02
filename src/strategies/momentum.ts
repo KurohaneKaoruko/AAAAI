@@ -29,6 +29,8 @@ export class MomentumStrategy implements Strategy {
     private readonly fast = 2,
     private readonly slow = 8,
     private readonly maxWeight = 0.5,
+    /** 合约模式：趋势向下时输出负目标权重；现货必须保持 false */
+    private readonly allowShort = false,
   ) {
     if (fast <= 0 || slow <= 0 || fast >= slow) {
       throw new Error(`MomentumStrategy 要求 0 < fast(${fast}) < slow(${slow})`);
@@ -43,14 +45,17 @@ export class MomentumStrategy implements Strategy {
     const { z, fastMa, slowMa, sigma } = score;
     // t 统计量换算仓位：[ENTER_Z, FULL_Z] 线性映射到 [0, maxWeight]。
     // z<ENTER_Z → 0（趋势弱于噪声，进场等于掷硬币还搭上手续费）。
-    const targetWeight =
-      z <= ENTER_Z ? 0 : clamp((z - ENTER_Z) / (FULL_Z - ENTER_Z), 0, 1) * this.maxWeight;
+    // 合约模式且 allowShort 时，向下的强趋势映射成负仓位（做空）。
+    const strength = Math.abs(z);
+    const magnitude =
+      strength <= ENTER_Z ? 0 : clamp((strength - ENTER_Z) / (FULL_Z - ENTER_Z), 0, 1) * this.maxWeight;
+    const targetWeight = z < 0 ? (this.allowShort ? -magnitude : 0) : magnitude;
     return {
       symbol,
       timestamp: bars[bars.length - 1]!.timestamp,
       targetWeight: round(targetWeight),
-      confidence: round(Math.min(z / FULL_Z, 1)),
-      reason: `fast_ma=${fastMa.toFixed(4)} slow_ma=${slowMa.toFixed(4)} z=${z.toFixed(2)} noise=${sigma.toFixed(4)}`,
+      confidence: round(Math.min(strength / FULL_Z, 1)),
+      reason: `fast_ma=${fastMa.toFixed(4)} slow_ma=${slowMa.toFixed(4)} z=${z.toFixed(2)} noise=${sigma.toFixed(4)}${targetWeight < 0 ? " short" : ""}`,
     };
   }
 }

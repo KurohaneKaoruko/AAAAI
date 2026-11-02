@@ -8,7 +8,7 @@ export interface RiskDecision {
 }
 
 export interface RiskLimits {
-  /** 单标的仓位上限（占总权益） */
+  /** 单标的仓位上限（占总权益；合约模式为单标的名义敞口/权益的绝对值上限） */
   maxPositionWeight: number;
   /** 单笔下单金额上限 */
   maxOrderValue: number;
@@ -16,6 +16,10 @@ export interface RiskLimits {
   maxDrawdownPct: number;
   /** 最小调仓金额：低于此值直接忽略，避免频繁微调（0 = 不限制） */
   minTradeValue: number;
+  /** 组合总名义敞口上限（倍数，缺省 1）；合约模式必须靠它防止多标叠加出无限杠杆 */
+  grossCap?: number;
+  /** 交易模式：现货禁止负仓位；合约允许做空 */
+  mode?: "spot" | "futures";
 }
 
 export class RiskRules {
@@ -30,10 +34,17 @@ export class RiskRules {
     if (!(equity > 0)) {
       return { allowed: false, reason: "权益非正，禁止交易" };
     }
-    if (!Number.isFinite(signal.targetWeight) || signal.targetWeight < 0 || signal.targetWeight > 1) {
+    if (!Number.isFinite(signal.targetWeight)) {
+      return { allowed: false, reason: `目标权重非法: ${signal.targetWeight}` };
+    }
+    const futures = this.limits.mode === "futures";
+    if (!futures && (signal.targetWeight < 0 || signal.targetWeight > 1)) {
       return { allowed: false, reason: `目标权重越界: ${signal.targetWeight}` };
     }
-    if (signal.targetWeight > maxPositionWeight + 1e-9) {
+    if (futures && Math.abs(signal.targetWeight) > maxPositionWeight + 1e-9) {
+      return { allowed: false, reason: `目标仓位超过上限 ±${(maxPositionWeight * 100).toFixed(0)}%` };
+    }
+    if (!futures && signal.targetWeight > maxPositionWeight + 1e-9) {
       return { allowed: false, reason: `目标仓位超过上限 ${(maxPositionWeight * 100).toFixed(0)}%` };
     }
     return { allowed: true, reason: "ok" };

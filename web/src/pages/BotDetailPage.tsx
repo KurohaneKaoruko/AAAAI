@@ -114,6 +114,11 @@ export function BotDetailPage({
           <span className="bot-chips">
             <span className={`badge ${status.cls}`}>{status.text}</span>
             <span className="chip chip-sm">持续运行</span>
+            {bot.tradingMode === "futures" && (
+              <span className="chip chip-sm chip-accent" title="保证金账户，允许策略做空；不模拟资金费/强平">
+                合约模式
+              </span>
+            )}
             {bot.paperTrading ? (
               <span className="chip chip-sm">模拟成交</span>
             ) : st.liveTrading ? (
@@ -216,7 +221,14 @@ export function BotDetailPage({
 
       <ActionPanel bot={bot} symLabel={symLabel} />
 
-      <Panel title="当前持仓" subtitle={a ? `权益 ${money(a.equity)} · 现金 ${wPct(a.cashWeight)}` : "尚未产生配置"}>
+      <Panel
+        title="当前持仓"
+        subtitle={
+          a
+            ? `权益 ${money(a.equity)} · ${bot.tradingMode === "futures" ? "保证金现金" : "现金"} ${wPct(a.cashWeight)}${bot.tradingMode === "futures" ? "（合约按保证金记账，现金≠可用购买力）" : ""}`
+            : "尚未产生配置"
+        }
+      >
         {a && a.holdings.length > 0 ? (
           <div className="table-scroll">
             <table className="table">
@@ -234,7 +246,10 @@ export function BotDetailPage({
               <tbody>
                 {a.holdings.map((h) => (
                   <tr key={h.symbol}>
-                    <td className="mono strong">{h.symbol}</td>
+                    <td className="mono strong">
+                      {h.symbol}
+                      {h.quantity < 0 && <span className="chip chip-sm chip-live" style={{ marginLeft: 6 }}>空</span>}
+                    </td>
                     <td className="mono num">{qty(h.quantity)}</td>
                     <td className="mono num">{money(h.avgCost, 4)}</td>
                     <td className="mono num">{money(h.price, 4)}</td>

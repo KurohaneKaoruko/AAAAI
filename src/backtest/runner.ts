@@ -15,6 +15,7 @@ import type { AppConfig } from "../configSchema.js";
 import type { Bar, TradeRecord } from "../core/types.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import { strategyFields, type StrategyProfile } from "../strategies/profileStore.js";
+import { isSimulatedMarket } from "../exchanges/types.js";
 import { getLogger } from "../core/logger.js";
 
 const log = getLogger("backtest");
@@ -46,6 +47,8 @@ export interface BacktestResult {
    * 用户有权知道这份结果是"策略表现"还是"随机数表演"。
    */
   marketData: "real" | "simulated";
+  /** 现货 / 合约：合约结果可能含负持仓与保证金记账 */
+  tradingMode: "spot" | "futures";
   /** 行情连接名（让人知道数据来自哪个交易所/数据源） */
   connectionLabel?: string;
   symbols: string[];
@@ -153,7 +156,8 @@ export async function runBacktest(
   );
 
   return {
-    marketData: adapter.meta.id === "simulated" ? "simulated" : "real",
+    marketData: isSimulatedMarket(adapter) ? "simulated" : "real",
+    tradingMode: adapter.meta.tradingMode ?? "spot",
     symbols: input.symbols,
     interval: input.interval,
     barCount: input.barCount,

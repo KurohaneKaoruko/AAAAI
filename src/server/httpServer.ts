@@ -453,7 +453,13 @@ export function createServer(controller: EngineController, options: ServerOption
   });
 
   /** 模拟对照的参赛者清单（机器人 / 策略 / 模型 / 基线，含不可用原因） */
-  app.get("/api/bench/participants", (_req, res) => ok(res, { participants: controller.listParticipants() }));
+  app.get("/api/bench/participants", (req, res) => {
+    const connectionId = typeof req.query.connectionId === "string" ? req.query.connectionId : undefined;
+    ok(res, {
+      participants: controller.listParticipants(connectionId),
+      target: controller.benchTarget(connectionId),
+    });
+  });
 
   /**
    * 多情景胜率：同一策略掷 N 条随机路径，统计正收益率场景占比。
@@ -515,6 +521,8 @@ function parseScenarioSeed(raw: unknown): number | undefined {
     const body = (req.body ?? {}) as {
       /** 参赛者 key 列表 */
       keys?: string[];
+      /** 对照连接（不填 = 全局默认） */
+      connectionId?: string;
       symbols?: string[];
       bars?: number;
       interval?: string;
@@ -524,6 +532,7 @@ function parseScenarioSeed(raw: unknown): number | undefined {
     void controller
       .runSimulationComparison({
         keys: body.keys ?? [],
+        ...(body.connectionId ? { connectionId: body.connectionId } : {}),
         symbols: body.symbols,
         bars: typeof body.bars === "number" ? body.bars : undefined,
         interval: body.interval,

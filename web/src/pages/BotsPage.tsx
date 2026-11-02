@@ -261,6 +261,12 @@ function BotCard({
           <span className={`badge ${st.cls}`}>{st.text}</span>
         </div>
         <div className="bot-card-chips">
+          {/* 交易模式：合约机器人可能持有空头，界面别让人误以为只有现货多头 */}
+          {bot.tradingMode === "futures" && (
+            <span className="chip chip-sm chip-accent" title="保证金账户，允许策略做空；不模拟资金费/强平">
+              合约模式
+            </span>
+          )}
           {/* 行情来源：跑在本地生成行情上的机器人，成交与盈亏不是真实市场的结果 */}
           {bot.marketData === "simulated" && (
             <span className="chip chip-sm chip-off" title="K 线由本地生成的走向叠加随机噪声">
@@ -599,12 +605,24 @@ function BotForm({
         <SelectField
           label="行情连接"
           value={connectionId}
-          options={connections.map((c) => ({ value: c.id, label: c.label }))}
+          options={connections.map((c) => ({
+            value: c.id,
+            label: `${c.label}${c.adapter.tradingMode === "futures" ? " · 合约" : ""}`,
+          }))}
           onChange={(v) => {
             setConnectionId(v);
             setSymbols([]);
           }}
         />
+        {connAdapter?.tradingMode === "futures" && (
+          <Notice tone="info">
+            该连接是<b>合约模式</b>：允许策略做空（在「策略」里开启「允许做空」），组合按保证金账户记账。
+            {connAdapter.supportsTrading
+              ? " 这是模拟合约行情，成交在本地完成。"
+              : " 该连接只提供真实合约行情，下单/撮合在本地完成，不会发真实订单。"}
+            不模拟资金费、维持保证金与强平。
+          </Notice>
+        )}
         <SelectField
           label="成交方式"
           value={paperTrading ? "paper" : "real"}
