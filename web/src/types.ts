@@ -348,6 +348,8 @@ export interface Bot {
   };
   createdAt: string;
   modelLabels: string[];
+  /** 连接名称（图表/卡片展示数据来自哪个交易所） */
+  connectionLabel: string;
   /** 行情来源：real = 真实行情；simulated = 模拟交易所的随机行情 */
   marketData: "real" | "simulated";
   /** 现货 / 合约 */

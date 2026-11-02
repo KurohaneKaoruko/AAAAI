@@ -250,7 +250,7 @@ function ConnectionForm({
           {adapter.supportsTestnet && (
             <Toggle
               label="使用测试网 / 模拟盘"
-              hint="强烈建议先用测试网验证"
+              hint="只影响下单/账户；K 线与候选池行情始终走主网真实数据"
               checked={testnet}
               onChange={setTestnet}
             />

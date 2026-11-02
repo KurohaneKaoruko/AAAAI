@@ -676,6 +676,9 @@ function parseScenarioSeed(raw: unknown): number | undefined {
    * - 真实交易所无状态，走独立实例，避免与缓存实例互相挤占连接池；
    * - 模拟交易所的行情长在实例上（情景种子），独立实例等于换一条随机路径 ——
    *   图表会与机器人看到的价格对不上，必须走同一个缓存实例（只读，不掷路径）。
+   *
+   * 真实适配器的公开行情固定走主网（见各适配器），testnet 只影响下单/账户；
+   * 否则测试网 K 线会被当成实盘图，价格和主网完全不是一回事。
    */
   app.get("/api/klines", (req: Request, res: Response) => {
     const connectionId = String(req.query.connectionId ?? "");

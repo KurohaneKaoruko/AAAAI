@@ -4,10 +4,12 @@
  * 刷新节奏（刻意的）：
  * - 不走「每次 SSE 状态广播就重拉」：机器人每几秒广播一次全量 state，
  *   K 线历史根本没变，重拉只是浪费；
- * - 30s 定时轮询保证图表不会太旧；SSE 只触发一次节流刷新（60s 内至多一次），
- *   覆盖「刚启动/刚有成交，想马上看到」的场景。
+ * - 15s 定时轮询保证当前未收盘 K 线保持新鲜；SSE 只触发一次节流刷新
+ *   （30s 内至多一次），覆盖「刚启动/刚有成交，想马上看到」的场景。
  *
  * 数据源：/api/klines（独立请求，不影响机器人自己的行情轮询）。
+ * 真实交易所的公开行情固定走主网，测试网只影响下单/账户 —— 图上的价格
+ * 必须是真实市场，不能拿测试网行情冒充实盘。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,11 +18,12 @@ import { Button, Empty, Panel } from "./ui";
 import { Select } from "./Select";
 import { KlineChart, type TradeMarker } from "./KlineChart";
 import type { Bot, KlineBar } from "../types";
+import { time } from "../lib/format";
 
-/** 定时轮询周期：K 线图不需要秒级新鲜度 */
-const POLL_MS = 30_000;
+/** 定时轮询周期：真实行情下让当前未收盘 K 线保持新鲜 */
+const POLL_MS = 15_000;
 /** SSE 触发刷新的节流窗口 */
-const SSE_THROTTLE_MS = 60_000;
+const SSE_THROTTLE_MS = 30_000;
 /** 可选周期：与主流适配器的 klineIntervals 取交集（Stooq 只支持 1d，切换时后端会报错并显示） */
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"] as const;
 type Interval = (typeof INTERVALS)[number];
@@ -31,6 +34,7 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
   const [bars, setBars] = useState<KlineBar[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [showTrades, setShowTrades] = useState(true);
   /** 上一次 SSE 触发的刷新时刻（节流用） */
   const lastSseFetch = useRef(0);
@@ -51,6 +55,7 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
       });
       setBars(d.bars);
       setError(null);
+      setUpdatedAt(new Date().toISOString());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -98,11 +103,17 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
 
   const intervalOptions = INTERVALS.map((iv) => ({ value: iv, label: iv }));
   const symbolOptions = bot.symbols.map((s) => ({ value: s, label: s }));
+  // 行情源要写在图上方：本地生成行情与真实主网行情长得一样，不标就会被当成实盘。
+  const dataSourceLabel = bot.marketData === "simulated" ? "本地模拟行情" : "真实行情（主网）";
 
   return (
     <Panel
       title="K 线"
-      subtitle={error ? undefined : `${symbol || "—"} · ${interval} · 涨跌标记来自本机器人的成交流水`}
+      subtitle={
+        error
+          ? undefined
+          : `${dataSourceLabel} · ${bot.connectionLabel} · ${symbol || "—"} · ${interval}${updatedAt ? ` · 更新 ${time(updatedAt)}` : ""} · 涨跌标记来自本机器人成交流水`
+      }
       actions={
         <div className="btn-row btn-row-auto" style={{ alignItems: "center", gap: 8 }}>
           {bot.symbols.length > 1 && (
@@ -113,6 +124,9 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
           <div style={{ width: 88 }}>
             <Select value={interval} options={intervalOptions} onChange={(v: Interval) => setInterval_(v)} />
           </div>
+          <Button small onClick={() => void load()} title="立即拉取最新 K 线">
+            刷新
+          </Button>
           <Button small variant={showTrades ? "primary" : "ghost"} onClick={() => setShowTrades((v) => !v)}>
             {showTrades ? "隐藏成交" : "显示成交"}
           </Button>

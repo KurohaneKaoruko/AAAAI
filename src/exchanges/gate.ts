@@ -67,7 +67,7 @@ export class GateAdapter implements ExchangeAdapter {
     name: "Gate.io 芝麻开门",
     assetClass: "crypto",
     description:
-      "Gate.io 现货。行情为公共接口无需密钥；下单需 API Key/Secret（HMAC-SHA512 签名）。可选测试网（默认），测试网密钥需单独申请。交易对内部使用 BTC_USDT 写法，会自动转换。",
+      "Gate.io 现货。公开行情固定走主网真实数据（无需密钥）；下单需 API Key/Secret，测试网只影响交易账户。交易对内部使用 BTC_USDT 写法，会自动转换。",
     requiresKeys: true,
     supportsTrading: true,
     supportsTestnet: true,
@@ -89,6 +89,7 @@ export class GateAdapter implements ExchangeAdapter {
     ],
     notes: [
       "签名：HMAC-SHA512(请求体) 的十六进制值，请求头需带 KEY / Timestamp / SIGN",
+      "公开行情固定走主网 api.gateio.ws；测试网只影响下单/账户",
       "测试网 baseUrl 为 api-testnet.gateapi.io；测试网 API Key 需在 Gate 测试网单独申请，主网密钥不通用",
     ],
   };
@@ -99,8 +100,14 @@ export class GateAdapter implements ExchangeAdapter {
     this.cred = cred;
   }
 
-  /** 测试网与主网只差 baseUrl：行情、K 线、签名路径完全一致。 */
-  private get baseUrl(): string {
+  /** 测试网与主网交易域只差 baseUrl；公开行情域固定主网。 */
+  /** 公开行情固定主网：测试网只用于签名/账户/下单，K 线必须展示真实市场。 */
+  private get marketBaseUrl(): string {
+    return GATE_MAIN_BASE;
+  }
+
+  /** 签名接口：测试网/主网在这里分开。 */
+  private get tradeBaseUrl(): string {
     return this.cred.testnet ? GATE_TESTNET_BASE : GATE_MAIN_BASE;
   }
 
@@ -112,25 +119,27 @@ export class GateAdapter implements ExchangeAdapter {
     const net = this.cred.testnet ? "测试网" : "主网";
     try {
       const started = Date.now();
-      const res = await fetch(`${this.baseUrl}/spot/currency_pairs`, {
+      const res = await fetch(`${this.marketBaseUrl}/spot/currency_pairs`, {
         signal: AbortSignal.timeout(8000),
       });
-      if (!res.ok) return { ok: false, message: `${net}行情 HTTP ${res.status}` };
+      if (!res.ok) return { ok: false, message: `主网行情 HTTP ${res.status}` };
       const elapsed = Date.now() - started;
       if (this.hasKeys) {
         const account = await this.signedRequest("GET", "/spot/accounts", "");
-        if (account.ok) return { ok: true, message: `连接成功（${net}，密钥有效，${elapsed}ms）` };
-        return { ok: false, message: `${net}行情可达（${elapsed}ms），但密钥校验失败: ${account.message}` };
+        if (account.ok) {
+          return { ok: true, message: `连接成功（行情：主网实时；交易：${net}，密钥有效，${elapsed}ms）` };
+        }
+        return { ok: false, message: `主网行情可达（${elapsed}ms），但${net}交易密钥校验失败: ${account.message}` };
       }
-      return { ok: true, message: `连接成功（${net}，未配置密钥，仅行情，${elapsed}ms）` };
+      return { ok: true, message: `连接成功（行情：主网实时；交易：${net}，未配置密钥，仅行情）` };
     } catch (err) {
-      return { ok: false, message: `${net}连接失败: ${(err as Error).message}` };
+      return { ok: false, message: `连接失败: ${(err as Error).message}` };
     }
   }
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolInfo[]> {
     const q = query.trim().toUpperCase();
-    const res = await fetch(`${this.baseUrl}/spot/currency_pairs`, {
+    const res = await fetch(`${this.marketBaseUrl}/spot/currency_pairs`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`Gate 交易对列表 HTTP ${res.status}`);
@@ -159,7 +168,7 @@ export class GateAdapter implements ExchangeAdapter {
     for (const symbol of symbols) {
       try {
         const res = await fetch(
-          `${this.baseUrl}/spot/tickers?currency_pair=${encodeURIComponent(toGatePair(symbol))}`,
+          `${this.marketBaseUrl}/spot/tickers?currency_pair=${encodeURIComponent(toGatePair(symbol))}`,
           { signal: AbortSignal.timeout(8000) },
         );
         if (!res.ok) continue;
@@ -186,7 +195,7 @@ export class GateAdapter implements ExchangeAdapter {
   }
 
   async fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]> {
-    const url = `${this.baseUrl}/spot/candlesticks?currency_pair=${encodeURIComponent(toGatePair(symbol))}&interval=${encodeURIComponent(interval)}&limit=${Math.min(limit, 1000)}`;
+    const url = `${this.marketBaseUrl}/spot/candlesticks?currency_pair=${encodeURIComponent(toGatePair(symbol))}&interval=${encodeURIComponent(interval)}&limit=${Math.min(limit, 1000)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`Gate K 线 HTTP ${res.status}`);
     const rows = (await res.json()) as (string | number)[][];
@@ -306,7 +315,7 @@ export class GateAdapter implements ExchangeAdapter {
       "Content-Type": "application/x-www-form-urlencoded",
     };
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
+      const res = await fetch(`${this.tradeBaseUrl}${path}`, {
         method,
         headers,
         body: method === "POST" ? body : undefined,

@@ -279,6 +279,8 @@ export interface BotHistoryTotals {
 
 export interface BotView extends BotConfig {
   state: BotState;
+  /** 连接名称（图表/卡片展示数据来自哪个交易所） */
+  connectionLabel: string;
   /** 历史运行存档（新 -> 旧，跨重启保留） */
   history: BotRunRecord[];
   /** 历史汇总（由 history 实时算出，不落盘） */

@@ -28,7 +28,7 @@ export class BinanceAdapter implements ExchangeAdapter {
     id: "binance",
     name: "Binance 币安",
     assetClass: "crypto",
-    description: "币安现货。行情为公共接口无需密钥；下单需 API Key（默认测试网）。",
+    description: "币安现货。公开行情固定走主网真实数据（无需密钥）；下单需 API Key，测试网只影响交易账户。",
     requiresKeys: true,
     supportsTrading: true,
     supportsTestnet: true,
@@ -51,7 +51,12 @@ export class BinanceAdapter implements ExchangeAdapter {
       { symbol: "DOTUSDT", name: "Polkadot", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
       { symbol: "LTCUSDT", name: "Litecoin", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 4, qtyPrecision: 6 },
     ],
-    notes: ["下单走 HMAC-SHA256 签名", "测试网 baseUrl 为 testnet.binance.vision", "市价买入使用 quoteOrderQty（金额）"],
+    notes: [
+      "下单走 HMAC-SHA256 签名",
+      "公开行情固定走主网 data-api.binance.vision；测试网只影响下单/账户",
+      "测试网交易 baseUrl 为 testnet.binance.vision",
+      "市价买入使用 quoteOrderQty（金额）",
+    ],
   };
 
   private cred: Credential = { apiKey: "", apiSecret: "", testnet: true };
@@ -60,7 +65,20 @@ export class BinanceAdapter implements ExchangeAdapter {
     this.cred = cred;
   }
 
-  private get baseUrl(): string {
+  /**
+   * 公开行情始终走主网数据域。
+   *
+   * 测试网只影响下单/账户，不能连行情一起切过去：testnet.binance.vision 的
+   * K 线是测试网自有数据（经常出现与主网完全不同的长影线），拿它画“实盘 K 线”
+   * 会直接误导用户。data-api.binance.vision 是 Binance 官方公开行情域，
+   * 无需 Key，且不依赖被墙的 api.binance.com。
+   */
+  private get marketBaseUrl(): string {
+    return "https://data-api.binance.vision";
+  }
+
+  /** 签名/下单/账户接口：测试网与主网在这里分开。 */
+  private get tradeBaseUrl(): string {
     return this.cred.testnet ? "https://testnet.binance.vision" : "https://api.binance.com";
   }
 
@@ -71,17 +89,23 @@ export class BinanceAdapter implements ExchangeAdapter {
   async testConnection(): Promise<ConnectionTest> {
     const started = Date.now();
     try {
-      const res = await fetch(`${this.baseUrl}/api/v3/ping`, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      const res = await fetch(`${this.marketBaseUrl}/api/v3/ping`, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) return { ok: false, message: `主网行情 HTTP ${res.status}` };
       if (this.hasKeys) {
-        // Key 有效性：读取账户接口
+        // Key 有效性：读取账户接口（走测试网/主网交易域）
         const account = await this.signedGet("/api/v3/account");
         if (account.ok) {
-          return { ok: true, message: `连接成功（${this.cred.testnet ? "测试网" : "主网"}，密钥有效）` };
+          return {
+            ok: true,
+            message: `连接成功（行情：主网实时；交易：${this.cred.testnet ? "测试网" : "主网"}，密钥有效，${Date.now() - started}ms）`,
+          };
         }
-        return { ok: false, message: `行情可达，但密钥校验失败: ${account.message}` };
+        return { ok: false, message: `主网行情可达，但交易密钥校验失败: ${account.message}` };
       }
-      return { ok: true, message: `连接成功（${this.cred.testnet ? "测试网" : "主网"}，未配置密钥，仅行情）` };
+      return {
+        ok: true,
+        message: `连接成功（行情：主网实时；交易：${this.cred.testnet ? "测试网" : "主网"}，未配置密钥，仅行情）`,
+      };
     } catch (err) {
       return { ok: false, message: `连接失败: ${(err as Error).message}（${Date.now() - started}ms）` };
     }
@@ -89,7 +113,7 @@ export class BinanceAdapter implements ExchangeAdapter {
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolInfo[]> {
     const q = query.trim().toUpperCase();
-    const url = `${this.baseUrl}/api/v3/exchangeInfo`;
+    const url = `${this.marketBaseUrl}/api/v3/exchangeInfo`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`Binance exchangeInfo HTTP ${res.status}`);
     const info = (await res.json()) as { symbols: BinanceSymbol[] };
@@ -110,7 +134,7 @@ export class BinanceAdapter implements ExchangeAdapter {
 
   async fetchTickers(symbols: string[]): Promise<Ticker[]> {
     if (symbols.length === 0) return [];
-    const url = `${this.baseUrl}/api/v3/ticker/24hr?symbols=${encodeURIComponent(JSON.stringify(symbols))}`;
+    const url = `${this.marketBaseUrl}/api/v3/ticker/24hr?symbols=${encodeURIComponent(JSON.stringify(symbols))}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`Binance 24hr HTTP ${res.status}`);
     const raw = (await res.json()) as
@@ -127,7 +151,7 @@ export class BinanceAdapter implements ExchangeAdapter {
   }
 
   async fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]> {
-    const url = `${this.baseUrl}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
+    const url = `${this.marketBaseUrl}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`Binance klines HTTP ${res.status}`);
     const raw = (await res.json()) as [number, string, string, string, string, string, ...unknown[]][];
@@ -164,7 +188,7 @@ export class BinanceAdapter implements ExchangeAdapter {
     }
     params.set("signature", createHmac("sha256", this.cred.apiSecret).update(params.toString()).digest("hex"));
 
-    const res = await fetch(`${this.baseUrl}/api/v3/order`, {
+    const res = await fetch(`${this.tradeBaseUrl}/api/v3/order`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "X-MBX-APIKEY": this.cred.apiKey },
       body: params.toString(),
@@ -201,7 +225,7 @@ export class BinanceAdapter implements ExchangeAdapter {
   private async signedGet(path: string): Promise<{ ok: boolean; message: string }> {
     const params = new URLSearchParams({ timestamp: String(Date.now()), recvWindow: "5000" });
     params.set("signature", createHmac("sha256", this.cred.apiSecret).update(params.toString()).digest("hex"));
-    const res = await fetch(`${this.baseUrl}${path}?${params.toString()}`, {
+    const res = await fetch(`${this.tradeBaseUrl}${path}?${params.toString()}`, {
       headers: { "X-MBX-APIKEY": this.cred.apiKey },
       signal: AbortSignal.timeout(10_000),
     });

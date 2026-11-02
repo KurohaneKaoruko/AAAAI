@@ -31,7 +31,6 @@ import { toGatePair } from "./gate.js";
 const log = getLogger("exchange:gate-futures");
 
 const GATE_MAIN_BASE = "https://api.gateio.ws/api/v4";
-const GATE_TESTNET_BASE = "https://api-testnet.gateapi.io/api/v4";
 
 interface GateContract {
   name: string;
@@ -86,21 +85,21 @@ export class GateFuturesAdapter implements ExchangeAdapter {
     name: "Gate.io 合约（真实行情 / 模拟撮合）",
     assetClass: "crypto",
     description:
-      "Gate.io USDT 永续合约公共行情。行情真实，下单/撮合在本地模拟，不接真实资金。支持做空与保证金账户；不模拟资金费、强平与交易所保证金率。",
+      "Gate.io USDT 永续合约主网公共行情。行情真实，下单/撮合在本地模拟，不接真实资金。支持做空与保证金账户；不模拟资金费、强平与交易所保证金率。",
     requiresKeys: false,
     supportsTrading: false,
-    supportsTestnet: true,
+    supportsTestnet: false,
     tradingMode: "futures",
     marketData: "real",
     klineIntervals: ["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
     keyFields: [],
     defaultSymbols: DEFAULT_SYMBOLS,
     notes: [
-      "公共行情无需 API Key；真实合约下单未开放（连接不支持下单）",
+      "公共行情固定走主网真实合约数据；测试网标记只影响连接展示，本适配器不下真实订单",
       "交易对写法：BTC_USDT（也接受 BTCUSDT / BTC-USDT，会自动转换）",
       "K 线为合约标记价格行情；成交量单位以交易所返回为准",
       "不模拟资金费、维持保证金、逐仓强平与交易所强平引擎",
-      "测试网 baseUrl 为 api-testnet.gateapi.io；建议先用模拟盘验证策略",
+      "下单/撮合在本地模拟，不会发送真实合约订单",
     ],
   };
 
@@ -110,31 +109,36 @@ export class GateFuturesAdapter implements ExchangeAdapter {
     this.cred = cred;
   }
 
-  private get baseUrl(): string {
-    return this.cred.testnet ? GATE_TESTNET_BASE : GATE_MAIN_BASE;
+  /**
+   * 公开合约行情固定主网。
+   *
+   * 本适配器不下真实订单，testnet 只是连接标记；K 线必须来自主网真实合约，
+   * 否则测试网自成一套价格，画出来不能当实盘行情。
+   */
+  private get marketBaseUrl(): string {
+    return GATE_MAIN_BASE;
   }
 
   async testConnection(): Promise<ConnectionTest> {
-    const net = this.cred.testnet ? "测试网" : "主网";
     try {
       const started = Date.now();
-      const res = await fetch(`${this.baseUrl}/futures/usdt/contracts/BTC_USDT`, {
+      const res = await fetch(`${this.marketBaseUrl}/futures/usdt/contracts/BTC_USDT`, {
         signal: AbortSignal.timeout(8000),
       });
-      if (!res.ok) return { ok: false, message: `${net}合约行情 HTTP ${res.status}` };
+      if (!res.ok) return { ok: false, message: `主网合约行情 HTTP ${res.status}` };
       const c = (await res.json()) as GateContract;
       return {
         ok: true,
-        message: `连接成功（${net}合约行情，${Date.now() - started}ms，合约 ${c.name ?? "BTC_USDT"}；仅行情/模拟撮合）`,
+        message: `连接成功（主网实时合约行情，${Date.now() - started}ms，合约 ${c.name ?? "BTC_USDT"}；本地模拟撮合）`,
       };
     } catch (err) {
-      return { ok: false, message: `${net}合约连接失败: ${(err as Error).message}` };
+      return { ok: false, message: `合约连接失败: ${(err as Error).message}` };
     }
   }
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolInfo[]> {
     const q = query.trim().toUpperCase();
-    const res = await fetch(`${this.baseUrl}/futures/usdt/contracts`, {
+    const res = await fetch(`${this.marketBaseUrl}/futures/usdt/contracts`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`Gate 合约列表 HTTP ${res.status}`);
@@ -167,7 +171,7 @@ export class GateFuturesAdapter implements ExchangeAdapter {
   async fetchTickers(symbols: string[]): Promise<Ticker[]> {
     if (symbols.length === 0) return [];
     // 一次拉全量再过滤：逐个 contract 请求会把页面拖到十几秒
-    const res = await fetch(`${this.baseUrl}/futures/usdt/tickers`, { signal: AbortSignal.timeout(10_000) });
+    const res = await fetch(`${this.marketBaseUrl}/futures/usdt/tickers`, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`Gate 合约行情 HTTP ${res.status}`);
     const all = (await res.json()) as GateFuturesTicker[];
     const wanted = new Map(symbols.map((s) => [toContract(s), s]));
@@ -188,7 +192,7 @@ export class GateFuturesAdapter implements ExchangeAdapter {
 
   async fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]> {
     const contract = toContract(symbol);
-    const url = `${this.baseUrl}/futures/usdt/candlesticks?contract=${encodeURIComponent(contract)}&interval=${encodeURIComponent(interval)}&limit=${Math.min(Math.max(1, limit), 1000)}`;
+    const url = `${this.marketBaseUrl}/futures/usdt/candlesticks?contract=${encodeURIComponent(contract)}&interval=${encodeURIComponent(interval)}&limit=${Math.min(Math.max(1, limit), 1000)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`Gate 合约 K 线 HTTP ${res.status}`);
     const rows = (await res.json()) as {

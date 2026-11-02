@@ -1230,6 +1230,7 @@ export class BotManager {
     return {
       ...bot,
       state: this.state(bot.id),
+      connectionLabel: this.connections.get(bot.connectionId)?.label ?? "未连接",
       modelLabels: labels,
       marketData: this.marketDataOf(bot),
       tradingMode: this.tradingModeOf(bot),
