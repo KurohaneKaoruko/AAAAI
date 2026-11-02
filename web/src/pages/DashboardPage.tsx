@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppStore } from "../state/useAppStore";
 import { useBotsPolling } from "../state/useAppStore";
 import { EquityChart } from "../components/EquityChart";
+import { BotKlinePanel } from "../components/BotKlinePanel";
 import { EventLog } from "../components/EventLog";
 import { Sparkline } from "../components/Sparkline";
 import { Button, Empty, Panel } from "../components/ui";
@@ -185,6 +186,8 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
           </div>
 
           <div className="col">
+            {/* 紧凑版 K 线：选中机器人的实时行情 + 决策标记，明细在机器人详情页 */}
+            <BotKlinePanel bot={selected} />
             <Panel
               title="权益曲线"
               subtitle={

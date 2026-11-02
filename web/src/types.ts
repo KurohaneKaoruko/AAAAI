@@ -94,6 +94,17 @@ export interface EquityPoint {
   equity: number;
 }
 
+/** 一根 K 线（/api/klines 返回；timestamp 是收盘时间，ISO 字符串）。 */
+export interface KlineBar {
+  symbol: string;
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export interface PortfolioMetrics {
   finalEquity: number;
   cash: number;

@@ -26,6 +26,7 @@ import type {
   Ticker,
   WatchItem,
   Participant,
+  KlineBar,
 } from "./types";
 
 const BASE = import.meta.env.DEV ? "http://localhost:8787" : "";
@@ -227,6 +228,17 @@ export const api = {
   startAllBots: (ids?: string[]) =>
     request<{ bots: Bot[] }>("/api/bots/start-all", { method: "POST", body: JSON.stringify({ ids }) }),
   stopAllBots: () => request<{ bots: Bot[] }>("/api/bots/stop-all", { method: "POST" }),
+
+  /** K 线（实时行情图）：timestamp 是收盘时间（ISO 字符串），按时间升序。 */
+  klines: (query: { connectionId: string; symbol: string; interval: string; limit?: number }) => {
+    const q = new URLSearchParams({
+      connectionId: query.connectionId,
+      symbol: query.symbol,
+      interval: query.interval,
+      limit: String(query.limit ?? 300),
+    });
+    return request<{ bars: KlineBar[] }>(`/api/klines?${q.toString()}`);
+  },
 
   // 模拟对照：参赛者 = 机器人 / 策略 / 模型 / 基线
   participants: () => request<{ participants: Participant[] }>("/api/bench/participants"),

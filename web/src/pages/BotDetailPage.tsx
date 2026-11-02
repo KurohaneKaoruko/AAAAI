@@ -14,6 +14,7 @@ import { Button, Empty, Panel } from "../components/ui";
 import { Sparkline } from "../components/Sparkline";
 import { describe } from "../components/StrategyProfiles";
 import { EquityChart } from "../components/EquityChart";
+import { BotKlinePanel } from "../components/BotKlinePanel";
 import { money, pct, qty, signed, signedPct, time, duration, wPct, dateTime, symbolColumnLabel, TOPIC_LABEL } from "../lib/format";
 import type { AppStore } from "../state/useAppStore";
 import type { Bot, BotAction, StrategyProfile } from "../types";
@@ -183,6 +184,9 @@ export function BotDetailPage({
           </span>
         </div>
       </Panel>
+
+      {/* K 线实时视图：实盘行情 + 决策标记 + 均线（来自策略参数） */}
+      <BotKlinePanel bot={bot} />
 
       <Panel
         title="战绩"

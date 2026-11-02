@@ -658,6 +658,56 @@ function parseScenarioSeed(raw: unknown): number | undefined {
     }
   });
 
+  // ---------------- K 线（实时行情图） ----------------
+
+  /**
+   * K 线查询：给前端画实时蜡烛图用。与回测/对照的一次性历史运行不同，
+   * 这里的结果最终要与机器人脚下看到的价格对上（决策标记就画在这些 K 线上），
+   * 所以适配器实例的选择是反过来的：
+   * - 真实交易所无状态，走独立实例，避免与缓存实例互相挤占连接池；
+   * - 模拟交易所的行情长在实例上（情景种子），独立实例等于换一条随机路径 ——
+   *   图表会与机器人看到的价格对不上，必须走同一个缓存实例（只读，不掷路径）。
+   */
+  app.get("/api/klines", (req: Request, res: Response) => {
+    const connectionId = String(req.query.connectionId ?? "");
+    const symbol = String(req.query.symbol ?? "").trim();
+    const interval = String(req.query.interval ?? "1d").trim();
+    // limit 钳制：既防一次拖回几十万根，也防负数/非数字混进来
+    const limit = Math.max(10, Math.min(1000, Math.floor(Number(req.query.limit ?? 300)) || 300));
+    if (!connectionId || !symbol) {
+      fail(res, new Error("缺少 connectionId 或 symbol"), 400);
+      return;
+    }
+    try {
+      const connection = connections.get(connectionId);
+      if (!connection) throw new Error(`连接不存在: ${connectionId}`);
+      const adapter =
+        connection.adapterId === "simulated"
+          ? connections.adapter(connectionId)
+          : controller.independentAdapter(connectionId);
+      // Binance/Gate 本来就返回最新一根；OKX 只回已收盘 K 线，latest 补拉一根
+      // 未收盘的；模拟交易所按当前钟点生成 —— 三种语义都由适配器自己决定，这里只透传。
+      void adapter
+        .fetchKlines(symbol, interval, limit)
+        .then((bars) =>
+          ok(res, {
+            bars: bars.map((b) => ({
+              symbol: b.symbol,
+              timestamp: b.timestamp.toISOString(),
+              open: b.open,
+              high: b.high,
+              low: b.low,
+              close: b.close,
+              volume: b.volume,
+            })),
+          }),
+        )
+        .catch((err) => fail(res, err, 502));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   app.get("/api/watchlist", (_req, res) => ok(res, { items: watchlist.list() }));
 
   app.post("/api/watchlist", (req, res) => {
