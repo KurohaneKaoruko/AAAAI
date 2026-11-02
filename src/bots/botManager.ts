@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { EventBus, Topic } from "../core/eventBus.js";
 import type { Bar } from "../core/types.js";
 import type { Event } from "../core/eventBus.js";
-import { LivePoller, mergeBarsByTime } from "../data/streaming.js";
+import { LivePoller, closedBars, mergeBarsByTime } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { AppConfig, DecisionSource } from "../configSchema.js";
 import { buildPipeline, feed, type Pipeline, type PipelineJournal } from "../agents/orchestrator.js";
@@ -966,9 +966,14 @@ export class BotManager {
      * "历史成交" —— 那是回放，不是这台机器人在实时的作为；
      * 用它统计盈亏、甚至照着人工模仿，模仿的是一段与实时无关的回放。
      */
-    const warmBars = mergeBarsByTime(
+    const simulated = isSimulatedMarket(adapter);
+    const rawWarm = mergeBarsByTime(
       await Promise.all(bot.symbols.map((s) => adapter.fetchKlines(s, bot.interval, bot.barCount))),
     );
+    // 真实行情只喂已收盘 K 线；模拟交易所的“当前周期”是本地完整合成 K 线，保留旧行为
+    const warmBars = simulated ? rawWarm : closedBars(rawWarm, bot.interval);
+    // 真实行情预热最后一条已收盘 K 线：实时轮询器从这里之后才开始，避免重复喂同一根
+    const warmLastMs = simulated ? 0 : (warmBars[warmBars.length - 1]?.timestamp.getTime() ?? 0);
     // 历史 K 线照样进 historyLog（get_history 工具的数据源）——
     // 只是不决策、不成交。工具看到的是真实行情，与预热是否成交无关。
     for (const bar of warmBars) this.trackHistory(bar);
@@ -1001,6 +1006,8 @@ export class BotManager {
       symbols: bot.symbols,
       interval: bot.interval,
       pollMs: bot.pollMs,
+      sinceMs: warmLastMs,
+      closedOnly: !simulated,
     });
     rt.poller = poller;
     poller.start((bars) => {

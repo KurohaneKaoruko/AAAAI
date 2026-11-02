@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventBus, Topic } from "../src/core/eventBus.js";
-import { PriceBook, streamBars } from "../src/data/streaming.js";
+import { PriceBook, streamBars, closedBars, intervalMs, LivePoller } from "../src/data/streaming.js";
+import type { ExchangeAdapter } from "../src/exchanges/types.js";
 import { PortfolioManager } from "../src/portfolio/portfolioManager.js";
 import { PaperBroker } from "../src/execution/paperBroker.js";
 import { SimulatedAdapter } from "../src/exchanges/simulated.js";
@@ -232,4 +233,66 @@ test("标的由交易所自带：模拟现货/合约是这种（界面据此不�
   for (const m of metas.filter((x) => !x.builtinSymbols)) {
     assert.equal(m.builtinSymbols ?? false, false);
   }
+});
+
+test("实时轮询：只喂已收盘 K 线，当前未收盘那根必须排除", () => {
+  const now = Date.UTC(2026, 0, 1, 12, 1, 30);
+  const mk = (minute: number) => ({
+    symbol: "X",
+    timestamp: new Date(Date.UTC(2026, 0, 1, 12, minute, 0)),
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100,
+    volume: 1,
+  });
+  const kept = closedBars([mk(0), mk(1)], "1m", now);
+  assert.deepEqual(kept.map((b) => b.timestamp.getUTCMinutes()), [0], "12:01 这根尚未收盘，不能提前喂给策略");
+  assert.equal(intervalMs("1m"), 60_000);
+  assert.equal(intervalMs("1h"), 3_600_000);
+  assert.equal(intervalMs("1d"), 86_400_000);
+});
+
+test("LivePoller：真实行情只广播已收盘 K 线，且不会重复预热最后一根", async () => {
+  const now = Date.now();
+  const lastClosed = Math.floor((now - 120_000) / 60_000) * 60_000;
+  const current = Math.floor(now / 60_000) * 60_000;
+  const mk = (ts: number) => ({
+    symbol: "X",
+    timestamp: new Date(ts),
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100,
+    volume: 1,
+  });
+  const adapter = {
+    meta: { marketData: "real" },
+    fetchKlines: async () => [mk(lastClosed), mk(current)],
+  } as unknown as ExchangeAdapter;
+  const seenA: string[] = [];
+  const pollerA = new LivePoller(adapter, new EventBus(), new PriceBook(), {
+    symbols: ["X"],
+    interval: "1m",
+    pollMs: 10_000,
+    closedOnly: true,
+  });
+  pollerA.start((bars) => seenA.push(...bars.map((b) => b.timestamp.toISOString())));
+  await new Promise((r) => setTimeout(r, 40));
+  pollerA.stop();
+  assert.deepEqual(seenA, [new Date(lastClosed).toISOString()], "未收盘的当前 K 线不能提前喂给策略");
+
+  const seenB: string[] = [];
+  const pollerB = new LivePoller(adapter, new EventBus(), new PriceBook(), {
+    symbols: ["X"],
+    interval: "1m",
+    pollMs: 10_000,
+    closedOnly: true,
+    // 预热已经处理过 lastClosed，轮询不应再重复喂一次
+    sinceMs: lastClosed,
+  });
+  pollerB.start((bars) => seenB.push(...bars.map((b) => b.timestamp.toISOString())));
+  await new Promise((r) => setTimeout(r, 40));
+  pollerB.stop();
+  assert.deepEqual(seenB, [], "预热最后一条不能被实时轮询重复处理");
 });

@@ -99,6 +99,13 @@ async function main(): Promise<void> {
   bots.normalizeBuiltinSymbols();
   await controller.refreshTickers().catch(() => undefined);
 
+  // 容器长期运行时，进程/容器重启后自动恢复启用的机器人（默认关闭，显式 AAAAI_AUTOSTART=1 才开）
+  const autostart = readEnv("AUTOSTART").trim().toLowerCase();
+  if (autostart === "1" || autostart === "true" || autostart === "yes") {
+    const states = await bots.startEnabled();
+    const running = states.filter((s) => s.status === "running").length;
+    log.info("AAAAI_AUTOSTART：已启动 %d/%d 个机器人", running, states.length);
+  }
 }
 
 function dirname(p: string): string {
