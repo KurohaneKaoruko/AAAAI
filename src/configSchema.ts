@@ -123,9 +123,20 @@ export interface LLMSection {
  */
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
 
+/** 量化规则引擎：经典双均线 / 自适应趋势（波动率与突破过滤）。 */
+export type StrategyEngine = "momentum" | "adaptive";
+
+const ENGINE_NAMES = new Set<StrategyEngine>(["momentum", "adaptive"]);
+
+export function safeStrategyEngine(value: string): StrategyEngine {
+  return ENGINE_NAMES.has(value as StrategyEngine) ? (value as StrategyEngine) : "momentum";
+}
+
 export interface StrategySection {
   /** 决策来源（三选一），决定智能体由谁做仓位决策 */
   decisionSource: DecisionSource;
+  /** 纯规则量化引擎；模型决策时作为失败回退基线 */
+  engine: StrategyEngine;
   /** momentum | llm-momentum */
   name: string;
   fastWindow: number;
@@ -323,6 +334,7 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
       decisionSource: safeDecisionSource(
         str(raw, ["strategy", "decision_source"], bool(raw, ["llm", "enabled"], false) ? "chat" : "rules"),
       ),
+      engine: safeStrategyEngine(str(raw, ["strategy", "engine"], "momentum")),
       name: str(raw, ["strategy", "name"], "llm-momentum"),
       // 默认 2/8：多情景胜率实测平台中值（见 docs/architecture.md「设计取舍 · 默认策略」）
       fastWindow: num(raw, ["strategy", "fast_window"], 2),
@@ -422,6 +434,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
     },
     strategy: {
       decision_source: config.strategy.decisionSource,
+      engine: config.strategy.engine,
       name: config.strategy.name,
       fast_window: config.strategy.fastWindow,
       slow_window: config.strategy.slowWindow,

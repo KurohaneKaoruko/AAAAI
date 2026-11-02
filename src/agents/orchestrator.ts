@@ -23,6 +23,7 @@ import type { FactorInput } from "../factors/index.js";
 import { PortfolioManager } from "../portfolio/portfolioManager.js";
 import { RiskRules } from "../risk/rules.js";
 import { MomentumStrategy } from "../strategies/momentum.js";
+import { AdaptiveTrendStrategy } from "../strategies/adaptiveTrend.js";
 import { LLMStrategy } from "../strategies/llmStrategy.js";
 import type { Strategy } from "../strategies/strategy.js";
 import type { LLMClient } from "../llm/llmClient.js";
@@ -51,6 +52,8 @@ export interface PipelineOptions {
   journal?: PipelineJournal;
   /** 大模型工具能力（只读工具箱）；不传则模型只能看拼好的 prompt */
   tools?: { box: ToolBox; context: ToolContext };
+  /** 研究/测试用：直接指定规则策略，跳过按 config.strategy.engine 装配 */
+  strategyOverride?: Strategy;
 }
 
 /** 决策留痕接口：只依赖最小面，便于对照实验/测试替换实现。 */
@@ -97,13 +100,23 @@ export function buildPipeline(
   const portfolio = new PortfolioManager(bus, config.risk.initialCash, tradingMode);
 
   const source: DecisionSource = sourceOverride ?? config.strategy.decisionSource;
-  const momentum = new MomentumStrategy(
-    config.strategy.fastWindow,
-    config.strategy.slowWindow,
-    config.strategy.maxTargetWeight,
-    // 只有合约模式才把空头信号交给策略；现货即使配置了 allowShort 也不会做空
-    tradingMode === "futures" && config.strategy.allowShort,
-  );
+  const allowShort = tradingMode === "futures" && config.strategy.allowShort;
+  /** 纯规则基线：模型决策失败时也回退到同一条引擎，避免“换了模型却偷偷换策略”。 */
+  const baseStrategy: Strategy =
+    options.strategyOverride ??
+    (config.strategy.engine === "adaptive"
+      ? new AdaptiveTrendStrategy(
+          config.strategy.fastWindow,
+          config.strategy.slowWindow,
+          config.strategy.maxTargetWeight,
+          allowShort,
+        )
+      : new MomentumStrategy(
+          config.strategy.fastWindow,
+          config.strategy.slowWindow,
+          config.strategy.maxTargetWeight,
+          allowShort,
+        ));
 
   const chatClient = options.hybrid?.chat ?? options.llm ?? null;
   const soClient = options.hybrid?.systemone ?? options.soClient ?? null;
@@ -124,15 +137,15 @@ export function buildPipeline(
   const hybrid = source === "hybrid";
   const analyst = hybrid ? new HybridAnalyst(chatClient, hybridOpts) : null;
 
-  let strategy: Strategy = momentum;
+  let strategy: Strategy = baseStrategy;
   if (source === "chat") {
     strategy = chatClient
-      ? new LLMStrategy(momentum, chatClient, config.llm.decisionInterval, newsProvider, toolBox, toolCtx, agentSteps)
-      : momentum;
+      ? new LLMStrategy(baseStrategy, chatClient, config.llm.decisionInterval, newsProvider, toolBox, toolCtx, agentSteps)
+      : baseStrategy;
   } else if (source === "systemone") {
     strategy = soClient
-      ? new LLMStrategy(momentum, soClient, config.llm.decisionInterval, newsProvider)
-      : momentum;
+      ? new LLMStrategy(baseStrategy, soClient, config.llm.decisionInterval, newsProvider)
+      : baseStrategy;
   }
 
   // 点评用第一个可用的模型（没有就纯规则，不影响主流程）

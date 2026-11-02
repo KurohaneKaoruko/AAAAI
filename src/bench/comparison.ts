@@ -205,6 +205,7 @@ function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
     decisionSource: spec.decisionSource,
     params: {
       decisionSource: strategy.decisionSource,
+      engine: strategy.engine,
       fastWindow: strategy.fastWindow,
       slowWindow: strategy.slowWindow,
       maxTargetWeight: strategy.maxTargetWeight,

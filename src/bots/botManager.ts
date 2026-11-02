@@ -107,6 +107,7 @@ export class BotManager {
       seed: {
         name: "默认策略",
         decisionSource: config.strategy.decisionSource,
+        engine: config.strategy.engine,
         fastWindow: config.strategy.fastWindow,
         slowWindow: config.strategy.slowWindow,
         maxTargetWeight: config.strategy.maxTargetWeight,
@@ -528,6 +529,7 @@ export class BotManager {
         .create({
           name: `${input.name.trim()} 策略`,
           decisionSource: input.decisionSource ?? "rules",
+          engine: input.strategy?.engine ?? this.config.strategy.engine,
           fastWindow: input.strategy?.fastWindow ?? this.config.strategy.fastWindow,
           slowWindow: input.strategy?.slowWindow ?? this.config.strategy.slowWindow,
           maxTargetWeight: input.strategy?.maxTargetWeight ?? this.config.strategy.maxTargetWeight,
@@ -557,6 +559,7 @@ export class BotManager {
       // 策略是独立实体：机器人只存 id，参数以策略列表为准（改一处，全体引用生效）
       strategyId,
       strategy: {
+        engine: input.strategy?.engine ?? this.config.strategy.engine,
         fastWindow: input.strategy?.fastWindow ?? this.config.strategy.fastWindow,
         slowWindow: input.strategy?.slowWindow ?? this.config.strategy.slowWindow,
         maxTargetWeight: input.strategy?.maxTargetWeight ?? this.config.strategy.maxTargetWeight,
@@ -863,6 +866,7 @@ export class BotManager {
       strategy: {
         ...this.config.strategy,
         decisionSource: strategy.decisionSource,
+        engine: strategy.engine,
         fastWindow: strategy.fastWindow,
         slowWindow: strategy.slowWindow,
         maxTargetWeight: strategy.maxTargetWeight,

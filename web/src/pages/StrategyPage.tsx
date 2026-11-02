@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
-import { Button, Notice, NumberField, Panel, Toggle } from "../components/ui";
+import { Button, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
 import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
 import { CandidatePool } from "../components/CandidatePool";
 import { NewsPanel } from "../components/NewsPanel";
@@ -24,7 +24,7 @@ import { OptimizePanel } from "../components/OptimizePanel";
 import { ValidationPanel } from "../components/ValidationPanel";
 import { StrategyList, describe } from "../components/StrategyProfiles";
 import { api } from "../api";
-import type { DecisionSource, PoolCounts, StrategyProfile } from "../types";
+import type { DecisionSource, PoolCounts, StrategyProfile, StrategyEngine } from "../types";
 import { pct } from "../lib/format";
 
 interface AgentNode {
@@ -49,7 +49,7 @@ const AGENTS: AgentNode[] = [
 function sourceHint(form: { decisionSource: DecisionSource; hybridInfluence?: number }): string {
   switch (form.decisionSource) {
     case "rules":
-      return "量化交易：本地算指标与仓位，完全不调用模型。快慢均线差按噪声归一（趋势强度低于噪声不进场），因子打分定强弱。";
+      return "量化交易：本地算指标与仓位，完全不调用模型。趋势强度按噪声归一，低于噪声不进场；下方可切换经典双均线或自适应趋势引擎。";
     case "chat":
       return "对话模型：把最近 20 根 K 线交给大模型，由它给 0~1 的目标仓位；失败自动回退量化基线。";
     case "systemone":
@@ -219,6 +219,23 @@ export function StrategyPage({
                 }
               />
               <div className="hint-line">{sourceHint(form)}</div>
+
+              <SelectField
+                label={form.decisionSource === "rules" ? "量化引擎" : "规则回退引擎"}
+                hint={
+                  form.selfAllocating
+                    ? "当前开启 AI/规则自主选资产：由因子配置器决定权重，此引擎仅在逐标的模式生效"
+                    : form.engine === "adaptive"
+                      ? "自适应趋势：效率比/突破/ATR 止损/波动率缩放"
+                      : "经典双均线：噪声归一 t 统计量"
+                }
+                value={form.engine}
+                options={[
+                  { value: "adaptive", label: "自适应趋势（稳健备选）" },
+                  { value: "momentum", label: "经典双均线" },
+                ]}
+                onChange={(v) => setForm({ ...form, engine: v as StrategyEngine })}
+              />
 
               <div className="grid-3" style={{ marginTop: 14 }}>
                 <NumberField
@@ -440,6 +457,7 @@ export function StrategyPage({
 interface StrategyForm {
   name: string;
   decisionSource: DecisionSource;
+  engine: StrategyEngine;
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
@@ -457,6 +475,7 @@ function toForm(s: StrategyProfile): StrategyForm {
   return {
     name: s.name,
     decisionSource: s.decisionSource,
+    engine: s.engine,
     fastWindow: s.fastWindow,
     slowWindow: s.slowWindow,
     maxTargetWeight: s.maxTargetWeight,
@@ -475,6 +494,7 @@ function fromForm(form: StrategyForm): Partial<StrategyProfile> {
   return {
     name: form.name,
     decisionSource: form.decisionSource,
+    engine: form.engine,
     fastWindow: form.fastWindow,
     slowWindow: form.slowWindow,
     maxTargetWeight: form.maxTargetWeight,

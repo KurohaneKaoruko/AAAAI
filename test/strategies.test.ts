@@ -59,15 +59,17 @@ test("策略列表：增删改查与复制，复制带走全部参数", () => {
   const d = dir();
   try {
     const store = new StrategyStore(d);
-    const a = store.create({ name: "激进趋势", decisionSource: "chat", fastWindow: 3, slowWindow: 9, maxTargetWeight: 0.9 });
+    const a = store.create({ name: "激进趋势", decisionSource: "chat", engine: "adaptive", fastWindow: 3, slowWindow: 9, maxTargetWeight: 0.9 });
     assert.equal(store.list().length, 2);
     assert.equal(store.get(a.id)!.fastWindow, 3);
+    assert.equal(store.get(a.id)!.engine, "adaptive");
 
     const copy = store.duplicate(a.id);
     assert.notEqual(copy.id, a.id);
     assert.equal(copy.fastWindow, 3);
     assert.equal(copy.slowWindow, 9);
     assert.equal(copy.maxTargetWeight, 0.9);
+    assert.equal(copy.engine, "adaptive", "复制必须连引擎一起带走");
     assert.equal(copy.decisionSource, "chat", "复制必须连决策来源一起带走");
 
     const updated = store.update(a.id, { fastWindow: 4 });
@@ -140,6 +142,7 @@ test("策略列表：默认参数是实测平台 2/8（改动必须同步文档�
     // 它是多情景胜率扫网格测出来的平台中值；功能下限由 test/winRate.test.ts 的同名用例锁住。
     assert.equal(s.fastWindow, 2);
     assert.equal(s.slowWindow, 8);
+    assert.equal(s.engine, "momentum", "默认引擎是模拟器实测最优的经典双均线");
     assert.ok(s.fastWindow < s.slowWindow);
   } finally {
     rmSync(d, { recursive: true, force: true });

@@ -18,6 +18,8 @@ export type BotStrategyId = string;
 
 /** 机器人的策略参数（已废弃：改由策略列表按 id 引用，此处仅为兼容旧数据保留）。 */
 export interface BotStrategy {
+  /** 纯规则引擎（模型决策时作回退） */
+  engine?: "momentum" | "adaptive";
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;

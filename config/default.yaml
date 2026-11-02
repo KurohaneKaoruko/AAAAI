@@ -46,6 +46,10 @@ llm:
   agent_max_steps: 4         # 单次决策允许的工具调用轮数（0 = 不给工具）
 
 strategy:
+  # 纯规则量化引擎：
+  #   momentum = 经典双均线（噪声归一 t 统计量）
+  #   adaptive = 自适应趋势（效率比 + 突破确认 + ATR 移动止损 + 波动率缩放）
+  engine: momentum
   # 智能体决策来源（三选一），WebUI「策略」页顶部可随时切换
   #   rules      = 纯规则，双均线动量本地计算，不调用模型
   #   chat       = 对话模型池（OpenAI 兼容大模型）

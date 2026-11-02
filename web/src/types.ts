@@ -134,6 +134,7 @@ export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
+export type StrategyEngine = "momentum" | "adaptive";
 
 export interface PoolCounts {
   chat: { total: number; available: number };
@@ -201,6 +202,7 @@ export interface Participant {
   detail: string;
   decisionSource: "rules" | "chat" | "systemone" | "hybrid";
   params: {
+    engine: StrategyEngine;
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
@@ -327,6 +329,7 @@ export interface Bot {
   /** 实时模式的成交方式：true = 模拟成交（行情真实、本地撮合），false = 真实下单 */
   paperTrading: boolean;
   strategy: {
+    engine?: StrategyEngine;
     fastWindow: number;
     slowWindow: number;
     maxTargetWeight: number;
@@ -457,6 +460,7 @@ export interface StrategyProfile {
   name: string;
   note?: string;
   decisionSource: DecisionSource;
+  engine: StrategyEngine;
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
@@ -486,6 +490,7 @@ export interface BotInput {
   /** 实时模式的成交方式：true = 模拟成交（默认），false = 真实下单 */
   paperTrading?: boolean;
   strategy?: {
+    engine?: StrategyEngine;
     fastWindow?: number;
     slowWindow?: number;
     maxTargetWeight?: number;
@@ -575,6 +580,7 @@ export interface AppConfig {
   };
   strategy: {
     decisionSource: DecisionSource;
+    engine: StrategyEngine;
     name: string;
     fastWindow: number;
     slowWindow: number;

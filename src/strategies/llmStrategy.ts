@@ -6,7 +6,7 @@
 import type { Signal } from "../core/types.js";
 import { getLogger } from "../core/logger.js";
 import { buildDecisionPrompt, parseDecision, type LLMClient } from "../llm/llmClient.js";
-import { MomentumStrategy, clamp, round } from "./momentum.js";
+import { clamp, round } from "./momentum.js";
 import type { Strategy, StrategyContext } from "./strategy.js";
 import { renderNewsForPrompt, type NewsDigest } from "../news/types.js";
 import { runToolAgent } from "../llm/agentLoop.js";
@@ -19,7 +19,7 @@ export class LLMStrategy implements Strategy {
   readonly name = "llm-momentum";
 
   constructor(
-    private readonly fallback: MomentumStrategy,
+    private readonly fallback: Strategy,
     private readonly llm: LLMClient | null,
     private readonly decisionInterval = 10,
     /** 新闻获取器（可选）；失败一律忽略 */

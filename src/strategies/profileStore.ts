@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getLogger } from "../core/logger.js";
-import { safeDecisionSource, type DecisionSource } from "../configSchema.js";
+import { safeDecisionSource, type DecisionSource, type StrategyEngine, safeStrategyEngine } from "../configSchema.js";
 
 const log = getLogger("strategies");
 
@@ -24,6 +24,8 @@ export interface StrategyProfile {
   note?: string;
   /** 决策来源：量化（纯规则）| 对话模型 | 决策模型 | 混合 */
   decisionSource: DecisionSource;
+  /** 纯规则引擎；模型决策时作为回退基线 */
+  engine: StrategyEngine;
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
@@ -43,6 +45,7 @@ export interface StrategyProfileInput {
   name: string;
   note?: string;
   decisionSource?: DecisionSource;
+  engine?: StrategyEngine;
   fastWindow?: number;
   slowWindow?: number;
   maxTargetWeight?: number;
@@ -60,6 +63,8 @@ export const DEFAULT_STRATEGY_ID = "default";
 
 const DEFAULTS = {
   decisionSource: "rules" as DecisionSource,
+  // 默认先用经典双均线；自适应引擎可通过策略页切换并单独验证
+  engine: "momentum" as StrategyEngine,
   // 默认窗口（2/8）不是拍的「经典 5/20」：它是在多情景胜率上扫窗口网格实测选出的
   // 平台中值（依据、判定规则与测量表见 docs/architecture.md「设计取舍 · 默认策略」）。
   // 改这里要同步三处默认值（本文件 / configSchema.ts / config/default.yaml）
@@ -137,6 +142,7 @@ export class StrategyStore {
       name: String(raw.name ?? "未命名策略"),
       note: raw.note,
       decisionSource: safeDecisionSource(String(raw.decisionSource ?? DEFAULTS.decisionSource)),
+      engine: safeStrategyEngine(String(raw.engine ?? DEFAULTS.engine)),
       fastWindow: Math.max(2, Number(raw.fastWindow ?? DEFAULTS.fastWindow)),
       slowWindow: Math.max(3, Number(raw.slowWindow ?? DEFAULTS.slowWindow)),
       maxTargetWeight: Math.min(Math.max(Number(raw.maxTargetWeight ?? DEFAULTS.maxTargetWeight), 0.01), 1),
@@ -278,6 +284,7 @@ export class StrategyStore {
 export function strategyFields(p: StrategyProfile): Record<string, unknown> {
   return {
     decisionSource: p.decisionSource,
+    engine: p.engine,
     fastWindow: p.fastWindow,
     slowWindow: p.slowWindow,
     maxTargetWeight: p.maxTargetWeight,

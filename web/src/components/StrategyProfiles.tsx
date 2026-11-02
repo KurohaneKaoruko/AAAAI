@@ -16,8 +16,9 @@ import { SOURCE_ZH } from "./DecisionSourceSwitch";
 /** 一行字概括这条策略（下方参数说明也用它）。 */
 export function describe(s: StrategyProfile): string {
   const parts: string[] = [];
-  if (s.decisionSource === "rules") parts.push(`量化交易 · 双均线 ${s.fastWindow}/${s.slowWindow}`);
-  else parts.push(SOURCE_ZH[s.decisionSource]);
+  if (s.decisionSource === "rules") {
+    parts.push(`量化交易 · ${s.engine === "adaptive" ? "自适应趋势" : "双均线"} ${s.fastWindow}/${s.slowWindow}`);
+  } else parts.push(SOURCE_ZH[s.decisionSource]);
   if (s.allowShort) parts.push("双向（仅合约）");
   if (s.selfAllocating) parts.push(`AI 选资产 ≤${s.maxPositions}`);
   return parts.join(" · ");
@@ -63,6 +64,7 @@ export function StrategyList({
         ...(base
           ? {
               decisionSource: base.decisionSource,
+              engine: base.engine,
               fastWindow: base.fastWindow,
               slowWindow: base.slowWindow,
               maxTargetWeight: base.maxTargetWeight,

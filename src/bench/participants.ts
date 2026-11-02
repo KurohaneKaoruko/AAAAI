@@ -19,6 +19,7 @@ export type ParticipantType = "baseline" | "strategy" | "bot" | "model";
 
 /** 页面摊开给人看的策略参数：比的是什么，必须一眼看见。 */
 export interface ParticipantParams {
+  engine: "momentum" | "adaptive";
   fastWindow: number;
   slowWindow: number;
   maxTargetWeight: number;
@@ -63,6 +64,7 @@ export function requiredModelKinds(source: DecisionSource): ModelKind[] {
 
 function paramsOf(p: Partial<StrategyProfile>): ParticipantParams {
   return {
+    engine: p.engine ?? "momentum",
     fastWindow: p.fastWindow ?? 5,
     slowWindow: p.slowWindow ?? 20,
     maxTargetWeight: p.maxTargetWeight ?? 0.5,

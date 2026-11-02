@@ -352,6 +352,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
                           <div className="dim small">{p.detail}</div>
                           <div className="participant-meta small">
                             <span className="chip chip-sm">{SOURCE_LABEL[p.decisionSource] ?? p.decisionSource}</span>
+                            <span className="chip chip-sm">{p.params.engine === "adaptive" ? "自适应趋势" : "经典双均线"}</span>
                             <span className="chip chip-sm mono">
                               {p.params.fastWindow}/{p.params.slowWindow}
                             </span>
@@ -451,7 +452,8 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
                       </td>
                       <td className="small">{SOURCE_LABEL[r.decisionSource] ?? r.decisionSource}</td>
                       <td className="small mono dim">
-                        {r.params.fastWindow}/{r.params.slowWindow} · ≤{Math.round(Number(r.params.maxTargetWeight) * 100)}%
+                        {r.params.engine === "adaptive" ? "自适应" : "双均线"} {r.params.fastWindow}/{r.params.slowWindow} · ≤
+                        {Math.round(Number(r.params.maxTargetWeight) * 100)}%
                       </td>
                       <td className={`mono num ${r.totalReturn >= 0 ? "up" : "down"}`}>{signedPct(r.totalReturn)}</td>
                       <td className="num mono">{money(r.finalEquity)}</td>
