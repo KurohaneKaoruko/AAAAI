@@ -1,8 +1,19 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // 首屏防闪：默认亮色；用户手动选过暗色时，在 CSS 绘制前先切回暗色
+      (function () {
+        try {
+          var saved = window.localStorage.getItem("aaaai.theme");
+          document.documentElement.dataset.theme = saved === "dark" || saved === "light" ? saved : "light";
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
     <title>AAAAI · 多智能体资产投研</title>
   </head>
   <body>

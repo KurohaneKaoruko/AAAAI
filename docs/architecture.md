@@ -99,7 +99,7 @@ Agent 之间不允许直接引用对方实例（装配层除外），一律经 E
 ## 主题系统
 
 - 所有颜色收敛为 CSS 变量，暗色与亮色各定义一套，仅切换 `:root` 上的变量；
-- `web/src/lib/theme.ts` 的 `useTheme()` 负责：读 localStorage → 首次跟随 `prefers-color-scheme` → 写 `document.documentElement[data-theme]`；
+- `web/src/lib/theme.ts` 的 `useTheme()` 负责：读 localStorage → 默认亮色 → 写 `document.documentElement[data-theme]`；
 - 主题状态不在 React 状态树之外单点维护，切换即时生效且与页面状态无关。
 
 ## WebUI 结构

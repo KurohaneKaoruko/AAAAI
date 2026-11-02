@@ -3,8 +3,7 @@
    所有颜色均由 CSS 变量驱动，暗色/亮色仅覆盖 :root 变量
    ============================================================ */
 
-/* ---------- 暗色（默认） ---------- */
-:root,
+/* ---------- 暗色 ---------- */
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: #0b0f16;
@@ -66,7 +65,8 @@
   --spinner-border: rgba(255, 255, 255, 0.35);
 }
 
-/* ---------- 亮色（纯白） ---------- */
+/* ---------- 亮色（默认） ---------- */
+:root:not([data-theme="dark"]),
 [data-theme="light"] {
   color-scheme: light;
   --bg: #ffffff;
@@ -84,6 +84,10 @@
   --accent-soft: rgba(31, 111, 235, 0.1);
   --green: #0f9d63;
   --red: #d93636;
+  --up: var(--green);
+  --down: var(--red);
+  --up-bg: var(--notice-ok-bg);
+  --down-bg: var(--notice-err-bg);
   --warn: #b7791f;
   --on-accent: #ffffff;
 

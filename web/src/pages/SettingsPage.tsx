@@ -21,8 +21,8 @@ const MODES: { value: UpDownMode; desc: string }[] = [
 ];
 
 const THEME_OPTIONS: { value: Theme; label: string; desc: string }[] = [
-  { value: "dark", label: "暗色", desc: "纯黑基调（默认）" },
-  { value: "light", label: "亮色", desc: "纯白基调" },
+  { value: "dark", label: "暗色", desc: "纯黑基调" },
+  { value: "light", label: "亮色", desc: "纯白基调（默认）" },
 ];
 
 const SYMBOL_PRESETS = ["", "¥", "$", "USDT"];
@@ -106,7 +106,7 @@ export function SettingsPage() {
         <p className="small dim set-note">
           涨跌颜色与价格符号存在 <b className="mono">localStorage["aaaai.display"]</b>，主题存在{" "}
           <b className="mono">localStorage["aaaai.theme"]</b>。 换浏览器、换设备或清除站点数据后回到默认：绿涨红跌、
-          无价格符号、暗色。
+          无价格符号、亮色。
         </p>
       </Panel>
     </>

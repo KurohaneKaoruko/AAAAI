@@ -1,6 +1,7 @@
 /**
  * 主题：暗色 / 亮色（黑白双主题），持久化到 localStorage。
  *
+ * 默认亮色；用户手动切换后以保存的选择为准，不再跟随系统。
  * 模块级单例：顶栏快捷开关与设置页各有一个入口，共享同一份状态 ——
  * 谁改了，另一个立刻跟上（useSyncExternalStore 订阅）。
  */
@@ -15,10 +16,10 @@ let current: Theme = initialTheme();
 const listeners = new Set<() => void>();
 
 function initialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const saved = window.localStorage.getItem(STORAGE_KEY);
   if (saved === "dark" || saved === "light") return saved;
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return "light";
 }
 
 function applyTheme(theme: Theme): void {
@@ -46,18 +47,6 @@ export function useTheme(): { theme: Theme; toggle: () => void; setTheme: (t: Th
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
-
-  // 首次未手动设置过时，跟随系统偏好变化
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-color-scheme: light)");
-    if (!mq) return;
-    const onChange = (e: MediaQueryListEvent): void => {
-      if (window.localStorage.getItem(STORAGE_KEY)) return;
-      setTheme(e.matches ? "light" : "dark");
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
 
   const toggle = useCallback(() => {
     setTheme(current === "dark" ? "light" : "dark");
