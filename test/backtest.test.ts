@@ -37,6 +37,12 @@ test("回测：整段历史一次跑完，成交一次性产出（这正是它�
     assert.ok(result.equityCurve.length > 1, "应有权益曲线");
     assert.ok(result.pnlBySymbol.length > 0, "应有分标的盈亏");
     assert.equal(result.strategyName, "双均线");
+    assert.equal(result.kline.length, 1, "回测必须带回实际使用的盘面");
+    assert.equal(result.kline[0]!.symbol, "单边上行");
+    assert.equal(result.kline[0]!.bars.length, 120, "盘面 K 线数应与回放一致");
+    assert.ok(!Number.isNaN(Date.parse(result.kline[0]!.bars[0]!.timestamp)), "盘面时间必须是可解析的 ISO 时间");
+    assert.equal(result.strategyParams.fastWindow, 5);
+    assert.equal(result.initialCash, testConfig().risk.initialCash);
     assert.ok(result.durationMs >= 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -64,6 +70,31 @@ test("回测：初始资金覆盖生效（用自己的钱，不受全局风控�
     const avgQty = (r: typeof result) =>
       r.trades.reduce((a, t) => a + t.quantity * t.price, 0) / Math.max(1, r.trades.length);
     assert.ok(avgQty(big) > avgQty(result), "更大资金应下更大的单");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("回测：多标的返回各自盘面，成交时间落在对应 K 线范围内", async () => {
+  const { dir, strategies } = setup();
+  try {
+    const profile = strategies.create({ name: "双均线多标的", fastWindow: 2, slowWindow: 8 });
+    const result = await runBacktest(testConfig(), testAdapter(), profile, {
+      symbols: ["单边上行", "震荡整理"],
+      interval: "1m",
+      barCount: 100,
+      strategyId: profile.id,
+    });
+    assert.equal(result.kline.length, 2);
+    assert.deepEqual(result.kline.map((k) => k.symbol), ["单边上行", "震荡整理"]);
+    for (const k of result.kline) {
+      const first = Date.parse(k.bars[0]!.timestamp);
+      const last = Date.parse(k.bars[k.bars.length - 1]!.timestamp);
+      for (const t of result.trades.filter((x) => x.symbol === k.symbol)) {
+        const ts = Date.parse(t.timestamp);
+        assert.ok(ts >= first && ts <= last, `${k.symbol} 的成交 ${t.timestamp} 必须落在盘面范围内`);
+      }
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

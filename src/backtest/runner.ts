@@ -39,6 +39,29 @@ export interface BacktestInput {
   scenarioSeed?: number;
 }
 
+export interface BacktestCandle {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** 回测实际使用的 K 线，按标的返回；前端必须用这份，不能重新拉（模拟行情会换路径）。 */
+export interface BacktestKline {
+  symbol: string;
+  bars: BacktestCandle[];
+}
+
+export interface BacktestStrategyParams {
+  engine: StrategyProfile["engine"];
+  fastWindow: number;
+  slowWindow: number;
+  maxTargetWeight: number;
+  allowShort: boolean;
+}
+
 export interface BacktestResult {
   /**
    * 行情来源：real = 交易所/数据商的真实行情；simulated = 本地随机生成的演示行情。
@@ -54,8 +77,14 @@ export interface BacktestResult {
   symbols: string[];
   interval: string;
   barCount: number;
-  /** 实际参与回放的 K 线数 */
+  /** 实际参与回放的 K 线数（所有标的合计） */
   bars: number;
+  /** 回测实际使用的 K 线（每标的一份，供盘面回放/成交标记） */
+  kline: BacktestKline[];
+  /** 本次跑的策略参数快照（之后改策略不影响这份结果） */
+  strategyParams: BacktestStrategyParams;
+  /** 初始资金（权益曲线基准，不能被页面当前输入框覆盖） */
+  initialCash: number;
   /**
    * 随机行情的情景种子（真实行情为 undefined）。
    *
@@ -155,6 +184,22 @@ export async function runBacktest(
     m.totalFills,
   );
 
+  const kline: BacktestKline[] = groups
+    .map((group, index) => ({
+      symbol: input.symbols[index] ?? group[0]?.symbol ?? `#${index + 1}`,
+      bars: [...group]
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+        .map((b) => ({
+          timestamp: b.timestamp.toISOString(),
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: b.volume,
+        })),
+    }))
+    .filter((k) => k.bars.length > 0);
+
   return {
     marketData: isSimulatedMarket(adapter) ? "simulated" : "real",
     tradingMode: adapter.meta.tradingMode ?? "spot",
@@ -162,6 +207,15 @@ export async function runBacktest(
     interval: input.interval,
     barCount: input.barCount,
     bars: bars.length,
+    kline,
+    strategyParams: {
+      engine: profile.engine,
+      fastWindow: profile.fastWindow,
+      slowWindow: profile.slowWindow,
+      maxTargetWeight: profile.maxTargetWeight,
+      allowShort: profile.allowShort,
+    },
+    initialCash,
     ...(scenarioSeed !== undefined ? { scenarioSeed } : {}),
     durationMs: Date.now() - started,
     strategyId: profile.id,

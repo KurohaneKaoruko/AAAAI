@@ -8,11 +8,13 @@
  *   成交当然一次性全出 —— 这就是它该做的事，它不属于任何机器人，也不写机器人的统计。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useAppStore, type AppStore } from "../state/useAppStore";
 import { Button, Empty, Notice, NumberField, Panel, SelectField } from "../components/ui";
 import { EquityChart } from "../components/EquityChart";
+import { KlineChart, type TradeMarker } from "../components/KlineChart";
+import { Select } from "../components/Select";
 import { Sparkline } from "../components/Sparkline";
 import { TradesTable } from "../components/TradesTable";
 import { money, pct, signed, signedPct } from "../lib/format";
@@ -35,6 +37,9 @@ export function BacktestPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
+  /** 盘面回放：当前显示的标的；多标的时由选择器切换 */
+  const [chartSymbol, setChartSymbol] = useState("");
+  const [showTrades, setShowTrades] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +104,31 @@ export function BacktestPage() {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    setChartSymbol(result?.kline?.[0]?.symbol ?? "");
+  }, [result]);
+
+  const chart = result?.kline?.find((k) => k.symbol === chartSymbol) ?? result?.kline?.[0] ?? null;
+  const chartTrades: TradeMarker[] = useMemo(() => {
+    if (!chart) return [];
+    return (result?.trades ?? [])
+      .filter((t) => t.symbol === chart.symbol)
+      .map((t) => ({
+        id: t.id,
+        timestamp: t.timestamp,
+        side: t.side,
+        price: t.price,
+        quantity: t.quantity,
+        reason: t.reason,
+      }));
+  }, [result, chart]);
+  // 突破/均值回归的 fast/slow 语义不是均线，画 MA 会误导；只给趋势类画。
+  const chartMa =
+    result?.strategyParams &&
+    (result.strategyParams.engine === "momentum" || result.strategyParams.engine === "adaptive")
+      ? { fastWindow: result.strategyParams.fastWindow, slowWindow: result.strategyParams.slowWindow }
+      : undefined;
 
   return (
     <div className="page page-backtest">
@@ -263,7 +293,7 @@ export function BacktestPage() {
       {result && (
         <Panel
           title={`回测结果 · ${result.strategyName}`}
-          subtitle={`${result.symbols.join(" / ")} · ${result.interval} · ${result.bars} 根 · ${result.tradingMode === "futures" ? "合约模式 · " : ""}耗时 ${(result.durationMs / 1000).toFixed(1)}s`}
+          subtitle={`${result.symbols.join(" / ")} · ${result.interval} · 每标的 ${result.barCount} 根 · 合计 ${result.bars} 根 · ${result.tradingMode === "futures" ? "合约模式 · " : ""}耗时 ${(result.durationMs / 1000).toFixed(1)}s`}
         >
           {result.tradingMode === "futures" && (
             <Notice tone="info">
@@ -296,9 +326,47 @@ export function BacktestPage() {
             <Stat label="期末持仓" value={String(result.metrics.openPositions)} />
           </div>
 
+          {chart ? (
+            <div className="backtest-kline">
+              <div className="backtest-kline-head">
+                <div>
+                  <h4>盘面与操作</h4>
+                  <div className="dim small">
+                    K 线来自本次回测实际使用的行情，不是另拉一份；▲ 买入 / ▼ 卖出，悬停看成交价、数量与原因
+                  </div>
+                </div>
+                <div className="btn-row" style={{ margin: 0, alignItems: "center" }}>
+                  {(result.kline?.length ?? 0) > 1 && (
+                    <div style={{ width: 180 }}>
+                      <Select
+                        value={chart.symbol}
+                        options={(result.kline ?? []).map((k) => ({ value: k.symbol, label: k.symbol }))}
+                        onChange={setChartSymbol}
+                      />
+                    </div>
+                  )}
+                  <Button small variant={showTrades ? "primary" : "ghost"} onClick={() => setShowTrades((v) => !v)}>
+                    {showTrades ? "隐藏成交标记" : "显示成交标记"}
+                  </Button>
+                </div>
+              </div>
+              <KlineChart
+                bars={chart.bars}
+                trades={showTrades ? chartTrades : []}
+                ma={chartMa}
+                symbolLabel={chart.symbol}
+              />
+              {chartTrades.length === 0 && (
+                <div className="dim small">这段行情里该标的没有成交；盘面仍保留，方便看策略为什么没动手。</div>
+              )}
+            </div>
+          ) : (
+            <Notice tone="warn">这份结果没有附带 K 线数据，无法回放盘面；请用新版服务端重新回测。</Notice>
+          )}
+
           {result.equityCurve.length > 1 && (
             <div style={{ marginTop: 12 }}>
-              <EquityChart curve={result.equityCurve} initialCash={cash} />
+              <EquityChart curve={result.equityCurve} initialCash={result.initialCash} />
             </div>
           )}
 
@@ -329,10 +397,12 @@ export function BacktestPage() {
             <Notice tone="info">这段时间里策略没有触发任何成交（可能全程空仓信号或风控拦截）。</Notice>
           )}
 
-          <div style={{ marginTop: 12 }}>
-            <h4 className="dim">成交流水</h4>
-            <TradesTable trades={result.trades} />
-          </div>
+          <details className="collapse" style={{ marginTop: 12 }}>
+            <summary>成交流水明细（{result.trades.length} 笔）</summary>
+            <div className="collapse-body">
+              <TradesTable trades={result.trades} />
+            </div>
+          </details>
 
           <div className="dim small" style={{ marginTop: 10 }}>
             成交口径与机器人一致：信号在这根 K 线的收盘算出，成交按<b>下一根 K 线的开盘价</b>撮合，
@@ -371,7 +441,18 @@ function Stat({ label, value, tone, spark }: { label: string; value: string; ton
 }
 
 function describeSource(s: StrategyProfile): string {
-  if (s.decisionSource === "rules") return s.selfAllocating ? "量化交易 · AI 选资产" : "量化交易 · 双均线";
+  if (s.decisionSource === "rules") {
+    if (s.selfAllocating) return "量化交易 · 因子选资产";
+    const engine =
+      s.engine === "adaptive"
+        ? "自适应趋势"
+        : s.engine === "breakout"
+          ? "唐奇安突破"
+          : s.engine === "meanrev"
+            ? "均值回归"
+            : "双均线";
+    return `量化交易 · ${engine}`;
+  }
   if (s.decisionSource === "hybrid") return "混合决策（不支持回测）";
   return `${s.decisionSource === "chat" ? "对话模型" : "决策模型"}（不支持回测）`;
 }

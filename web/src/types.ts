@@ -95,6 +95,8 @@ export interface TradeRecord {
   price: number;
   fee: number;
   realizedPnl: number;
+  /** 触发该成交的信号理由，K 线标记悬停时显示 */
+  reason: string;
 }
 
 export interface EquityPoint {
@@ -275,6 +277,18 @@ export interface BacktestResult {
   interval: string;
   barCount: number;
   bars: number;
+  /** 回测实际使用的 K 线；盘面必须用这份，重新拉模拟行情会换路径 */
+  kline: { symbol: string; bars: KlineBar[] }[];
+  /** 本次策略参数快照（之后改策略不影响这份结果） */
+  strategyParams: {
+    engine: StrategyEngine;
+    fastWindow: number;
+    slowWindow: number;
+    maxTargetWeight: number;
+    allowShort: boolean;
+  };
+  /** 初始资金（权益曲线基准） */
+  initialCash: number;
   /**
    * 随机行情的情景种子（真实行情没有）。不填则每次回测都会掷新路径；
    * 想原样重现某一次结果，把这个数填回去。

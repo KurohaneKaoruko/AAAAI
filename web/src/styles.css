@@ -804,6 +804,28 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 /* ---------- 图表 ---------- */
 
 .chart-wrap { position: relative; }
+
+/* 回测盘面：K 线 + 成交标记，放在权益曲线之前，先看操作再看结果 */
+.backtest-kline {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.backtest-kline-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.backtest-kline-head h4 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  color: var(--text);
+}
 .chart { width: 100%; height: auto; display: block; }
 .chart-headline { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .chart-pnl { font-family: var(--mono); font-size: 16px; font-weight: 600; }
