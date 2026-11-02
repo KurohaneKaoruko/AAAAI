@@ -1763,31 +1763,35 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 .set-symbol .small { margin-left: 4px; }
 
 /* ---------- 使用指引（Tour） ---------- */
-.tour-root { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
-.tour-mask { position: absolute; background: color-mix(in srgb, var(--bg) 72%, transparent); pointer-events: auto; }
+.tour-root { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.tour-mask { position: fixed; background: rgba(0, 0, 0, 0.55); pointer-events: auto; }
 .tour-spot {
-  position: absolute;
+  position: fixed;
   border: 2px solid var(--accent);
   border-radius: 8px;
   pointer-events: none;
   animation: tour-breathe 2.2s ease-in-out infinite;
 }
 .tour-bubble {
-  position: absolute;
-  background: var(--panel);
+  position: fixed;
+  background: var(--bg-panel);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-lg, 0 8px 32px rgba(0, 0, 0, 0.35));
   padding: 14px 16px 12px;
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.tour-step { font-size: 11px; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 6px; }
-.tour-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
-.tour-body { font-size: 12.5px; line-height: 1.7; color: var(--fg-soft, var(--fg)); }
-.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.tour-step { font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 6px; flex-shrink: 0; }
+.tour-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; flex-shrink: 0; }
+.tour-body { font-size: 12.5px; line-height: 1.7; color: var(--text); overflow-y: auto; min-height: 0; }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-shrink: 0; }
 @keyframes tour-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
-  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 142, 247, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(79, 142, 247, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tour-spot { animation: none; }

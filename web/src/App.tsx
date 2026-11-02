@@ -136,7 +136,8 @@ export function App() {
         <main className="content">{render()}</main>
       </div>
       <Toasts store={store} />
-      <Tour onNavigate={setPage} forceKey={tourKey} />
+      {/* 鉴权状态未决（auth===null）时先不播：登录页背后跑指引没有意义 */}
+      {auth && <Tour onNavigate={setPage} forceKey={tourKey} />}
     </div>
   );
 }

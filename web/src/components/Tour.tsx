@@ -2,12 +2,14 @@
  * 新手引导（Tour）：一步一步在画面上指出「先做什么、再做什么」。
  *
  * 实现原则：
- * - 零依赖：遮罩用 4 块 div 拼出聚光洞，高亮框呼吸描边，
- *   气泡按目标位置在四周自动挑落点；
+ * - 零依赖：遮罩层 position:fixed，用 4 块 div 拼出聚光洞（视口坐标系，
+ *   目标坐标直接取 getBoundingClientRect，滚动/缩放时 rAF 重算）；
+ * - 高亮框呼吸描边；气泡按目标位置在右/左/下/上自适应落点，宽度与高度
+ *   都钳制在视口内，长文本内部滚动；
  * - 步骤可跨页面：每步可带 page（App 的 PageId），进入该步先导航，
  *   再轮询等待目标元素渲染出来（最多 2s）；
  * - 初次访问自动播放（localStorage 标记），顶栏「?」随时重看；
- * - 键盘：←/→ 切步、Esc 跳过；resize 重算位置。
+ * - 键盘：←/→ 切步、Esc 跳过。
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -16,7 +18,7 @@ import { Button } from "./ui";
 
 /** 一条引导步骤 */
 export interface TourStep {
-  /** 目标元素的 data-tour 值；welcome / tour-restart 两步无目标（居中卡片） */
+  /** 目标元素的 data-tour 值；welcome 步无目标（视口居中卡片） */
   target: string;
   title: string;
   body: string;
@@ -93,6 +95,7 @@ export function shouldShowTourOnFirstVisit(): boolean {
   }
 }
 
+/** 视口坐标系里的一个矩形 */
 interface Rect {
   top: number;
   left: number;
@@ -128,17 +131,10 @@ export function Tour({
   }, []);
 
   if (!active) return null;
-  return (
-    <TourOverlay
-      stepIndex={stepIndex}
-      onStep={setStepIndex}
-      onNavigate={onNavigate}
-      onClose={close}
-    />
-  );
+  return <TourOverlay stepIndex={stepIndex} onStep={setStepIndex} onNavigate={onNavigate} onClose={close} />;
 }
 
-/** 遮罩 + 高亮 + 气泡主体。 */
+/** 遮罩 + 高亮 + 气泡主体（全部 fixed / 视口坐标）。 */
 function TourOverlay({
   stepIndex,
   onStep,
@@ -152,47 +148,77 @@ function TourOverlay({
 }) {
   const steps = TOUR_STEPS;
   const step = steps[Math.min(stepIndex, steps.length - 1)];
+  /** 目标在视口内的矩形；null = 元素尚未渲染或本步无目标 */
   const [rect, setRect] = useState<Rect | null>(null);
-  const [doc, setDoc] = useState({ w: 0, h: 0 });
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
   const rafRef = useRef(0);
+  // onNavigate 用 ref 转发：父层若传内联函数，放进 effect 依赖会在每次渲染后重复导航
+  const navRef = useRef(onNavigate);
+  navRef.current = onNavigate;
 
-  const isCentered = step.target === "welcome" || step.target === "tour-restart";
+  const isCentered = step.target === "welcome";
 
   const locate = useCallback(() => {
-    const el = isCentered
-      ? null
-      : document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
-    if (el) {
-      const r = el.getBoundingClientRect();
-      setRect({ top: r.top + window.scrollY, left: r.left + window.scrollX, width: r.width, height: r.height });
-    } else if (!isCentered) {
-      setRect(null); // 还没渲染出来：先不画高亮，等下一帧
+    setVp({ w: window.innerWidth, h: window.innerHeight });
+    if (isCentered) {
+      setRect(null); // 欢迎步没有目标元素，气泡自己居中
+      return;
     }
-    setDoc({ w: window.innerWidth, h: document.documentElement.scrollHeight });
+    const el = document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
+    if (el) {
+      const r = el.getBoundingClientRect(); // 视口坐标，滚动后重算即同步
+      if (r.width > 0 && r.height > 0) {
+        setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+        return;
+      }
+    }
+    setRect(null);
   }, [step.target, isCentered]);
 
   // 进入步骤：先导航（若跨页），再轮询等目标元素出现
   useEffect(() => {
-    if (step.page) onNavigate(step.page);
-  }, [stepIndex, step.page, onNavigate]);
+    if (step.page) navRef.current(step.page);
+  }, [stepIndex, step.page]);
 
   useEffect(() => {
     let tries = 0;
+    let stop = false;
     const tick = () => {
+      if (stop) return;
       locate();
-      const found = isCentered || document.querySelector(`[data-tour="${step.target}"]`);
-      if (!found && ++tries < 120) {
+      const el = isCentered ? true : document.querySelector(`[data-tour="${step.target}"]`);
+      if (!el && ++tries < 120) {
         rafRef.current = requestAnimationFrame(tick);
       }
     };
     rafRef.current = requestAnimationFrame(tick);
-    const onResize = () => locate();
-    window.addEventListener("resize", onResize);
-    return () => {
+    // 滚动/缩放都要重算：fixed 坐标跟着视口走
+    const schedule = () => {
       cancelAnimationFrame(rafRef.current);
-      window.removeEventListener("resize", onResize);
+      rafRef.current = requestAnimationFrame(locate);
+    };
+    window.addEventListener("scroll", schedule, true); // capture：内容区自身滚动也算
+    window.addEventListener("resize", schedule);
+    return () => {
+      stop = true;
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
     };
   }, [locate, step.target, isCentered]);
+
+  const go = useCallback(
+    (dir: 1 | -1) => {
+      const next = stepIndex + dir;
+      if (next < 0) return;
+      if (next >= steps.length) {
+        onClose();
+        return;
+      }
+      onStep(next);
+    },
+    [stepIndex, steps.length, onClose, onStep],
+  );
 
   // 键盘：←/→ 步进、Esc 跳过
   useEffect(() => {
@@ -203,51 +229,49 @@ function TourOverlay({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepIndex]);
+  }, [go, onClose]);
 
-  const go = (dir: 1 | -1) => {
-    const next = stepIndex + dir;
-    if (next < 0) return;
-    if (next >= steps.length) {
-      onClose();
-      return;
-    }
-    onStep(next);
-  };
-
-  // 目标滚进视野
+  // 目标滚进视野（fixed 坐标直接判断，比 scrollY 换算直观）
   useLayoutEffect(() => {
-    if (!rect || isCentered) return;
-    const top = rect.top - window.scrollY;
-    if (top < 0 || top > window.innerHeight - 80) {
-      window.scrollTo({ top: Math.max(0, rect.top - window.innerHeight / 3), behavior: "smooth" });
+    if (!rect) return;
+    const bottom = rect.top + rect.height;
+    if (rect.top < 0 || rect.top > vp.h - 60 || bottom > vp.h) {
+      const delta = rect.top - vp.h / 3;
+      window.scrollBy({ top: delta, behavior: "smooth" });
     }
-  }, [rect, stepIndex, isCentered]);
+  }, [rect, stepIndex, vp.h]);
 
-  const vw = doc.w || window.innerWidth;
   const pad = 6;
+  // 聚光洞：有目标用目标外扩；欢迎步在视口中央开一个假想洞（只用于摆气泡）
   const hole = rect
     ? { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }
     : isCentered
-      ? { top: Math.max(80, doc.h / 2 - 60), left: vw / 2 - 240, width: 480, height: 120 }
+      ? { top: vp.h / 2 - 70, left: vp.w / 2 - 200, width: 400, height: 140 }
       : null;
 
-  // 气泡落点：优先目标右侧 → 左侧 → 下方 → 上方
-  const bw = 360;
-  const bh = 190;
-  let bx = 12;
-  let by = 12;
-  if (hole) {
+  // 气泡：宽/高钳制视口；落点优先目标右侧 → 左侧 → 下方 → 上方
+  const bw = Math.min(360, vp.w - 24);
+  const bhEst = 200;
+  let bx: number;
+  let by: number;
+  if (isCentered) {
+    // 欢迎步：气泡盖在假想洞正下方居中
+    bx = Math.max(12, Math.min(vp.w / 2 - bw / 2, vp.w - bw - 12));
+    by = hole ? Math.min(hole.top + hole.height + 16, vp.h - bhEst - 12) : 12;
+    if (by < 12) by = Math.max(12, vp.h / 2 - bhEst / 2);
+  } else if (hole) {
     bx = hole.left + hole.width + 16;
     by = hole.top;
-    if (bx + bw > vw - 12) bx = hole.left - bw - 16;
+    if (bx + bw > vp.w - 12) bx = hole.left - bw - 16;
     if (bx < 12) {
-      bx = Math.min(Math.max(12, hole.left), Math.max(12, vw - bw - 12));
+      bx = Math.max(12, Math.min(hole.left, vp.w - bw - 12));
       by = hole.top + hole.height + 16;
     }
-    if (by + bh > doc.h - 12) by = Math.max(12, hole.top - bh - 16);
-    if (by < 12) by = 12;
+    if (by + bhEst > vp.h - 12) by = Math.max(12, hole.top - bhEst - 16);
+  } else {
+    // 目标还没渲染出来：先停在左上角，等定位到再跳过去
+    bx = 12;
+    by = 12;
   }
 
   const isLast = stepIndex === steps.length - 1;
@@ -256,20 +280,27 @@ function TourOverlay({
     <div className="tour-root">
       {hole && (
         <>
-          <div className="tour-mask" style={{ top: 0, left: 0, width: "100%", height: Math.max(0, hole.top) }} />
+          <div className="tour-mask" style={{ top: 0, left: 0, width: "100vw", height: Math.max(0, hole.top) }} />
           <div className="tour-mask" style={{ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }} />
           <div
             className="tour-mask"
-            style={{ top: hole.top, left: hole.left + hole.width, width: Math.max(0, vw - hole.left - hole.width), height: hole.height }}
+            style={{ top: hole.top, left: hole.left + hole.width, width: Math.max(0, vp.w - hole.left - hole.width), height: hole.height }}
           />
           <div
             className="tour-mask"
-            style={{ top: hole.top + hole.height, left: 0, width: "100%", height: Math.max(0, doc.h - hole.top - hole.height) }}
+            style={{ top: hole.top + hole.height, left: 0, width: "100vw", height: Math.max(0, vp.h - hole.top - hole.height) }}
           />
-          <div className="tour-spot" style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }} />
+          {!isCentered && (
+            <div className="tour-spot" style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }} />
+          )}
         </>
       )}
-      <div className="tour-bubble" style={{ top: by, left: bx, width: bw }} role="dialog" aria-label={step.title}>
+      <div
+        className="tour-bubble"
+        style={{ top: by, left: bx, width: bw, maxHeight: vp.h - 24 }}
+        role="dialog"
+        aria-label={step.title}
+      >
         <div className="tour-step">
           {stepIndex + 1} / {steps.length}
         </div>
