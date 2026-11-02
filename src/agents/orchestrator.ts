@@ -24,6 +24,8 @@ import { PortfolioManager } from "../portfolio/portfolioManager.js";
 import { RiskRules } from "../risk/rules.js";
 import { MomentumStrategy } from "../strategies/momentum.js";
 import { AdaptiveTrendStrategy } from "../strategies/adaptiveTrend.js";
+import { BreakoutStrategy } from "../strategies/breakout.js";
+import { MeanReversionStrategy } from "../strategies/meanReversion.js";
 import { LLMStrategy } from "../strategies/llmStrategy.js";
 import type { Strategy } from "../strategies/strategy.js";
 import type { LLMClient } from "../llm/llmClient.js";
@@ -103,20 +105,7 @@ export function buildPipeline(
   const allowShort = tradingMode === "futures" && config.strategy.allowShort;
   /** 纯规则基线：模型决策失败时也回退到同一条引擎，避免“换了模型却偷偷换策略”。 */
   const baseStrategy: Strategy =
-    options.strategyOverride ??
-    (config.strategy.engine === "adaptive"
-      ? new AdaptiveTrendStrategy(
-          config.strategy.fastWindow,
-          config.strategy.slowWindow,
-          config.strategy.maxTargetWeight,
-          allowShort,
-        )
-      : new MomentumStrategy(
-          config.strategy.fastWindow,
-          config.strategy.slowWindow,
-          config.strategy.maxTargetWeight,
-          allowShort,
-        ));
+    options.strategyOverride ?? buildRuleStrategy(config.strategy, allowShort);
 
   const chatClient = options.hybrid?.chat ?? options.llm ?? null;
   const soClient = options.hybrid?.systemone ?? options.soClient ?? null;
@@ -330,6 +319,42 @@ export function buildPipeline(
 export async function feed(pipeline: Pipeline, bars: Bar[]): Promise<void> {
   if (bars.length === 0) return;
   await streamBars(pipeline.bus, pipeline.book, bars);
+}
+
+/** 按策略引擎装配纯规则策略；模型失败时的回退也走这里，保证口径一致。 */
+export function buildRuleStrategy(strategy: AppConfig["strategy"], allowShort: boolean): Strategy {
+  switch (strategy.engine) {
+    case "adaptive":
+      return new AdaptiveTrendStrategy(
+        strategy.fastWindow,
+        strategy.slowWindow,
+        strategy.maxTargetWeight,
+        allowShort,
+      );
+    case "breakout":
+      // 突破引擎：fastWindow = 离场反向通道，slowWindow = 入场通道
+      return new BreakoutStrategy(
+        strategy.fastWindow,
+        strategy.slowWindow,
+        strategy.maxTargetWeight,
+        allowShort,
+      );
+    case "meanrev":
+      return new MeanReversionStrategy(
+        strategy.fastWindow,
+        strategy.slowWindow,
+        strategy.maxTargetWeight,
+        allowShort,
+      );
+    case "momentum":
+    default:
+      return new MomentumStrategy(
+        strategy.fastWindow,
+        strategy.slowWindow,
+        strategy.maxTargetWeight,
+        allowShort,
+      );
+  }
 }
 
 /** 给 AI 配置器套一层风险倾斜：模型定方向，这里只调风险敞口。 */

@@ -65,6 +65,28 @@ BTC 与股票上说的是同一种语言，不需要为每个品种重新拍门�
 它更接近真实市场里可解释的趋势系统，但在当前合成行情里收益低于纯动量——
 因为合成走向的“趋势段”太干净，过滤器主要是在减少参与。
 
+### 另外两个经典引擎
+
+- **唐奇安突破（Turtle / Donchian）**：`slowWindow` = 入场通道，`fastWindow` = 离场反向通道，
+  ATR 止损；适合有持续方向的市场。预设为 20/10。
+- **布林均值回归**：`slowWindow` = 均值/标准差窗口，`fastWindow` = 短趋势过滤，
+  价格偏离 1.5σ 反向入场；适合震荡市，不适合单边趋势。预设为 5/20。
+
+### 内置策略预设（首次升级补入，可删除）
+
+| 预设 | 引擎 | 参数 | 用途 |
+| --- | --- | --- | --- |
+| 默认策略 | 经典双均线 | 2/8 | 当前实测最优，默认 |
+| 时序动量 · 2/8 | 经典双均线 | 2/8 | 与默认同参数，便于单独比较 |
+| 自适应趋势 · 5/20 | 自适应 | 5/20 | 真实/震荡市场备选 |
+| 唐奇安突破 · 20/10 | 突破 | 20/10 | 趋势突破 |
+| 布林均值回归 · 5/20 | 均值回归 | 5/20 | 区间震荡 |
+| 横截面多因子 · Top3 | 因子配置 | 3 个持仓 | 多标的选强 |
+
+突破/均值回归在“五条走向组合”里不一定跑赢动量：突破 1m/1h 可达 100% 正收益，
+但 1d 只有约六成正收益；均值回归在持续单边组合里会跑输，这是策略适配的边界，
+不是 bug。选择引擎时要匹配市场状态。
+
 ## 5. 实测结果（模拟行情，200 根/标的）
 
 测试口径：5 条走向组合、每格 50 条路径 × 2 颗种子、1m/1h/1d、
@@ -113,3 +135,22 @@ BTC 与股票上说的是同一种语言，不需要为每个品种重新拍门�
 
 **不要为了追求 90% 而调参到过拟合。** 判断标准应同时看最差路径、回撤、换手和费用；
 如果某个参数只在一条路径上漂亮，换一批种子就崩，那它不是策略，是拟合。
+
+## 7. 参考来源（已核验 DOI / NBER）
+
+这些是策略设计的直接来源，不是“网上看到的名字”：
+
+| 主题 | 文献 | 本项目对应 |
+| --- | --- | --- |
+| 时序动量 | Moskowitz, Ooi & Pedersen (2012), *Time Series Momentum*, JFE 104(2), DOI [10.1016/j.jfineco.2011.11.003](https://doi.org/10.1016/j.jfineco.2011.11.003) | 经典双均线 / 自适应趋势 |
+| 横截面动量 | Jegadeesh & Titman (1993), *Returns to Buying Winners and Selling Losers*, JF 48(1), DOI [10.1111/j.1540-6261.1993.tb04702.x](https://doi.org/10.1111/j.1540-6261.1993.tb04702.x) | 横截面多因子 · Top3 |
+| 趋势跟踪长期证据 | Hurst, Ooi & Pedersen (2017), *A Century of Evidence on Trend-Following Investing*, JPM 44(1), DOI [10.3905/jpm.2017.44.1.015](https://doi.org/10.3905/jpm.2017.44.1.015) | 唐奇安突破 / 自适应趋势 |
+| 波动率管理 | Moreira & Muir (2017), *Volatility-Managed Portfolios*, JF 72(4), DOI [10.1111/jofi.12513](https://doi.org/10.1111/jofi.12513)；NBER [w22208](https://www.nber.org/papers/w22208) | 自适应引擎的波动率缩放、风控仓位 |
+| 风险平价 | Asness, Frazzini & Pedersen (2012), *Leverage Aversion and Risk Parity*, FAJ 68(1), DOI [10.2469/faj.v68.n1.1](https://doi.org/10.2469/faj.v68.n1.1) | 组合风险平价配置器 |
+| 配对交易 / 统计套利 | Gatev, Goetzmann & Rouwenhorst (2006), *Pairs Trading*, RFS 19(3), DOI [10.1093/rfs/hhj020](https://doi.org/10.1093/rfs/hhj020)；NBER [w7032](https://www.nber.org/papers/w7032) | 尚未实现（需要协整/配对框架） |
+| 多因子定价 | Fama & French (2015), *A Five-Factor Asset Pricing Model*, JFE 116(1), DOI [10.1016/j.jfineco.2014.10.010](https://doi.org/10.1016/j.jfineco.2014.10.010) | 因子配置器的价值/规模等扩展方向 |
+| 加密趋势跟踪 | Rozario, Holt, West & Ng (2020), *A Decade of Evidence of Trend Following Investing in Cryptocurrencies*, SSRN [3697981](https://doi.org/10.2139/ssrn.3697981) | 加密货币趋势参数与风险提示 |
+| 通道突破 | Donchian 通道 / Turtle Trading 规则（行业经典，非学术论文） | 唐奇安突破引擎 |
+
+> 说明：公开网络搜索接口当时返回 402；以上引用通过 DOI 解析、Crossref 元数据与 NBER 页面核验。
+> 引用只说明“方法有学术/行业来源”，不代表这些策略在当下市场仍然有效，更不代表收益承诺。

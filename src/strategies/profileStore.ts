@@ -87,19 +87,25 @@ export interface StrategyStoreOptions {
   seed?: Partial<StrategyProfile>;
   /** 只在内存里跑，不落盘（测试与一次性对照实验用） */
   memoryOnly?: boolean;
+  /** 首次升级时补入官方策略预设（生产入口开启；测试默认关闭） */
+  seedPresets?: boolean;
 }
 
 export class StrategyStore {
   private profiles: StrategyProfile[] = [];
   private defaultId: string = DEFAULT_STRATEGY_ID;
+  /** 预设播种版本：只播一次，用户删掉后不会每次重启又冒出来 */
+  private presetVersion = 0;
 
   private readonly memoryOnly: boolean;
+  private readonly seedPresets: boolean;
 
   constructor(
     private readonly dataDir: string,
     options: StrategyStoreOptions = {},
   ) {
     this.memoryOnly = options.memoryOnly ?? false;
+    this.seedPresets = options.seedPresets ?? false;
     this.load(options.seed);
   }
 
@@ -112,26 +118,104 @@ export class StrategyStore {
    * 这样老配置升级后行为不变，且立刻有一条可用策略。
    */
   private load(seed?: Partial<StrategyProfile>): void {
+    let loaded = false;
     if (!this.memoryOnly && existsSync(this.path)) {
       try {
         const data = JSON.parse(readFileSync(this.path, "utf8")) as {
           strategies?: StrategyProfile[];
           defaultId?: string;
+          presetVersion?: number;
         };
         if (Array.isArray(data.strategies) && data.strategies.length > 0) {
           this.profiles = data.strategies.map((p) => this.hydrate(p));
           this.defaultId = this.profiles.some((p) => p.id === data.defaultId)
             ? data.defaultId!
             : this.profiles[0]!.id;
-          return;
+          this.presetVersion = Number(data.presetVersion ?? 0) || 0;
+          loaded = true;
         }
       } catch (err) {
         log.warn("strategies.json 解析失败，用默认策略重建: %s", (err as Error).message);
       }
     }
-    this.profiles = [this.hydrate({ ...DEFAULTS, ...seed, id: DEFAULT_STRATEGY_ID, name: seed?.name ?? "默认策略" })];
-    this.defaultId = this.profiles[0]!.id;
+    if (!loaded) {
+      this.profiles = [this.hydrate({ ...DEFAULTS, ...seed, id: DEFAULT_STRATEGY_ID, name: seed?.name ?? "默认策略" })];
+      this.defaultId = this.profiles[0]!.id;
+    }
+    this.ensurePresets();
     this.persist();
+  }
+
+  /**
+   * 官方策略预设：只在第一次升级时补入，之后用户可以自由删改。
+   * 不覆盖同名/同 id 的现有策略；默认策略仍是用户当前选中的那条。
+   */
+  private ensurePresets(): void {
+    if (!this.seedPresets || this.presetVersion >= 1) return;
+    const presets: Partial<StrategyProfile>[] = [
+      {
+        id: "preset-momentum",
+        name: "时序动量 · 2/8",
+        note: "经典双均线，t 统计量归一；模拟行情实测最优",
+        engine: "momentum",
+        fastWindow: 2,
+        slowWindow: 8,
+        maxTargetWeight: 0.5,
+        allowShort: true,
+      },
+      {
+        id: "preset-adaptive",
+        name: "自适应趋势 · 5/20",
+        note: "效率比 + 突破 + ATR 移动止损 + 波动率缩放",
+        engine: "adaptive",
+        fastWindow: 5,
+        slowWindow: 20,
+        maxTargetWeight: 0.5,
+        allowShort: true,
+      },
+      {
+        id: "preset-breakout",
+        name: "唐奇安突破 · 20/10",
+        note: "20 根通道突破入场、10 根反向通道离场，ATR 止损",
+        engine: "breakout",
+        fastWindow: 10,
+        slowWindow: 20,
+        maxTargetWeight: 0.5,
+        allowShort: true,
+      },
+      {
+        id: "preset-meanrev",
+        name: "布林均值回归 · 5/20",
+        note: "价格偏离均值 1.5σ 反向入场，短均线过滤强趋势",
+        engine: "meanrev",
+        fastWindow: 5,
+        slowWindow: 20,
+        maxTargetWeight: 0.5,
+        allowShort: true,
+      },
+      {
+        id: "preset-xsmom",
+        name: "横截面多因子 · Top3",
+        note: "趋势/动量/突破/量价因子排名取前 3，适合多标的候选池",
+        engine: "momentum",
+        fastWindow: 2,
+        slowWindow: 8,
+        maxTargetWeight: 0.5,
+        allowShort: false,
+        selfAllocating: true,
+        maxPositions: 3,
+      },
+    ];
+    let added = 0;
+    for (const preset of presets) {
+      const id = preset.id!;
+      const exists = this.profiles.some((p) => p.id === id || p.name === preset.name);
+      if (exists) continue;
+      this.profiles.push(this.hydrate({ ...DEFAULTS, ...preset, createdAt: new Date().toISOString() }));
+      added += 1;
+    }
+    this.presetVersion = 1;
+    if (added > 0) log.info("已补入 %d 条官方策略预设", added);
   }
 
   /** 补齐缺省字段：老数据/手改文件里少字段时不至于 undefined 满天飞。 */
@@ -162,7 +246,7 @@ export class StrategyStore {
     mkdirSync(this.dataDir, { recursive: true });
     writeFileSync(
       this.path,
-      JSON.stringify({ defaultId: this.defaultId, strategies: this.profiles }, null, 2),
+      JSON.stringify({ defaultId: this.defaultId, presetVersion: this.presetVersion, strategies: this.profiles }, null, 2),
       { mode: 0o600 },
     );
   }

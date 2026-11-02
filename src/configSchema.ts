@@ -123,10 +123,10 @@ export interface LLMSection {
  */
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
 
-/** 量化规则引擎：经典双均线 / 自适应趋势（波动率与突破过滤）。 */
-export type StrategyEngine = "momentum" | "adaptive";
+/** 量化规则引擎：经典双均线 / 自适应趋势 / 突破 / 均值回归。 */
+export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev";
 
-const ENGINE_NAMES = new Set<StrategyEngine>(["momentum", "adaptive"]);
+const ENGINE_NAMES = new Set<StrategyEngine>(["momentum", "adaptive", "breakout", "meanrev"]);
 
 export function safeStrategyEngine(value: string): StrategyEngine {
   return ENGINE_NAMES.has(value as StrategyEngine) ? (value as StrategyEngine) : "momentum";

@@ -149,6 +149,25 @@ test("策略列表：默认参数是实测平台 2/8（改动必须同步文档�
   }
 });
 
+test("策略列表：官方预设只补一次，用户删除后重启不会复活", () => {
+  const d = dir();
+  try {
+    const store = new StrategyStore(d, { seedPresets: true });
+    const first = store.list();
+    assert.ok(first.length >= 6, `应包含默认策略 + 官方预设，实际 ${first.length}`);
+    assert.ok(first.some((s) => s.id === "preset-breakout" && s.engine === "breakout"));
+    assert.ok(first.some((s) => s.id === "preset-meanrev" && s.engine === "meanrev"));
+    assert.ok(first.some((s) => s.id === "preset-xsmom" && s.selfAllocating));
+    store.remove("preset-breakout");
+
+    const again = new StrategyStore(d, { seedPresets: true });
+    assert.equal(again.get("preset-breakout"), undefined, "用户删掉的预设不能每次重启又冒出来");
+    assert.equal(again.list().length, first.length - 1);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("策略列表：引用同一策略的两个机器人，改策略两边同时生效", () => {
   const d = dir();
   try {

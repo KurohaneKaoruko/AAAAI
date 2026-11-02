@@ -41,9 +41,11 @@ async function main(): Promise<void> {
   seedLegacyLlmProfile(llm, config);
   const news = new NewsService(dataDir, config.news);
   const strategies = new StrategyStore(dataDir, {
+    seedPresets: true,
     seed: {
       name: "默认策略",
       decisionSource: config.strategy.decisionSource,
+      engine: config.strategy.engine,
       fastWindow: config.strategy.fastWindow,
       slowWindow: config.strategy.slowWindow,
       maxTargetWeight: config.strategy.maxTargetWeight,

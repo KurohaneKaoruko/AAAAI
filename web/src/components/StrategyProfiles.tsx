@@ -17,10 +17,16 @@ import { SOURCE_ZH } from "./DecisionSourceSwitch";
 export function describe(s: StrategyProfile): string {
   const parts: string[] = [];
   if (s.decisionSource === "rules") {
-    parts.push(`量化交易 · ${s.engine === "adaptive" ? "自适应趋势" : "双均线"} ${s.fastWindow}/${s.slowWindow}`);
+    if (s.engine === "breakout") {
+      parts.push(`量化交易 · 唐奇安突破 入场${s.slowWindow}/离场${s.fastWindow}`);
+    } else if (s.engine === "meanrev") {
+      parts.push(`量化交易 · 均值回归 均值${s.slowWindow}/过滤${s.fastWindow}`);
+    } else {
+      parts.push(`量化交易 · ${s.engine === "adaptive" ? "自适应趋势" : "双均线"} ${s.fastWindow}/${s.slowWindow}`);
+    }
   } else parts.push(SOURCE_ZH[s.decisionSource]);
   if (s.allowShort) parts.push("双向（仅合约）");
-  if (s.selfAllocating) parts.push(`AI 选资产 ≤${s.maxPositions}`);
+  if (s.selfAllocating) parts.push(`${s.decisionSource === "rules" ? "因子选资产" : "AI 选资产"} ≤${s.maxPositions}`);
   return parts.join(" · ");
 }
 

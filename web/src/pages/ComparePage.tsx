@@ -34,6 +34,14 @@ const SOURCE_LABEL: Record<string, string> = {
   hybrid: "混合决策",
 };
 
+const ENGINE_LABEL: Record<string, string> = {
+  momentum: "双均线",
+  adaptive: "自适应",
+  breakout: "突破",
+  meanrev: "均值回归",
+};
+const engineLabel = (engine: string): string => ENGINE_LABEL[engine] ?? engine;
+
 const MAX_RUNNERS = 6;
 
 export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate?: (target: "llm" | "pool") => void }) {
@@ -352,7 +360,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
                           <div className="dim small">{p.detail}</div>
                           <div className="participant-meta small">
                             <span className="chip chip-sm">{SOURCE_LABEL[p.decisionSource] ?? p.decisionSource}</span>
-                            <span className="chip chip-sm">{p.params.engine === "adaptive" ? "自适应趋势" : "经典双均线"}</span>
+                            <span className="chip chip-sm">{engineLabel(p.params.engine)}</span>
                             <span className="chip chip-sm mono">
                               {p.params.fastWindow}/{p.params.slowWindow}
                             </span>
@@ -452,7 +460,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
                       </td>
                       <td className="small">{SOURCE_LABEL[r.decisionSource] ?? r.decisionSource}</td>
                       <td className="small mono dim">
-                        {r.params.engine === "adaptive" ? "自适应" : "双均线"} {r.params.fastWindow}/{r.params.slowWindow} · ≤
+                        {engineLabel(String(r.params.engine ?? "momentum"))} {r.params.fastWindow}/{r.params.slowWindow} · ≤
                         {Math.round(Number(r.params.maxTargetWeight) * 100)}%
                       </td>
                       <td className={`mono num ${r.totalReturn >= 0 ? "up" : "down"}`}>{signedPct(r.totalReturn)}</td>

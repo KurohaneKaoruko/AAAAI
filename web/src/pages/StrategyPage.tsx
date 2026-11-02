@@ -227,12 +227,18 @@ export function StrategyPage({
                     ? "当前开启 AI/规则自主选资产：由因子配置器决定权重，此引擎仅在逐标的模式生效"
                     : form.engine === "adaptive"
                       ? "自适应趋势：效率比/突破/ATR 止损/波动率缩放"
-                      : "经典双均线：噪声归一 t 统计量"
+                      : form.engine === "breakout"
+                        ? "唐奇安突破：慢线=入场通道，快线=离场通道，ATR 止损"
+                        : form.engine === "meanrev"
+                          ? "布林均值回归：慢线=均值窗口，快线=趋势过滤；适合震荡市"
+                          : "经典双均线：噪声归一 t 统计量"
                 }
                 value={form.engine}
                 options={[
-                  { value: "adaptive", label: "自适应趋势（稳健备选）" },
                   { value: "momentum", label: "经典双均线" },
+                  { value: "adaptive", label: "自适应趋势（稳健备选）" },
+                  { value: "breakout", label: "唐奇安突破（趋势）" },
+                  { value: "meanrev", label: "布林均值回归（震荡）" },
                 ]}
                 onChange={(v) => setForm({ ...form, engine: v as StrategyEngine })}
               />
@@ -248,16 +254,40 @@ export function StrategyPage({
                   onChange={(v) => setForm({ ...form, maxTargetWeight: v })}
                 />
                 <NumberField
-                  label="快线窗口"
-                  hint="最近 N 根均值"
+                  label={
+                    form.engine === "breakout"
+                      ? "离场通道"
+                      : form.engine === "meanrev"
+                        ? "趋势过滤窗口"
+                        : "快线窗口"
+                  }
+                  hint={
+                    form.engine === "breakout"
+                      ? "跌破/突破 N 根反向通道离场"
+                      : form.engine === "meanrev"
+                        ? "短均线，过滤接飞刀"
+                        : "最近 N 根均值"
+                  }
                   value={form.fastWindow}
                   min={2}
                   max={100}
                   onChange={(v) => setForm({ ...form, fastWindow: v })}
                 />
                 <NumberField
-                  label="慢线窗口"
-                  hint="须大于快线"
+                  label={
+                    form.engine === "breakout"
+                      ? "入场通道"
+                      : form.engine === "meanrev"
+                        ? "均值窗口"
+                        : "慢线窗口"
+                  }
+                  hint={
+                    form.engine === "breakout"
+                      ? "突破 N 根最高/最低入场"
+                      : form.engine === "meanrev"
+                        ? "布林带均值/标准差窗口"
+                        : "须大于快线"
+                  }
                   value={form.slowWindow}
                   min={3}
                   max={400}

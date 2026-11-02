@@ -134,7 +134,7 @@ export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
-export type StrategyEngine = "momentum" | "adaptive";
+export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev";
 
 export interface PoolCounts {
   chat: { total: number; available: number };
