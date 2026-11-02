@@ -39,7 +39,7 @@ interface ExchangeAdapter {
 }
 ```
 
-现有实现：模拟、Binance、Gate.io、OKX（加密货币），(removed)（美股/港股）、Stooq（美股）。
+现有实现：模拟、Binance、Gate.io、OKX（加密货币）、Stooq（美股）。
 新增交易所只需实现该接口并在 `registry.ts` 注册，UI 的目录、连接表单、周期下拉会自动出现。
 
 **签名差异对照**（下单均走 HTTPS + 私有接口）：

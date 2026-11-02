@@ -29,10 +29,9 @@ AAAAI 探索「LLM Agent × 量化投资」的自动化投研流程。一条事�
 | Binance 币安 | 加密货币 | 公共接口 | HMAC-SHA256 签名下单 | 需要 |
 | Gate.io | 加密货币 | 公共接口 | HMAC-SHA512 签名下单 | 需要 |
 | OKX | 加密货币 | 公共接口 | OK-ACCESS 签名下单 | 需要 |
-| (removed) | 美股 / 港股 / ETF | 实时 + K 线 | 仅行情（可模拟盘交易） | 不需要 |
 | Stooq | 美股 | 日线 | 仅行情（可模拟盘交易） | 不需要 |
 
-- 股票没有免费实盘接口，因此 美股 / 美股连接默认 **真实行情 + 模拟成交**，策略照样能跑真实价格；
+- 股票没有免费实盘接口，因此美股连接默认 **真实行情 + 模拟成交**，策略照样能跑真实价格；
 - 加密货币连接配好 Key 后可切「真实下单」，默认走测试网。
 
 ### 黑白双主题与显示偏好
@@ -94,7 +93,7 @@ npm run typecheck # 服务端 + WebUI 全量类型检查
 ## 接入真实行情
 
 1. 进入 **交易所连接** 页 → 新建连接 → 选择 `Binance 币安`（或东财 / Stooq）→ 保存；
-2. 进入 **策略 → 候选池** 标签 → 选择该连接 → 搜索 `BTC` / `BTCUSDT` / `AAPL` → 加入候选池；
+2. 进入 **策略 → 候选池** 标签 → 选择该连接 → 搜索 `BTC` / `ETH` / `AAPL` → 加入候选池；
    （Gate.io 的 `BTC_USDT` 与其它家的 `BTCUSDT` 写法不同，搜索结果已统一成无下划线形式）
 3. 进 **交易机器人** 页 → 新建机器人 → 选连接、选标的、选策略 → 「启动」。
 
@@ -135,7 +134,7 @@ AAAAI/
 │   │   ├── types.ts        #   ExchangeAdapter 统一接口
 │   │   ├── registry.ts     #   适配器注册与工厂
 │   │   ├── connectionManager.ts # 连接 CRUD + 密钥保管
-│   │   ├── simulated.ts / binance.ts / gate.ts / okx.ts / (removed).ts / stooq.ts
+│   │   ├── simulated.ts / binance.ts / gate.ts / okx.ts / stooq.ts
 │   ├── agents/             # 智能体：analyst / strategist / riskGuard / allocator / orchestrator
 │   ├── strategies/         # 策略：momentum / llmStrategy / hybrid / allocator / 策略档案
 │   ├── data/streaming.ts   # 价格簿、K 线归并、实时轮询

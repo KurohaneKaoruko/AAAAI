@@ -239,11 +239,9 @@ export function CandidatePool({ store }: { store: AppStore }) {
         <input
           value={query}
           placeholder={
-            adapter?.id === "(removed)"
-              ? "输入代码或名称，如 BTCUSDT / 比特币"
-              : adapter?.id === "stooq"
-                ? "输入美股代码，如 AAPL / TSLA"
-                : "输入交易对，如 BTC / ETHUSDT"
+            adapter?.id === "stooq"
+              ? "输入美股代码，如 AAPL / TSLA"
+              : "输入交易对，如 BTC / ETHUSDT"
           }
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void search()}
@@ -333,7 +331,7 @@ export function CandidatePool({ store }: { store: AppStore }) {
           <TextField
             label="代码"
             value={manual?.symbol ?? ""}
-            placeholder={adapter?.assetClass === "stock" ? "BTCUSDT" : "BTCUSDT"}
+            placeholder={adapter?.assetClass === "stock" ? "AAPL" : "BTCUSDT"}
             onChange={(v) =>
               setManual({
                 symbol: v.toUpperCase().trim(),

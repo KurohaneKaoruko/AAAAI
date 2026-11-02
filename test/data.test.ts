@@ -7,10 +7,8 @@ import { PaperBroker } from "../src/execution/paperBroker.js";
 import { SimulatedAdapter } from "../src/exchanges/simulated.js";
 import { BinanceAdapter } from "../src/exchanges/binance.js";
 import { OkxAdapter } from "../src/exchanges/okx.js";
-import { (已移除的交易所适配器) } from "../src/exchanges/(removed).js";
 import { StooqAdapter } from "../src/exchanges/stooq.js";
 import { toStooqSymbol, fromStooqSymbol } from "../src/exchanges/stooq.js";
-import { secidOf } from "../src/exchanges/(removed).js";
 import { listAdapterMetas, createAdapter } from "../src/exchanges/registry.js";
 import type { OrderIntent } from "../src/core/types.js";
 
@@ -75,10 +73,10 @@ test("SimulatedAdapter: 模拟成交含手续费", async () => {
   assert.equal(bad.status, "rejected");
 });
 
-test("适配器元信息完整：6 家交易所", () => {
+test("适配器元信息完整：5 家交易所", () => {
   const metas = listAdapterMetas();
   const ids = metas.map((m) => m.id);
-  assert.deepEqual(ids.sort(), ["binance", "(removed)", "gate", "okx", "simulated", "stooq"]);
+  assert.deepEqual(ids.sort(), ["binance", "gate", "okx", "simulated", "stooq"]);
   for (const m of metas) {
     assert.ok(m.name.length > 0, `${m.id} 缺少名称`);
     assert.ok(m.description.length > 0, `${m.id} 缺少描述`);
@@ -86,7 +84,6 @@ test("适配器元信息完整：6 家交易所", () => {
     assert.ok(["crypto", "stock", "mixed"].includes(m.assetClass));
   }
   // 股票源仅行情，加密源支持下单
-  assert.equal(metas.find((m) => m.id === "(removed)")!.supportsTrading, false);
   assert.equal(metas.find((m) => m.id === "stooq")!.supportsTrading, false);
   assert.equal(metas.find((m) => m.id === "binance")!.supportsTrading, true);
   assert.equal(metas.find((m) => m.id === "okx")!.supportsTrading, true);
@@ -161,13 +158,10 @@ test("PaperBroker: 无行情的订单被驳回", async () => {
   assert.equal(portfolio.metrics().totalFills, 0);
 });
 
-test("交易所代码规则：Stooq / 东财", () => {
+test("交易所代码规则：Stooq", () => {
   assert.equal(toStooqSymbol("AAPL"), "aapl.us");
   assert.equal(toStooqSymbol("msft.us"), "msft.us");
   assert.equal(fromStooqSymbol("aapl.us"), "AAPL");
-  assert.equal(secidOf("BTCUSDT"), "1.BTCUSDT");
-  assert.equal(secidOf("000001"), "0.000001");
-  assert.equal(secidOf("1.BTCUSDT"), "1.BTCUSDT");
 });
 
 test("无网络环境下连接测试应失败而非崩溃", async () => {
@@ -180,10 +174,6 @@ test("无网络环境下连接测试应失败而非崩溃", async () => {
   const okx = new OkxAdapter();
   okx.init(noCred);
   assert.ok((await okx.testConnection()).message.length > 0);
-
-  const em = new (已移除的交易所适配器)();
-  em.init(noCred);
-  assert.ok((await em.testConnection()).message.length > 0);
 
   const stooq = new StooqAdapter();
   stooq.init(noCred);
@@ -208,12 +198,9 @@ test("常用标的清单：每个交易所都提供且字段合法", async () =>
   }
 });
 
-test("常用标的：股票源覆盖 美股与美股两类代码", async () => {
+test("常用标的：股票源覆盖美股代码", async () => {
   const { listAdapterMetas } = await import("../src/exchanges/registry.js");
   const byId = new Map(listAdapterMetas().map((m) => [m.id, m]));
-  // 美股：6 位数字代码
-  const em = byId.get("(removed)")!.defaultSymbols!;
-  assert.ok(em.some((s) => /^\d{6}$/.test(s.symbol) && s.currency === "CNY"), "东财清单应含 美股 6 位代码");
   // 美股：字母代码
   const stooq = byId.get("stooq")!.defaultSymbols!;
   assert.ok(stooq.some((s) => /^[A-Z.]+$/.test(s.symbol) && s.currency === "USD"), "Stooq 清单应含美股字母代码");

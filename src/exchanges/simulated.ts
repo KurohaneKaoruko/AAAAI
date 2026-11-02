@@ -238,7 +238,7 @@ function fastWalkOf(seed: number, tag: string, i: number): number {
 /**
  * 走向查找。
  *
- * 表里没有的代码（测试与调试会随便传，"BTCUSDT""BTC"都算）一律走默认走向，
+ * 表里没有的代码（测试与调试会随便传，"ETHUSDT""BTC"都算）一律走默认走向，
  * 免得某个随机选中的阴跌走向让"等成交"的用例永远等不到 —— 那是用例在赌运气。
  */
 function regimeOf(symbol: string): Regime {

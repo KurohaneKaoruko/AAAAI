@@ -91,12 +91,12 @@ export function defaultToolBox(): ToolBox {
       parameters: {
         type: "object",
         properties: {
-          symbol: { type: "string", description: "标的代码，如 BTCUSDT / BTCUSDT" },
+          symbol: { type: "string", description: "标的代码，如 ETHUSDT / BTCUSDT" },
           limit: { type: "integer", description: "返回条数，1-10，默认 5" },
         },
         required: ["symbol"],
       },
-      example: '{"symbol":"BTCUSDT","limit":5}',
+      example: '{"symbol":"ETHUSDT","limit":5}',
     },
     {
       name: "get_history",
@@ -109,13 +109,13 @@ export function defaultToolBox(): ToolBox {
         },
         required: ["symbol"],
       },
-      example: '{"symbol":"BTCUSDT","limit":60}',
+      example: '{"symbol":"ETHUSDT","limit":60}',
     },
     {
       name: "get_quote",
       description: "取该标的最新价（当前模拟/实时行情快照）",
       parameters: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"] },
-      example: '{"symbol":"BTCUSDT"}',
+      example: '{"symbol":"ETHUSDT"}',
     },
     {
       name: "get_allocation",

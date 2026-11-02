@@ -40,7 +40,7 @@ test("机器人：可创建多个，各自保存独立配置", () => {
   try {
     const a = bots.create({ name: "BTC 趋势", connectionId, symbols: ["单边上行"] });
     const b = bots.create({
-      name: "美股均线",
+      name: "BTC均线",
       connectionId,
       symbols: ["BTCUSDT"],
       decisionSource: "chat",
@@ -51,9 +51,9 @@ test("机器人：可创建多个，各自保存独立配置", () => {
     assert.equal(bots.list().length, 2);
 
     // 改一个不影响另一个
-    bots.update(b.id, { name: "美股改" });
+    bots.update(b.id, { name: "BTC改" });
     assert.equal(bots.get(a.id)!.name, "BTC 趋势");
-    assert.equal(bots.get(b.id)!.name, "美股改");
+    assert.equal(bots.get(b.id)!.name, "BTC改");
     assert.equal(bots.get(b.id)!.strategy.slowWindow, 9);
     assert.equal(bots.get(b.id)!.risk.initialCash, 5000);
     // 量化交易（纯规则）机器人标注清楚

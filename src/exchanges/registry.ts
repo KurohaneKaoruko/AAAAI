@@ -2,7 +2,6 @@
 
 import { BinanceAdapter } from "./binance.js";
 import { GateAdapter } from "./gate.js";
-import { (已移除的交易所适配器) } from "./(removed).js";
 import { OkxAdapter } from "./okx.js";
 import { SimulatedAdapter } from "./simulated.js";
 import { StooqAdapter } from "./stooq.js";
@@ -22,7 +21,6 @@ export function listAdapterMetas(): AdapterMeta[] {
     new BinanceAdapter().meta,
     new GateAdapter().meta,
     new OkxAdapter().meta,
-    new (已移除的交易所适配器)().meta,
     new StooqAdapter().meta,
   ];
 }
@@ -42,8 +40,6 @@ export function createAdapter(connection: Connection, cred: { apiKey: string; ap
       return new GateAdapter();
     case "okx":
       return new OkxAdapter();
-    case "(removed)":
-      return new (已移除的交易所适配器)();
     case "stooq":
       return new StooqAdapter();
     default:

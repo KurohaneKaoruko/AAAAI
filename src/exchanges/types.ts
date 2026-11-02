@@ -9,13 +9,13 @@ export type AssetClass = "crypto" | "stock";
 
 /** 标的元信息。 */
 export interface SymbolInfo {
-  /** 本适配器内的代码：BTCUSDT / BTCUSDT / AAPL */
+  /** 本适配器内的代码：BTCUSDT / ETHUSDT / AAPL */
   symbol: string;
   name: string;
   assetClass: AssetClass;
   /** 计价货币：USDT / CNY / USD */
   currency: string;
-  /** 每手股数（美股 100，其余 1） */
+  /** 每手股数（部分市场 100，其余 1） */
   lotSize: number;
   pricePrecision: number;
   qtyPrecision: number;

@@ -37,7 +37,7 @@ export interface AgentRun {
   /** 模型的最终文字输出 */
   text: string;
   steps: AgentStep[];
-  /** 人类可读的审计串，例如 "news(BTCUSDT)→5条 · history(BTC,60)→-2.1%" */
+  /** 人类可读的审计串，例如 "news(ETHUSDT)→5条 · history(BTC,60)→-2.1%" */
   audit: string;
 }
 
@@ -71,7 +71,7 @@ export async function runToolAgent(opts: AgentOptions): Promise<AgentRun> {
     ...specs.map((s) => `- ${s.name}：${s.description}\n  调用示例：${s.example}`),
     "",
     "如果你要用文本方式调用工具，就只输出一行 JSON，形如：",
-    '{"tool":"search_news","args":{"symbol":"BTCUSDT","limit":5}}',
+    '{"tool":"search_news","args":{"symbol":"ETHUSDT","limit":5}}',
     "一次只调一个工具。收到结果后（以 [工具结果] 开头）再决定下一步。",
     "查完请直接输出最终答案，不要再输出工具调用行。",
   ].join("\n");
