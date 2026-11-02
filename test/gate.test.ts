@@ -13,13 +13,13 @@ test("Gate 交易对格式转换（下划线 <-> 连续）", () => {
   assert.equal(fromGatePair("BTC_USDT"), "BTCUSDT");
 });
 
-test("Gate 元信息完整且无测试网", () => {
+test("Gate 元信息完整且支持测试网", () => {
   const meta = new GateAdapter().meta;
   assert.equal(meta.id, "gate");
   assert.equal(meta.assetClass, "crypto");
   assert.equal(meta.supportsTrading, true);
   assert.equal(meta.requiresKeys, true);
-  assert.equal(meta.supportsTestnet, false, "现货无官方测试网");
+  assert.equal(meta.supportsTestnet, true, "Gate 现货有官方测试网 api-testnet.gateapi.io");
   assert.ok(meta.klineIntervals.includes("1m"));
   assert.equal(meta.keyFields.length, 2);
 });

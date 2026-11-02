@@ -26,7 +26,8 @@ import { getLogger } from "../core/logger.js";
 
 const log = getLogger("exchange:gate");
 
-const GATE_BASE = "https://api.gateio.ws/api/v4";
+const GATE_MAIN_BASE = "https://api.gateio.ws/api/v4";
+const GATE_TESTNET_BASE = "https://api-testnet.gateapi.io/api/v4";
 
 interface GatePair {
   id: string;
@@ -66,10 +67,10 @@ export class GateAdapter implements ExchangeAdapter {
     name: "Gate.io 芝麻开门",
     assetClass: "crypto",
     description:
-      "Gate.io 现货。行情为公共接口无需密钥；下单需 API Key/Secret（HMAC-SHA512 签名）。交易对内部使用 BTC_USDT 写法，会自动转换。",
+      "Gate.io 现货。行情为公共接口无需密钥；下单需 API Key/Secret（HMAC-SHA512 签名）。可选测试网（默认），测试网密钥需单独申请。交易对内部使用 BTC_USDT 写法，会自动转换。",
     requiresKeys: true,
     supportsTrading: true,
-    supportsTestnet: false,
+    supportsTestnet: true,
     klineIntervals: ["10s", "1m", "5m", "15m", "30m", "1h", "4h", "1d"],
     keyFields: [
       { key: "apiKey", label: "API Key", secret: false, placeholder: "粘贴 Gate.io API Key" },
@@ -88,14 +89,19 @@ export class GateAdapter implements ExchangeAdapter {
     ],
     notes: [
       "签名：HMAC-SHA512(请求体) 的十六进制值，请求头需带 KEY / Timestamp / SIGN",
-      "现货无官方测试网，建议先用 paper 模式验证策略",
+      "测试网 baseUrl 为 api-testnet.gateapi.io；测试网 API Key 需在 Gate 测试网单独申请，主网密钥不通用",
     ],
   };
 
-  private cred: Credential = { apiKey: "", apiSecret: "", testnet: false };
+  private cred: Credential = { apiKey: "", apiSecret: "", testnet: true };
 
   init(cred: Credential): void {
     this.cred = cred;
+  }
+
+  /** 测试网与主网只差 baseUrl：行情、K 线、签名路径完全一致。 */
+  private get baseUrl(): string {
+    return this.cred.testnet ? GATE_TESTNET_BASE : GATE_MAIN_BASE;
   }
 
   private get hasKeys(): boolean {
@@ -103,27 +109,28 @@ export class GateAdapter implements ExchangeAdapter {
   }
 
   async testConnection(): Promise<ConnectionTest> {
+    const net = this.cred.testnet ? "测试网" : "主网";
     try {
       const started = Date.now();
-      const res = await fetch(`${GATE_BASE}/spot/currency_pairs`, {
+      const res = await fetch(`${this.baseUrl}/spot/currency_pairs`, {
         signal: AbortSignal.timeout(8000),
       });
-      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      if (!res.ok) return { ok: false, message: `${net}行情 HTTP ${res.status}` };
       const elapsed = Date.now() - started;
       if (this.hasKeys) {
         const account = await this.signedRequest("GET", "/spot/accounts", "");
-        if (account.ok) return { ok: true, message: `连接成功（密钥有效，${elapsed}ms）` };
-        return { ok: false, message: `行情可达（${elapsed}ms），但密钥校验失败: ${account.message}` };
+        if (account.ok) return { ok: true, message: `连接成功（${net}，密钥有效，${elapsed}ms）` };
+        return { ok: false, message: `${net}行情可达（${elapsed}ms），但密钥校验失败: ${account.message}` };
       }
-      return { ok: true, message: `连接成功（未配置密钥，仅行情，${elapsed}ms）` };
+      return { ok: true, message: `连接成功（${net}，未配置密钥，仅行情，${elapsed}ms）` };
     } catch (err) {
-      return { ok: false, message: `连接失败: ${(err as Error).message}` };
+      return { ok: false, message: `${net}连接失败: ${(err as Error).message}` };
     }
   }
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolInfo[]> {
     const q = query.trim().toUpperCase();
-    const res = await fetch(`${GATE_BASE}/spot/currency_pairs`, {
+    const res = await fetch(`${this.baseUrl}/spot/currency_pairs`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`Gate 交易对列表 HTTP ${res.status}`);
@@ -152,7 +159,7 @@ export class GateAdapter implements ExchangeAdapter {
     for (const symbol of symbols) {
       try {
         const res = await fetch(
-          `${GATE_BASE}/spot/tickers?currency_pair=${encodeURIComponent(toGatePair(symbol))}`,
+          `${this.baseUrl}/spot/tickers?currency_pair=${encodeURIComponent(toGatePair(symbol))}`,
           { signal: AbortSignal.timeout(8000) },
         );
         if (!res.ok) continue;
@@ -179,7 +186,7 @@ export class GateAdapter implements ExchangeAdapter {
   }
 
   async fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]> {
-    const url = `${GATE_BASE}/spot/candlesticks?currency_pair=${encodeURIComponent(toGatePair(symbol))}&interval=${encodeURIComponent(interval)}&limit=${Math.min(limit, 1000)}`;
+    const url = `${this.baseUrl}/spot/candlesticks?currency_pair=${encodeURIComponent(toGatePair(symbol))}&interval=${encodeURIComponent(interval)}&limit=${Math.min(limit, 1000)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`Gate K 线 HTTP ${res.status}`);
     const rows = (await res.json()) as (string | number)[][];
@@ -299,7 +306,7 @@ export class GateAdapter implements ExchangeAdapter {
       "Content-Type": "application/x-www-form-urlencoded",
     };
     try {
-      const res = await fetch(`${GATE_BASE}${path}`, {
+      const res = await fetch(`${this.baseUrl}${path}`, {
         method,
         headers,
         body: method === "POST" ? body : undefined,
