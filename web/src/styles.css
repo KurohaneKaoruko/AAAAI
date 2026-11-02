@@ -127,12 +127,23 @@
 }
 
 /* 「红涨绿跌」：只对调行情方向色，状态色（--green/--red）不动。
-   选择器故意不锁 :root —— 设置页的选项卡片挂同一个属性给自己做真身演示。 */
+   选择器故意保留不带 :root 的版本 —— 设置页的选项卡片挂同一个属性给自己做真身演示。
+   :root[...] 必须写：亮色主题的 :root:not([data-theme="dark"]) 特异性更高，
+   只写 [data-updown] 会在亮色下被主题变量盖回绿涨红跌。 */
+:root[data-updown="red-up"],
 [data-updown="red-up"] {
   --up: var(--red);
   --down: var(--green);
   --up-bg: var(--notice-err-bg);
   --down-bg: var(--notice-ok-bg);
+}
+
+/* 绿涨红跌卡片需要显式覆盖，否则会继承页面当前的（可能是红涨）方向色 */
+[data-updown="green-up"] {
+  --up: var(--green);
+  --down: var(--red);
+  --up-bg: var(--notice-ok-bg);
+  --down-bg: var(--notice-err-bg);
 }
 
 * { box-sizing: border-box; }

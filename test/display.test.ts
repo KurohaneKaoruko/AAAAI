@@ -78,7 +78,10 @@ test("界面接线：行情方向色可对调，系统状态色不跟随", () =>
   assert.match(css, /\.badge-error \{ color: var\(--red\)/);
   assert.match(css, /\.log-lv-error \{ color: var\(--red\)/);
   // 红涨绿跌 = 对调同一组变量（选择器不锁 :root，设置页卡片靠它做真身演示）
+  assert.match(css, /:root\[data-updown="red-up"\]/);
   assert.match(css, /\[data-updown="red-up"\] \{[\s\S]{0,220}?--up: var\(--red\);/);
+  // 亮色主题的 :root:not(...) 特异性更高，必须有 :root[data-updown] 才能压住主题变量
+  assert.match(css, /\[data-updown="green-up"\] \{[\s\S]{0,160}?--up: var\(--green\);/);
   // 行情底色也成对（买卖标签不会出现「绿字红底」）
   assert.match(css, /\.side-buy \{ background: var\(--up-bg\); color: var\(--up\); \}/);
   assert.match(css, /\.side-sell \{ background: var\(--down-bg\); color: var\(--down\); \}/);
