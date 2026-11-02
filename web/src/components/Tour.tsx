@@ -3,7 +3,7 @@
  *
  * 实现原则：
  * - 零依赖：遮罩层 position:fixed，用 4 块 div 拼出聚光洞（视口坐标系，
- *   目标坐标直接取 getBoundingClientRect，滚动/缩放时 rAF 重算）；
+ *   目标坐标直接取 getBoundingClientRect，滚动/缩放/滚动条变化时重算）；
  * - 高亮框呼吸描边；气泡按目标位置在右/左/下/上自适应落点，宽度与高度
  *   都钳制在视口内，长文本内部滚动；
  * - 步骤可跨页面：每步可带 page（App 的 PageId），进入该步先导航，
@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { PageId } from "./Shell";
 import { Button } from "./ui";
 
@@ -150,8 +151,15 @@ function TourOverlay({
   const step = steps[Math.min(stepIndex, steps.length - 1)];
   /** 目标在视口内的矩形；null = 元素尚未渲染或本步无目标 */
   const [rect, setRect] = useState<Rect | null>(null);
-  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
-  const rafRef = useRef(0);
+  const [vp, setVp] = useState(() => ({
+    w: document.documentElement.clientWidth,
+    h: document.documentElement.clientHeight,
+  }));
+  const pollTimerRef = useRef(0);
+  const schedTimerRef = useRef(0);
+  // 气泡实际高度：内容长短不一，硬编码估算值会把气泡推出视口
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const [bubbleH, setBubbleH] = useState(0);
   // onNavigate 用 ref 转发：父层若传内联函数，放进 effect 依赖会在每次渲染后重复导航
   const navRef = useRef(onNavigate);
   navRef.current = onNavigate;
@@ -159,7 +167,8 @@ function TourOverlay({
   const isCentered = step.target === "welcome";
 
   const locate = useCallback(() => {
-    setVp({ w: window.innerWidth, h: window.innerHeight });
+    // clientWidth/Height 不含滚动条：100vw 会把滚动条宽度也算进去，遮罩会撑出横向滚动
+    setVp({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight });
     if (isCentered) {
       setRect(null); // 欢迎步没有目标元素，气泡自己居中
       return;
@@ -175,8 +184,9 @@ function TourOverlay({
     setRect(null);
   }, [step.target, isCentered]);
 
-  // 进入步骤：先导航（若跨页），再轮询等目标元素出现
+  // 进入步骤：先清掉上一步的定位（否则气泡会按旧目标闪一帧），再导航（若跨页）
   useEffect(() => {
+    setRect(null);
     if (step.page) navRef.current(step.page);
   }, [stepIndex, step.page]);
 
@@ -187,23 +197,31 @@ function TourOverlay({
       if (stop) return;
       locate();
       const el = isCentered ? true : document.querySelector(`[data-tour="${step.target}"]`);
-      if (!el && ++tries < 120) {
-        rafRef.current = requestAnimationFrame(tick);
+      if (!el && ++tries < 40) {
+        // 50ms 一轮，最多等 2s。不用 rAF：后台标签页里 rAF 会被节流甚至暂停，
+        // 跨页步骤会永远等不到目标（遮罩整屏、气泡卡在左上角）。
+        pollTimerRef.current = window.setTimeout(tick, 50);
       }
     };
-    rafRef.current = requestAnimationFrame(tick);
+    // 先立即定位一次，正常页面无需等待
+    tick();
     // 滚动/缩放都要重算：fixed 坐标跟着视口走
     const schedule = () => {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(locate);
+      window.clearTimeout(schedTimerRef.current);
+      schedTimerRef.current = window.setTimeout(locate, 16);
     };
     window.addEventListener("scroll", schedule, true); // capture：内容区自身滚动也算
     window.addEventListener("resize", schedule);
+    // 滚动条出现/消失只改变 clientWidth，不触发 resize —— ResizeObserver 兜住这种情况
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
+    ro?.observe(document.documentElement);
     return () => {
       stop = true;
-      cancelAnimationFrame(rafRef.current);
+      window.clearTimeout(pollTimerRef.current);
+      window.clearTimeout(schedTimerRef.current);
       window.removeEventListener("scroll", schedule, true);
       window.removeEventListener("resize", schedule);
+      ro?.disconnect();
     };
   }, [locate, step.target, isCentered]);
 
@@ -223,81 +241,89 @@ function TourOverlay({
   // 键盘：←/→ 步进、Esc 跳过
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowRight") go(1);
-      else if (e.key === "ArrowLeft") go(-1);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        go(1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        go(-1);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [go, onClose]);
 
-  // 目标滚进视野（fixed 坐标直接判断，比 scrollY 换算直观）
-  useLayoutEffect(() => {
-    if (!rect) return;
-    const bottom = rect.top + rect.height;
-    if (rect.top < 0 || rect.top > vp.h - 60 || bottom > vp.h) {
-      const delta = rect.top - vp.h / 3;
-      window.scrollBy({ top: delta, behavior: "smooth" });
-    }
-  }, [rect, stepIndex, vp.h]);
+  // 注：当前所有步骤目标都是 sticky 的侧栏/顶栏元素，不需要（也不应该）滚 window：
+  // sticky 元素滚动时不移动，反而会把页面内容滚走。
 
   const pad = 6;
-  // 聚光洞：有目标用目标外扩；欢迎步在视口中央开一个假想洞（只用于摆气泡）
+  // 聚光洞：仅限有真实目标的步骤。欢迎步不挖洞（整屏遮罩 + 气泡居中），
+  // 否则会在页面中央露出莫名的一块内容，看起来像框错位。
   const hole = rect
     ? { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }
-    : isCentered
-      ? { top: vp.h / 2 - 70, left: vp.w / 2 - 200, width: 400, height: 140 }
-      : null;
+    : null;
 
-  // 气泡：宽/高钳制视口；落点优先目标右侧 → 左侧 → 下方 → 上方
-  const bw = Math.min(360, vp.w - 24);
-  const bhEst = 200;
-  let bx: number;
-  let by: number;
-  if (isCentered) {
-    // 欢迎步：气泡盖在假想洞正下方居中
-    bx = Math.max(12, Math.min(vp.w / 2 - bw / 2, vp.w - bw - 12));
-    by = hole ? Math.min(hole.top + hole.height + 16, vp.h - bhEst - 12) : 12;
-    if (by < 12) by = Math.max(12, vp.h / 2 - bhEst / 2);
-  } else if (hole) {
+  // 气泡：宽钳制视口；欢迎步居中，其余优先目标右侧 → 左侧 → 下方 → 上方
+  const bw = isCentered ? Math.min(420, vp.w - 24) : Math.min(360, vp.w - 24);
+  // 实际高度未测量前给个保守估值，渲染后立刻校正
+  const bh = bubbleH || 180;
+  let bx = 12;
+  let by = 12;
+  if (!isCentered && hole) {
     bx = hole.left + hole.width + 16;
     by = hole.top;
     if (bx + bw > vp.w - 12) bx = hole.left - bw - 16;
     if (bx < 12) {
-      bx = Math.max(12, Math.min(hole.left, vp.w - bw - 12));
+      // 左右都放不下：落到目标下方
+      bx = 12;
       by = hole.top + hole.height + 16;
     }
-    if (by + bhEst > vp.h - 12) by = Math.max(12, hole.top - bhEst - 16);
-  } else {
-    // 目标还没渲染出来：先停在左上角，等定位到再跳过去
-    bx = 12;
-    by = 12;
+    // 下方放不下就翻到目标上方；最后无论怎样都钳在视口内
+    if (by + bh > vp.h - 12) by = hole.top - bh - 16;
+    by = Math.max(12, Math.min(by, vp.h - bh - 12));
   }
+
+  const bubbleStyle: CSSProperties = isCentered
+    ? {
+        // 居中用 transform，气泡高度随内容变化也不会偏
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: bw,
+        maxHeight: vp.h - 24,
+      }
+    : { top: by, left: bx, width: bw, maxHeight: vp.h - 24 };
+
+  // 测量气泡真实高度：内容换行/主题字体变化后校正落点，避免被推出视口
+  useLayoutEffect(() => {
+    const h = bubbleRef.current?.offsetHeight ?? 0;
+    if (h > 0 && Math.abs(h - bubbleH) > 1) setBubbleH(h);
+  });
 
   const isLast = stepIndex === steps.length - 1;
 
   return (
     <div className="tour-root">
-      {hole && (
+      {hole ? (
         <>
-          <div className="tour-mask" style={{ top: 0, left: 0, width: "100vw", height: Math.max(0, hole.top) }} />
+          <div className="tour-mask" style={{ top: 0, left: 0, right: 0, height: Math.max(0, hole.top) }} />
           <div className="tour-mask" style={{ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }} />
-          <div
-            className="tour-mask"
-            style={{ top: hole.top, left: hole.left + hole.width, width: Math.max(0, vp.w - hole.left - hole.width), height: hole.height }}
-          />
-          <div
-            className="tour-mask"
-            style={{ top: hole.top + hole.height, left: 0, width: "100vw", height: Math.max(0, vp.h - hole.top - hole.height) }}
-          />
-          {!isCentered && (
-            <div className="tour-spot" style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }} />
-          )}
+          <div className="tour-mask" style={{ top: hole.top, left: hole.left + hole.width, right: 0, height: hole.height }} />
+          <div className="tour-mask" style={{ top: hole.top + hole.height, left: 0, right: 0, height: Math.max(0, vp.h - hole.top - hole.height) }} />
+          <div className="tour-spot" style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }} />
         </>
+      ) : (
+        // 欢迎步，或目标尚未渲染出来：整屏遮罩，不挖洞。
+        // 之前给欢迎步造了个「假洞」，页面中央会露出莫名一块内容，看着像框错位。
+        <div className="tour-mask" style={{ inset: 0 }} />
       )}
       <div
+        ref={bubbleRef}
         className="tour-bubble"
-        style={{ top: by, left: bx, width: bw, maxHeight: vp.h - 24 }}
+        style={bubbleStyle}
         role="dialog"
         aria-label={step.title}
       >

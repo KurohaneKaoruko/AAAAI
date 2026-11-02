@@ -41,6 +41,16 @@ export function App() {
     }
   }, []);
 
+  // 统一导航：侧栏与使用指引共用。进 bots 时清掉详情/编辑子页，
+  // 否则从详情页重看指引会停在第 3 步的详情页而不是机器人列表。
+  const navigate = useCallback((p: PageId) => {
+    setPage(p);
+    if (p === "bots") {
+      setBotDetail(null);
+      setBotEditId(null);
+    }
+  }, []);
+
   useEffect(() => {
     void checkAuth();
   }, [checkAuth]);
@@ -114,13 +124,7 @@ export function App() {
     <div className="app">
       <Sidebar
         page={page}
-        onNavigate={(p) => {
-          setPage(p);
-          if (p === "bots") {
-            setBotDetail(null);
-            setBotEditId(null);
-          }
-        }}
+        onNavigate={navigate}
         connections={store.connections}
         connected={store.connected}
       />
@@ -137,7 +141,7 @@ export function App() {
       </div>
       <Toasts store={store} />
       {/* 鉴权状态未决（auth===null）时先不播：登录页背后跑指引没有意义 */}
-      {auth && <Tour onNavigate={setPage} forceKey={tourKey} />}
+      {auth && <Tour onNavigate={navigate} forceKey={tourKey} />}
     </div>
   );
 }
