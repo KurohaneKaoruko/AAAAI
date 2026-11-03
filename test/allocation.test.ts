@@ -239,9 +239,10 @@ test("资产配置：端到端——只买 AI 选的标的，落选的自动清�
     "落选标的要收到 0 权重信号以便清仓",
   );
 
-  // 第二阶段：模型改主意，换成 BTC
+  // 第二阶段：模型改主意，换成 BTC。窗口多喂一根：新决策的买单
+  // 要等「决策的下一根开盘」才能落地（成交时点与全链路口径一致）。
   pickBtc.on = true;
-  await streamBars(pipeline.bus, pipeline.book, bars.slice(84, 104));
+  await streamBars(pipeline.bus, pipeline.book, bars.slice(84, 105));
   const held2 = positions().map((p) => p.symbol);
   assert.ok(held2.includes("BTC"), `第二轮应买入 BTC，实际持仓 ${held2.join(",") || "空"}`);
   assert.ok(

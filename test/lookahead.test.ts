@@ -12,9 +12,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventBus, Topic } from "../src/core/eventBus.js";
-import { PriceBook, streamBars } from "../src/data/streaming.js";
+import { PriceBook, mergeBarsByTime, streamBars } from "../src/data/streaming.js";
 import { PaperBroker } from "../src/execution/paperBroker.js";
-import type { Bar, OrderIntent } from "../src/core/types.js";
+import { buildPipeline } from "../src/agents/orchestrator.js";
+import type { Strategy } from "../src/strategies/strategy.js";
+import type { Allocation, Bar, OrderIntent } from "../src/core/types.js";
+import { testAdapter, testConfig } from "./helpers.js";
 
 function bar(symbol: string, t: number, o: number, c: number): Bar {
   return {
@@ -42,6 +45,57 @@ function setup(overrides: Partial<ConstructorParameters<typeof PaperBroker>[2]> 
   });
   return { bus, book, broker, fills };
 }
+
+test("流水线：同一根 BAR 里生成的订单，必须等下一根开盘成交", async () => {
+  const t0 = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const bars: Bar[] = Array.from({ length: 60 }, (_, i) => ({
+    symbol: "SYM1",
+    timestamp: new Date(t0 + i * 60_000),
+    open: 100 + i,
+    high: 101 + i,
+    low: 99 + i,
+    close: 100.5 + i,
+    volume: 1000,
+  }));
+  const alwaysLong: Strategy = {
+    name: "always-long",
+    warmup: 1,
+    async generate(ctx) {
+      return {
+        symbol: "SYM1",
+        timestamp: ctx.bars[ctx.bars.length - 1]!.timestamp,
+        targetWeight: 0.5,
+        confidence: 1,
+        reason: "test",
+      };
+    },
+  };
+  const base = testConfig();
+  const pipeline = buildPipeline(
+    { ...base, risk: { ...base.risk, feeRate: 0, slippageBps: 0 } },
+    { adapter: testAdapter(), liveTrading: false, strategyOverride: alwaysLong },
+  );
+  const fills: { price: number; ts: number }[] = [];
+  const signals: number[] = [];
+  pipeline.bus.subscribe(Topic.SIGNAL, (e) => {
+    signals.push((e.payload as { timestamp: Date }).timestamp.getTime());
+  });
+  pipeline.bus.subscribe(Topic.FILL, (e) => {
+    const f = e.payload as { price: number; timestamp: Date };
+    fills.push({ price: f.price, ts: f.timestamp.getTime() });
+  });
+  await streamBars(pipeline.bus, pipeline.book, bars);
+  assert.ok(fills.length >= 1, "应产生成交");
+  assert.ok(signals.length >= 1, "应产生信号");
+  const signalIdx = bars.findIndex((b) => b.timestamp.getTime() === signals[0]);
+  assert.ok(signalIdx >= 0 && signalIdx + 1 < bars.length, "信号必须落在回放 K 线内");
+  assert.equal(fills[0]!.price, bars[signalIdx + 1]!.open, "成交价必须是信号下一根的开盘价");
+  assert.equal(fills[0]!.ts, bars[signalIdx + 1]!.timestamp.getTime(), "成交时间必须是信号下一根");
+  assert.ok(
+    fills.every((f) => f.ts > signals[0]!),
+    "不能在同一根 BAR 内按本根开盘价成交",
+  );
+});
 
 test("成交价必须来自下一根 K 线：不能按信号那根的收盘价成交", async () => {
   const { bus, book, broker, fills } = setup();
@@ -253,4 +307,78 @@ test("不同标的的未成交订单互不取代", async () => {
   await streamBars(bus, book, [bar("SYM1", t0 + 60_000, 120, 121)]);
   await streamBars(bus, book, [bar("SYM2", t0 + 60_000, 220, 221)]);
   assert.equal(fills.length, 2, "两个标的各自成交，互不影响");
+});
+
+test("自配置流水线（xsmom 路径）：allocation 时间戳必须是本轮刚收盘那根，成交只能更晚", async () => {
+  const t0 = Date.UTC(2026, 0, 1, 0, 0, 0);
+  // 两个标的、60 根 1m K 线。因子窗口（trend 20 / volume 20 / breakout 60）
+  // 要求足够长；两条相反走势制造横截面区分度，配置器才会选出 SYM1。
+  const mkBars = (symbol: string, base: number, drift: number): Bar[] =>
+    Array.from({ length: 60 }, (_, i) => ({
+      symbol,
+      timestamp: new Date(t0 + i * 60_000),
+      open: base + drift * i,
+      high: base + drift * i + 1,
+      low: base + drift * i - 1,
+      close: base + drift * i + drift * 0.5,
+      volume: 1000,
+    }));
+  const base = testConfig();
+  const config = {
+    ...base,
+    market: { ...base.market, symbols: ["SYM1", "SYM2"] },
+    strategy: {
+      ...base.strategy,
+      selfAllocating: true,
+      allocationInterval: 5, // 每 5 轮决策一次，给已入队的订单留出成交窗口
+      slowWindow: 5,
+      fastWindow: 2,
+      maxGrossExposure: 0.6,
+    },
+    risk: { ...base.risk, feeRate: 0, slippageBps: 0 },
+  };
+  const pipeline = buildPipeline(config, { adapter: testAdapter(), liveTrading: false });
+  assert.ok(pipeline.allocator, "应装配出配置器");
+
+  const allocations: { allocTs: number; currentBarTs: number }[] = [];
+  const fills: { ts: number; price: number; symbol: string; orderTs: number }[] = [];
+  pipeline.bus.subscribe(Topic.ALLOCATION, (e) => allocations.push({ allocTs: (e.payload as Allocation).timestamp.getTime(), currentBarTs: currentTs }));
+  pipeline.bus.subscribe(Topic.FILL, (e) => {
+    const f = e.payload as { timestamp: Date; price: number; order: OrderIntent };
+    fills.push({ ts: f.timestamp.getTime(), price: f.price, symbol: f.order.symbol, orderTs: f.order.timestamp.getTime() });
+  });
+
+  const allBars = mergeBarsByTime([mkBars("SYM1", 100, 1), mkBars("SYM2", 200, -0.5)]);
+  // 逐根喂入；currentTs 记录「正在喂入哪根」。allocation 在处理第 t 根时发布，
+  // 它的时间戳就必须是 t —— 旧实现打成前一根（t-1），撮合层据此把成交回填到
+  // t 根自己的开盘价，而那个价格在决策之前就发生了（未来函数）。
+  let currentTs = 0;
+  for (const g of allBars) {
+    currentTs = g.timestamp.getTime();
+    await streamBars(pipeline.bus, pipeline.book, [g]);
+  }
+
+  assert.ok(allocations.length >= 2, `应产生多次配置决策，实际 ${allocations.length}`);
+  const liars = allocations.filter((a) => a.allocTs !== a.currentBarTs);
+  assert.deepEqual(
+    liars,
+    [],
+    `allocation 时间戳必须等于决策当根 K 线；谎报前一根的有 ${liars.length} 次`,
+  );
+
+  assert.ok(fills.length >= 1, "应产生成交");
+  // 因果不变量，逐笔核对：
+  // 1) 每笔成交的时刻必须晚于它的订单时间戳（订单时间 = 决策那根 K 线）；
+  // 2) 成交价 = 成交那根 K 线上该标的的开盘价（无滑点配置下）。
+  for (const f of fills) {
+    assert.ok(
+      f.ts > f.orderTs,
+      `成交 ${f.ts} 必须晚于订单 ${f.orderTs}（否则是用未来信息回填开盘价）`,
+    );
+    const fillBar = allBars.find(
+      (b) => b.symbol === f.symbol && b.timestamp.getTime() === f.ts,
+    );
+    assert.ok(fillBar, `成交时刻 ${f.ts} 必须落在回放的 K 线上`);
+    assert.equal(f.price, fillBar.open, `成交价必须是该根开盘价 ${fillBar.open}，实际 ${f.price}`);
+  }
 });

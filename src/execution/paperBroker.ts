@@ -252,12 +252,23 @@ export class PaperBroker implements Broker {
       return;
     }
     for (const intent of queue) {
-      if (intent.symbol !== bar.symbol) continue; // 该标的的订单等它自己的下一根 K 线
+      if (intent.symbol !== bar.symbol) {
+        // 非本标的的订单继续等自己的下一根 K 线
+        this.queued.push(intent);
+        continue;
+      }
+      /*
+       * 关键防未来函数：订单只能用它之后的下一根 K 线成交。
+       * 如果订单和当前 K 线是同一根（尤其策略在 BAR 事件里下单，
+       * 而 broker 的 BAR 订阅在策略之后执行），绝对不能用这根的开盘价成交——
+       * 那个价格发生在信号之前。保留到下一根，避免回测凭空多出一段利润。
+       */
+      if (bar.timestamp.getTime() <= intent.timestamp.getTime()) {
+        this.queued.push(intent);
+        continue;
+      }
       this.fillWholeOrder(intent, open, bar.timestamp);
     }
-    // 非本标的的订单放回队首，保持顺序
-    const rest = queue.filter((i) => i.symbol !== bar.symbol);
-    if (rest.length > 0) this.queued = [...rest, ...this.queued];
   }
 
   /**

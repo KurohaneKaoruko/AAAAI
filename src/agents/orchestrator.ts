@@ -101,6 +101,41 @@ export function buildPipeline(
   const tradingMode = tradingModeOf(options.adapter);
   const portfolio = new PortfolioManager(bus, config.risk.initialCash, tradingMode);
 
+  /*
+   * 券商必须先于所有 agents 订阅 BAR：每根 K 线的派发顺序是
+   * 「组合更新 -> 券商按本根开盘撮合上一轮订单 -> agents 用本根收盘决策」。
+   * 若券商挂在 agents 之后，同一根里 agents 会先发出新订单并作废旧单，
+   * 撮合时钟永远轮不到旧单成交 —— 决策每根都在变时（如横截面配置），
+   * 订单无限互换、一单都成不了。先撮合后决策，才符合真实时间线。
+   */
+  const broker: Broker =
+    options.liveTrading && options.adapter.placeOrder
+      ? new ExchangeBroker(bus, options.adapter)
+      : new PaperBroker(bus, book, {
+          feeRate: config.risk.feeRate,
+          slippageBps: config.risk.slippageBps,
+          impactK: config.cost.impactK,
+          maxSlippageBps: config.cost.maxSlippageBps,
+          interval: config.market.interval,
+          // 现货：模拟成交与真实券商同一道底线 —— 花不起的钱买不了。
+          // 合约：开仓不占用全额现金，靠 RiskGuard 的总名义敞口上限兜底；
+          // 绝不能把现货的“现金不足”逻辑套到合约上，否则空单和保证金交易全被拒。
+          ...(tradingMode === "spot" ? { availableCash: () => portfolio.cash } : {}),
+          slicing: {
+            algo: config.execution.slicingAlgo,
+            slices: config.execution.slicingSlices,
+            sliceSpacingBars: config.execution.slicingSpacingBars,
+            volumeProfileBars: config.execution.slicingVolumeProfileBars,
+          },
+        });
+
+  // 执行层接入总线：订单意图 -> 券商 -> 成交广播。
+  // 预热期（primeMode）一律不发单：历史只用来喂指标，不产生成交。
+  bus.subscribe<OrderIntent>(Topic.ORDER_INTENT, async (e) => {
+    if (prime.mode) return;
+    await broker.handle(e.payload);
+  });
+
   const source: DecisionSource = sourceOverride ?? config.strategy.decisionSource;
   const allowShort = tradingMode === "futures" && config.strategy.allowShort;
   /** 纯规则基线：模型决策失败时也回退到同一条引擎，避免“换了模型却偷偷换策略”。 */
@@ -139,7 +174,17 @@ export function buildPipeline(
 
   // 点评用第一个可用的模型（没有就纯规则，不影响主流程）
   const commentaryLlm = source === "chat" ? chatClient : source === "systemone" ? soClient : chatClient ?? soClient;
-  new MarketAnalystAgent(bus, 3, 10, commentaryLlm).attach();
+  /*
+   * MarketAnalystAgent 必须晚于决策 Agent（Strategist/Allocator）挂载：
+   * EventBus 按订阅顺序派发 BAR，分析 Agent 先订阅的话，它会在决策 Agent
+   * 把当前 K 线写入缓冲**之前**就发布 MARKET_VIEW —— 策略拿到的 bars 不含
+   * 当前这根，信号时间戳被迫落在 t-1；而撮合守卫要求「成交 bar 时间 > 信号时间」，
+   * 于是成交被顶到 t 的下一根（t+1），比文档承诺的「下一根开盘」晚一根。
+   * 挪到决策 Agent 之后：BAR 到达 → 决策缓冲先收下第 t 根 → 分析发布视图 →
+   * 策略用 t 收盘决策、打 t 时间戳 → t+1 开盘成交，三个环节口径一致。
+   * 撮合时钟（PaperBroker）已在更早处订阅，不受此调整影响。
+   */
+  const marketAnalyst = new MarketAnalystAgent(bus, 3, 10, commentaryLlm);
 
 
   const limits = {
@@ -248,6 +293,8 @@ export function buildPipeline(
   } else {
     new StrategistAgent(bus, strategy, commentaryLlm).attach();
   }
+  // 决策 Agent 挂载完再挂分析 Agent（原因见上方 marketAnalyst 注释）
+  marketAnalyst.attach();
 
   new RiskGuardAgent(
     bus,
@@ -263,34 +310,6 @@ export function buildPipeline(
     book,
     tradingMode,
   ).attach();
-
-  const broker: Broker =
-    options.liveTrading && options.adapter.placeOrder
-      ? new ExchangeBroker(bus, options.adapter)
-      : new PaperBroker(bus, book, {
-          feeRate: config.risk.feeRate,
-          slippageBps: config.risk.slippageBps,
-          impactK: config.cost.impactK,
-          maxSlippageBps: config.cost.maxSlippageBps,
-          interval: config.market.interval,
-          // 现货：模拟成交与真实券商同一道底线 —— 花不起的钱买不了。
-          // 合约：开仓不占用全额现金，靠 RiskGuard 的总名义敞口上限兜底；
-          // 绝不能把现货的“现金不足”逻辑套到合约上，否则空单和保证金交易全被拒。
-          ...(tradingMode === "spot" ? { availableCash: () => portfolio.cash } : {}),
-          slicing: {
-            algo: config.execution.slicingAlgo,
-            slices: config.execution.slicingSlices,
-            sliceSpacingBars: config.execution.slicingSpacingBars,
-            volumeProfileBars: config.execution.slicingVolumeProfileBars,
-          },
-        });
-
-  // 执行层接入总线：订单意图 -> 券商 -> 成交广播。
-  // 预热期（primeMode）一律不发单：历史只用来喂指标，不产生成交。
-  bus.subscribe<OrderIntent>(Topic.ORDER_INTENT, async (e) => {
-    if (prime.mode) return;
-    await broker.handle(e.payload);
-  });
 
   return {
     bus,

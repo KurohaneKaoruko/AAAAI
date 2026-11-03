@@ -392,14 +392,16 @@ test("对照实验：每个选手只跑自己那一路，基线绝不调用模�
     name: "chat",
     async complete() {
       chatCalls += 1;
-      return JSON.stringify({ target_weight: 0.5, confidence: 1, reason: "[llm]" });
+      // 权重必须与动量基线可区分（单边上涨里动量会饱和到 maxTargetWeight=0.5），
+      // 否则「各跑各的」断言恒真，等于没测。
+      return JSON.stringify({ target_weight: 0.9, confidence: 1, reason: "[llm]" });
     },
   };
   const soSpy: LLMClient = {
     name: "so",
     async complete() {
       soCalls += 1;
-      return JSON.stringify({ target_weight: 0.5, confidence: 1, reason: "[llm]" });
+      return JSON.stringify({ target_weight: 0.9, confidence: 1, reason: "[llm]" });
     },
   };
   const result = await runComparison(config, {

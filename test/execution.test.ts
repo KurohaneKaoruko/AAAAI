@@ -31,7 +31,7 @@ import type { Bar, Fill, OrderIntent } from "../src/core/types.js";
 function bar(symbol: string, close: number, volume = 100, minutesAgo = 0): Bar {
   return {
     symbol,
-    timestamp: new Date(Date.UTC(2024, 0, 1, 0, 0, 0) - minutesAgo * 60_000),
+    timestamp: new Date(BAR_EPOCH - minutesAgo * 60_000),
     open: close,
     high: close,
     low: close,
@@ -40,13 +40,18 @@ function bar(symbol: string, close: number, volume = 100, minutesAgo = 0): Bar {
   };
 }
 
+/** 测试专用时钟：每发一根 BAR 前进一分钟，保证「订单时间 < 成交 bar 时间」。 */
+let BAR_EPOCH = Date.UTC(2024, 0, 1, 0, 0, 0);
+
 function intent(overrides: Partial<OrderIntent> = {}): OrderIntent {
   return {
     symbol: "X",
     side: "BUY",
     quantity: 10,
     price: 100,
-    timestamp: new Date(),
+    // 决策发生在「当前测试时钟」：与 bar() 同一时钟，成交守卫才能判定
+    // 「下一根 bar 时间 > 订单时间」。真实时钟会晚于固定的 2024 时钟。
+    timestamp: new Date(BAR_EPOCH),
     reason: "test",
     ...overrides,
   };
@@ -247,6 +252,7 @@ function collect(bus: EventBus): Fill[] {
 /** 回放 n 根 K 线（收盘价固定、量能固定）。 */
 async function pump(bus: EventBus, n: number, close = 100, volume = 1000): Promise<void> {
   for (let i = 0; i < n; i++) {
+    BAR_EPOCH += 60_000; // 撮合守卫要求成交 bar 严格晚于订单时间，时钟逐根前进
     await bus.publishAsync(Topic.BAR, bar("X", close, volume));
   }
 }

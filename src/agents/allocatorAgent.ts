@@ -69,6 +69,8 @@ export class AllocatorAgent extends Agent {
   private readonly views = new Map<string, MarketView>();
   /** 本轮已收到的 K 线所属标的 */
   private round = new Set<string>();
+  /** 当前轮的时间戳（本轮第一根 K 线的时间），决策用它打时间戳 */
+  private roundTs: Date | undefined;
   /** 上一轮的标的集合，用来判断本轮是否收齐 */
   private expected = new Set<string>();
   /** 已完成的有效轮次（预热未结束不计），用于按 interval 节流 */
@@ -97,34 +99,65 @@ export class AllocatorAgent extends Agent {
 
   private async onBar(bar: Bar): Promise<void> {
     const list = this.bars.get(bar.symbol) ?? [];
-    const isNewRound = list.length === 0 || bar.timestamp.getTime() > list[list.length - 1]!.timestamp.getTime();
+    /*
+     * 「轮」的判据是**全局轮钟**（roundTs），不是单标的的上一根时间：
+     * 同一时间戳的多根 K 线（各标的）都属于同一轮。若按「本标的上一根」
+     * 判断，两个标的交替到达时每根都是新轮，「轮」永远凑不满，
+     * complete 分支永不触发（曾经因此决策死锁在预热期）。
+     */
+    const isNewRound = this.roundTs === undefined || bar.timestamp.getTime() > this.roundTs.getTime();
 
+    /*
+     * 新一轮的第一根：上一轮已在它的最后一根凑齐并结过账（complete 分支），
+     * 这里只做「换轮」：重置 round、记下本轮时间戳。当前根必须**先入缓冲**
+     * 再进入新轮记账 —— 顺序与数据边界无关（本轮刚开始，还没有决策发生）。
+     */
     list.push(bar);
     if (list.length > BUFFER) list.shift();
     this.bars.set(bar.symbol, list);
     this.barsSeen += 1;
 
-    // 每个时间戳只决策一次：
-    // 多个标的共享同一时间戳时，等这一批都到齐再决策；实盘轮询缺标的时，
-    // 下一个时间戳到来时用已有数据决策，不无限等待。
+    if (isNewRound) {
+      // 上一轮已在轮尾凑齐结账 —— 它的标的集合就是「本轮凑齐」的定义。
+      // 没有这颗种子，complete 分支的 expected.size>0 永远不成立，决策死锁。
+      if (this.round.size > 0) this.expected = new Set(this.round);
+      this.round = new Set([bar.symbol]);
+      this.roundTs = bar.timestamp;
+      return;
+    }
     this.round.add(bar.symbol);
-    if (!isNewRound) return;
-    const previousTs = list.length > 1 ? list[list.length - 2]!.timestamp : bar.timestamp;
-    const complete = this.expected.size > 0 && this.round.size >= this.expected.size;
-    if (this.round.size > 1 && !complete) return;
-    this.expected = new Set(this.round);
-    this.round = new Set();
-    await this.decide(previousTs);
+    /*
+     * 等一轮凑齐再决策（补齐的那根是本轮最后一根）：
+     * 1) 数据完整——所有标的的本轮 K 线都已入缓冲。在第一个标的到达就决策，
+     *    快照是「先到标的的本轮数据 + 其余标的的上一轮数据」拼出来的；
+     * 2) 时序安全——broker 先于 agents 订阅 BAR，本轮每一根开盘时上一轮的
+     *    对应订单已撮合完毕。若在本轮中途决策，新单会在其余标的的成交 bar
+     *    到达之前就把它「取代」掉——订单永远死在成交前一步，一单都成不了。
+     * 信号时间戳打本轮（roundTs）：决策用的数据边界就是本轮收盘，
+     * 撮合守卫会把成交推迟到各标的的下一根开盘。
+     */
+    if (this.expected.size > 0 && this.round.size >= this.expected.size) {
+      await this.decide(this.roundTs!, true);
+      this.expected = new Set(this.round);
+      this.round = new Set();
+    }
   }
 
-  /** 一轮行情 = 一次决策机会；按 interval 节流后再真正调用模型。 */
-  private async decide(timestamp: Date): Promise<void> {
+  /**
+   * 一轮行情 = 一次决策机会；按 interval 节流后再真正调用模型。
+   *
+   * roundsElapsed：本轮「轮次计数」是否自增。complete（本轮凑齐）与
+   * flush（下一轮开头的补结）都代表一轮行情的终结，但同一次轮终结只会
+   * 走其中一条路——调用方必须如实标记，否则节流计数会把一轮算成两次，
+   * 决策时点整体漂移（曾经踩过：计数翻倍后每 5 轮决策实际落在 2.5 轮边界上）。
+   */
+  private async decide(timestamp: Date, roundsElapsed: boolean): Promise<void> {
     // 预热中：K 线只进缓冲区，不决策 —— 实时机器人的统计只能来自实时行情
     if (this.opts.gate?.()) return;
     // 预热未完成时不计入节流计数，保证预热一结束就能做第一次决策
     if (this.snapshots().length === 0) return;
-    const due = this.rounds % Math.max(1, this.opts.interval) === 0;
-    this.rounds += 1;
+    const due = roundsElapsed && this.rounds % Math.max(1, this.opts.interval) === 0;
+    if (roundsElapsed) this.rounds += 1;
     if (!due) return;
     if (this.busy) {
       log.debug("上一轮决策仍在进行，跳过本轮");

@@ -65,8 +65,11 @@ test("机器人：可创建多个，各自保存独立配置", () => {
 
 test("机器人：并行运行，资金与成交各自独立", async () => {
   const { dir, bots, connectionId } = setup();
+  // 声明在 try 外：finally 里要停轮询器（断言失败也不能漏停，否则进程挂死）
+  let a: ReturnType<BotManager["create"]> | undefined;
+  let b: ReturnType<BotManager["create"]> | undefined;
   try {
-    const a = bots.create({
+    a = bots.create({
       name: "A",
       connectionId,
       symbols: ["BTCUSDT"],
@@ -74,13 +77,16 @@ test("机器人：并行运行，资金与成交各自独立", async () => {
       barCount: 60,
       risk: { initialCash: 100_000 },
     });
-    const b = bots.create({
+    b = bots.create({
       name: "B",
       connectionId,
       symbols: ["单边上行"],
       pollMs: 120,
       barCount: 60,
-      risk: { initialCash: 20_000, minTradeValue: 5000 },
+      // 冻结时钟下实时阶段只有 1 轮决策（首单差额 = 50%×2 万 = 1 万）。
+      // 最小调仓额设为 2 万：首单差额小于它 → 首单就被抑制（旧值 5000 拦不住首单，
+      // 只能靠「当根成交」的旧语义在多轮里挤出差距；防未来守卫下该语义已不存在）。
+      risk: { initialCash: 20_000, minTradeValue: 20_000 },
     });
 
     const states = await bots.startMany([a.id, b.id]);
@@ -96,6 +102,8 @@ test("机器人：并行运行，资金与成交各自独立", async () => {
 
     // 成交随实时 tick 到来（不再是启动即跑完）
     await waitFor(() => (bots.state(a.id).metrics?.totalFills ?? 0) > 0);
+    // 首笔成交后，让流水线再跑几轮实时 tick，观察「最小调仓额」的持续抑制效果
+    await new Promise((r) => setTimeout(r, 1500));
 
     const va = bots.state(a.id).metrics!;
     const vb = bots.state(b.id).metrics!;
@@ -114,6 +122,9 @@ test("机器人：并行运行，资金与成交各自独立", async () => {
     bots.stop(a.id);
     bots.stop(b.id);
   } finally {
+    // 断言失败也不能漏停轮询器：句柄拖着事件循环，会让测试进程挂死
+    if (a) bots.stop(a.id);
+    if (b) bots.stop(b.id);
     rmSync(dir, { recursive: true, force: true });
   }
 });
