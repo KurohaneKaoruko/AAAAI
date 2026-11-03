@@ -103,6 +103,35 @@ test("AuthService: 会话有效期可配置", () => {
   assert.ok(ttl > 0 && ttl <= 0.02 * 3600_000 + 1000, "有效期应约 72 秒");
 });
 
+test("AuthService: 开启鉴权后健康检查放行、其他 API 拦截", () => {
+  // 健康检查由容器编排调用且不带凭据：被 401 挡住会让服务被误判为不健康
+  const auth = new AuthService(loadAuthConfig({ AAAAI_AUTH_TOKEN: "tok" } as NodeJS.ProcessEnv));
+  const middleware = auth.middleware();
+
+  let nexted = false;
+  middleware({ path: "/api/health", headers: {}, query: {} } as never, {} as never, () => {
+    nexted = true;
+  });
+  assert.equal(nexted, true, "/api/health 必须免鉴权");
+
+  let status = 0;
+  let body: unknown;
+  const res = {
+    status(code: number) {
+      status = code;
+      return this;
+    },
+    json(payload: unknown) {
+      body = payload;
+    },
+  };
+  middleware({ path: "/api/bots", headers: {}, query: {} } as never, res as never, () => {
+    throw new Error("未认证请求不应放行");
+  });
+  assert.equal(status, 401);
+  assert.deepEqual(body, { error: "未认证", authRequired: true });
+});
+
 test("AuthService: publicConfig 不泄露任何密钥", () => {
   const auth = new AuthService(
     loadAuthConfig({

@@ -143,8 +143,14 @@ export class AuthService {
   middleware() {
     return (req: Request, res: Response, next: NextFunction): void => {
       if (!this.config.required) return next();
-      // 登录接口与状态查询必须放行
-      if (req.path === "/api/auth/login" || req.path === "/api/auth/logout" || req.path === "/api/auth/status") {
+      // 登录接口、状态查询与健康检查必须放行：
+      // 健康检查不带凭据，若被挡会让容器编排层误判服务已死
+      if (
+        req.path === "/api/auth/login" ||
+        req.path === "/api/auth/logout" ||
+        req.path === "/api/auth/status" ||
+        req.path === "/api/health"
+      ) {
         return next();
       }
       if (this.authenticate(req)) return next();
