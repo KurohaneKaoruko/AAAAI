@@ -269,8 +269,22 @@ export const api = {
     request<{ authRequired: boolean; authenticated: boolean; username: string; sessionTtlHours: number }>(
       "/api/auth/status",
     ),
-  login: (username: string, password: string) =>
-    request<{ ok: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  /**
+   * 登录失败必须显示服务端的真实原因（口令错 ? 用户名错），
+   * 不能走 request() 的统一 401 映射——那里会显示「需要登录」，
+   * 用户会误以为登录页卡住了，而看不出是自己口令打错。
+   */
+  login: async (username: string, password: string) => {
+    const res = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username, password }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok) throw new Error(data.error ?? `登录失败（HTTP ${res.status}）`);
+    return data as { ok: boolean };
+  },
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   /** 服务端运行日志（环形缓冲，最新在后）。 */
   logs: (limit = 300) =>
