@@ -126,6 +126,79 @@ test("System One: 档位不足 2 个时报错", async () => {
   await assert.rejects(() => client.complete("x"), /至少需要 2 个档位/);
 });
 
+test("System One: Laya 严格校验（422）自动切 criteria 字段并记住", async () => {
+  const original = globalThis.fetch;
+  const bodies: Array<Record<string, { criteria?: unknown; levels?: unknown }>> = [];
+  let calls = 0;
+  globalThis.fetch = (async (_url, init) => {
+    calls += 1;
+    const body = JSON.parse(String(init?.body)) as Record<string, { questions: Record<string, { criteria?: unknown; levels?: unknown }> }>;
+    bodies.push(body.questions.position);
+    if (calls === 1) {
+      // 首次按 levels 发 → Laya 的 pydantic 严格校验整单拒绝，错误里点名 criteria
+      return new Response(
+        JSON.stringify({
+          detail: {
+            code: "VALIDATION_ERROR",
+            errors: [{ loc: ["body", "questions", "position", "score", "criteria"], type: "missing", message: "Field required" }],
+          },
+        }),
+        { status: 422, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // 重试后应只带 criteria 数组、不带 levels（extra_forbidden 教训）
+    return new Response(
+      JSON.stringify({
+        answers: {
+          position: { score: 3, legend: { "0": "a", "1": "b", "2": "c" }, probabilities: { "0": 0.1, "1": 0.2, "2": 0.7 }, confidence: 0.8 },
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  try {
+    const client = new SystemOneClient({
+      baseUrl: "https://laya.local/v1",
+      apiKey: "k",
+      model: "auto",
+      timeoutMs: 5000,
+      levels: ["a", "b", "c"],
+      levelWeights: [0, 0.5, 1],
+      instructions: "i",
+      buildState: (p) => p,
+    });
+    const out = await client.complete("x");
+    assert.equal(calls, 2, "422 后应换字段风格重试一次");
+    assert.deepEqual(bodies[0]?.levels, ["a", "b", "c"], "首次按 levels 风格发");
+    assert.ok("criteria" in (bodies[1] ?? {}) && Array.isArray(bodies[1]?.criteria), "重试应改用 criteria 字段");
+    assert.ok(!("levels" in (bodies[1] ?? {})), "Laya 风格不得再带 levels 字段");
+
+    // 记住协议：下一次调用直接命中，不再试错
+    await client.complete("x");
+    assert.equal(calls, 3, "第二次调用应直接成功（协议已记住）");
+    assert.ok(Array.isArray(bodies[2]?.criteria), "后续调用延续 criteria 风格");
+
+    const parsed = JSON.parse(out) as { target_weight: number; reason: string };
+    // 期望权重 = 0.1×0 + 0.2×0.5 + 0.7×1 = 0.8；档位名取 score=3 对照 legend 最近档
+    assert.ok(Math.abs(parsed.target_weight - 0.8) < 1e-6, `期望权重应为 0.8，实际 ${parsed.target_weight}`);
+    assert.match(parsed.reason, /systemone:auto\/c$/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("System One: Laya 响应（score+legend+对象概率）解析出档位名", () => {
+  // score 是连续值，round(1.7342)=2 → legend["2"]="flat"
+  const r = parseScoreAnswer(
+    { score: 1.7342, legend: { "0": "strong_short", "1": "short", "2": "flat", "3": "long", "4": "strong_long" }, probabilities: { "0": 0.0138, "1": 0.274, "2": 0.6884, "3": 0.0116, "4": 0.0121 }, confidence: 0.5177 },
+    [-0.5, -0.25, 0, 0.25, 0.5],
+  );
+  assert.equal(r.level, "flat", "score 对照 legend 应落在 flat 档");
+  // 期望权重 = 0.0138×(-0.5) + 0.274×(-0.25) + 0.6884×0 + 0.0116×0.25 + 0.0121×0.5 ≈ -0.0605
+  assert.ok(r.targetWeight < 0, "空头概率占优时期望权重应为负");
+  assert.equal(r.confidence, 0.5177);
+});
+
 test("LlmManager: systemone 类型实例独立成池，不与对话模型混用", async () => {
   const dir = tmpDir();
   try {

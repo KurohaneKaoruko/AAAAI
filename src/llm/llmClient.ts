@@ -71,11 +71,14 @@ export function parseDecision(text: string): LLMDecision {
   const targetWeight = Number(raw.target_weight ?? raw.targetWeight);
   const confidence = Number(raw.confidence ?? 0);
   const reason = String(raw.reason ?? "").slice(0, 120);
-  if (!Number.isFinite(targetWeight) || targetWeight < 0 || targetWeight > 1) {
+  // System One 的期望权重允许小幅负值：档位含做空方向（如 strong_short=-0.5），
+  // 空头概率略占优时期望落在 -0.05~0 附近——语义是「看空但接近观望」。
+  // 现货拒收负目标，这里钳到 0（平仓/观望），按报错回退基线反而丢掉模型的判断。
+  if (!Number.isFinite(targetWeight) || targetWeight < -0.25 || targetWeight > 1) {
     throw new Error(`LLM 输出 target_weight 非法: ${String(raw.target_weight)}`);
   }
   return {
-    targetWeight,
+    targetWeight: Math.max(0, targetWeight),
     confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
     reason: reason || "llm-decision",
   };

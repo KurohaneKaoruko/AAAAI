@@ -123,6 +123,19 @@ test("LlmManager: 档位与权重必须等长（levels/levelWeights 对齐）", 
     const resized = m.update(ragged.id, { levels: ["x", "y", "z", "w"] });
     assert.equal(resized.levelWeights.length, 4, "改档位后权重跟着对齐");
     assert.deepEqual(resized.levelWeights, [0.1, 0.9, 0, 0]);
+
+    // 负数档位权重必须保留：做空方向的档位（如 strong_short=-0.5）输出负期望权重，
+    // 曾被 clamp(0,1) 静默截成 0 —— 模型喊「强空」，策略却收到「观望」。
+    const short = m.create({
+      label: "带做空档位",
+      kind: "systemone",
+      baseUrl: "https://s.test/v1",
+      model: "m",
+      apiKey: "k",
+      levels: ["strong_short", "short", "flat", "long", "strong_long"],
+      levelWeights: [-0.5, -0.25, 0, 0.25, 0.5],
+    });
+    assert.deepEqual(short.levelWeights, [-0.5, -0.25, 0, 0.25, 0.5], "负档位权重不得被截断");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

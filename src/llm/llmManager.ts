@@ -657,9 +657,15 @@ function clampWeight(w: number): number {
 }
 
 /** 档位权重：长度对齐 levels，缺失补 0，并夹到 0~1。 */
+/**
+ * 档位权重归一。System One 的 score 档位权重允许负数：
+ * 均值回归/做空方向的档位（如 strong_short=-0.5）本来就该输出负目标权重，
+ * clamp 到 [0,1] 会把做空档位静默截成 0 —— 模型说「强空」，策略却收到「观望」。
+ * 这里只做数值合法性（非有限数按 0 处理），范围由下游 clamp(targetWeight) 兜底。
+ */
 function normalizeWeights(weights?: number[]): number[] {
   const base = weights ?? DEFAULT_LEVEL_WEIGHTS;
-  return base.map((w) => (Number.isFinite(w) ? Math.min(Math.max(w, 0), 1) : 0));
+  return base.map((w) => (Number.isFinite(w) ? w : 0));
 }
 
 /** SystemOneClient 没有 chat 接口，这里做一次安全的能力判断。 */
