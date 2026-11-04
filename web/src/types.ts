@@ -188,6 +188,8 @@ export interface LlmOverview {
 export interface AuthStatus {
   authRequired: boolean;
   authenticated: boolean;
+  username: string;
+  sessionTtlHours: number;
 }
 
 export type RunnerKind = "baseline" | "rules" | "chat" | "systemone" | "hybrid";

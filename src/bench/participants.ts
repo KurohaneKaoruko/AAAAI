@@ -133,7 +133,11 @@ export function buildParticipants(deps: ParticipantDeps): Participant[] {
     const kinds = requiredModelKinds(sp.decisionSource);
     let unavailable: string | undefined;
     if (bot.connectionId !== deps.connectionId) {
-      unavailable = `连接不同（${deps.connectionLabel}），无法在同一份行情上比较`;
+      // 解析不出目标（如该连接没有候选池标的）时 connectionId 是空串，
+      // 此时说「连接不同（（未选择））」纯属误导 —— 真正原因在页面顶部的状态条里。
+      unavailable = deps.connectionId
+        ? `连接不同（${deps.connectionLabel}），无法在同一份行情上比较`
+        : `当前连接没有可用标的，无法上场（见页面顶部提示）`;
     } else if (!bot.enabled) {
       unavailable = "机器人已停用";
     } else {

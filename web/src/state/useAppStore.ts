@@ -55,6 +55,8 @@ export interface AppStore {
   reloadConnections: () => Promise<void>;
   reloadWatchlist: () => Promise<void>;
   reloadAdapters: () => Promise<void>;
+  /** 首屏四件套一起重拉：登录成功后必须调一次，见下方注释 */
+  reloadAll: () => Promise<void>;
   patchConfig: (patch: Partial<AppConfig>) => Promise<void>;
   reloadState: () => Promise<void>;
 }
@@ -115,6 +117,11 @@ export function useAppStore(): AppStore {
     }
   }, []);
 
+  /** 首屏四件套：状态、连接、适配器、自选。可重复调用（登录后重拉）。 */
+  const reloadAll = useCallback(async () => {
+    await Promise.all([reloadState(), reloadConnections(), reloadAdapters(), reloadWatchlist()]);
+  }, [reloadState, reloadConnections, reloadAdapters, reloadWatchlist]);
+
   const patchConfig = useCallback(
     async (patch: Partial<AppConfig>) => {
       try {
@@ -129,18 +136,20 @@ export function useAppStore(): AppStore {
   );
 
   // 首屏加载 + SSE 订阅
+  //
+  // 注意：这个 effect 在 App 顶层，**登录之前**就会跑一次。开启鉴权后那次请求
+  // 全是 401，被各自的 catch 吞掉（不能弹错，否则登录页满屏红字），于是
+  // connections/adapters 会永久停在空数组——「模拟对照」的对照连接下拉因此
+  // 一个选项都没有。登录成功后由 App 调用 reloadAll() 重拉一遍。
   useEffect(() => {
-    void reloadState();
-    void reloadConnections();
-    void reloadAdapters();
-    void reloadWatchlist();
+    void reloadAll();
 
     const off = subscribeEvents((b: Broadcast) => {
       // 引擎已删除，SSE 只推送全局状态；事件流改为按机器人从 /api/bots 拉取
       setState(b.data);
     }, setConnected);
     return off;
-  }, [reloadState, reloadConnections, reloadAdapters, reloadWatchlist]);
+  }, [reloadAll]);
 
   return {
     state,
@@ -154,6 +163,7 @@ export function useAppStore(): AppStore {
     reloadConnections,
     reloadWatchlist,
     reloadAdapters,
+    reloadAll,
     patchConfig,
     reloadState,
   };

@@ -247,7 +247,7 @@ test("开关：配置报告的鉴权状态必须与真正生效的一致", () =>
   assert.equal(yamlOnly.auth.sessionTtlHours, 12, "YAML 里的会话时长也不再生效");
 
   // 5) 会话时长由环境变量决定
-  const ttl = buildConfig({}, { AAAAI_AUTH_TOKEN: "t", AAAAI_AUTH_SESSION_HOURS: "3" });
+  const ttl = buildConfig({}, { AAAAI_AUTH_SESSION_HOURS: "3" });
   assert.equal(ttl.auth.sessionTtlHours, 3);
 
   // 6) 运行中改配置也不能篡改这个只读视图

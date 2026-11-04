@@ -87,6 +87,12 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
     }
   }, [store.state?.runTarget?.connectionId, connectionId]);
 
+  // 兜底：连接列表为空（首屏那次请求撞上登录页/服务重启）就自己再拉一次，
+  // 否则「对照连接」下拉一个选项都没有，用户会以为是不能选。
+  useEffect(() => {
+    if (store.connections.length === 0) void store.reloadConnections();
+  }, [store.connections.length, store.reloadConnections]);
+
   useEffect(() => {
     if (connectionId) void loadParticipants(connectionId);
   }, [connectionId, loadParticipants]);
@@ -243,7 +249,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           />
           <NumberField
             label="每标的 K 线数量"
-            hint="各选手看到的行情完全相同；越多越慢、模型调用越多"
+            hint="行情相同；越多越慢"
             value={bars}
             min={30}
             max={1000}
@@ -253,7 +259,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           {simulatedTarget ? (
             <NumberField
               label="随机路径轮数"
-              hint="单轮只代表一条随机路径；多轮看正收益占比与最差一轮"
+              hint="单轮=一条路径；多轮看稳定性"
               value={rounds}
               min={1}
               max={20}
@@ -262,7 +268,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           ) : (
             <div className="field">
               <span className="field-label">随机路径轮数</span>
-              <div className="dim small" style={{ marginTop: 8 }}>
+              <div className="dim small">
                 真实行情只有一条历史，重复跑结果相同；要看随机性请选模拟行情连接。
               </div>
             </div>
@@ -271,7 +277,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             <span className="field-label">情景种子（随机行情才用得上）</span>
             <input
               className="input"
-              style={{ width: 160, marginTop: 6 }}
+              style={{ width: 160 }}
               inputMode="numeric"
               placeholder="留空 = 每次随机"
               value={seedText}

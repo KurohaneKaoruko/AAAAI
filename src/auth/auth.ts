@@ -1,11 +1,13 @@
 /**
- * 可选鉴权：默认关闭，开启后支持两种方式。
+ * 可选鉴权：默认关闭。**只有一个凭据：用户名 + 口令。**
  *
- * - 口令登录：用户名/密码登录后签发 HMAC 签名的会话 Cookie（HttpOnly）
- * - API Token：请求头 Authorization: Bearer <token>，也支持 ?token= 供 SSE 使用
+ * - 浏览器：登录后签发 HMAC 签名的会话 Cookie（HttpOnly）
+ * - 脚本：`Authorization: Bearer <口令>` —— 用的就是同一个口令，
+ *   不存在第二把钥匙。曾经单独配过 AAAAI_AUTH_TOKEN，结果面板一个密码、
+ *   脚本另一个密码，谁也记不住哪个用在哪儿 —— 那个口子已经废除。
  *
  * 配置全部来自环境变量，配置文件里只记录是否开启与用户名：
- *   AAAAI_AUTH_USERNAME / AAAAI_AUTH_PASSWORD / AAAAI_AUTH_TOKEN
+ *   AAAAI_AUTH_USERNAME / AAAAI_AUTH_PASSWORD
  *   AAAAI_AUTH_SESSION_HOURS
  */
 
@@ -23,21 +25,18 @@ export interface AuthConfig {
   required: boolean;
   username: string;
   password: string;
-  /** Bearer Token（可单独使用，无需用户名密码） */
-  token: string;
   sessionTtlMs: number;
 }
 
 export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
   const username = env[envKey("AUTH_USERNAME")] ?? "";
   const password = env[envKey("AUTH_PASSWORD")] ?? "";
-  const token = env[envKey("AUTH_TOKEN")] ?? "";
   const sessionHours = Number(env[envKey("AUTH_SESSION_HOURS")] ?? 12);
   return {
-    required: Boolean(username && password) || Boolean(token),
+    // 两个都设了才启用：只设用户名不设口令等于把门锁上却没发钥匙，直接不开
+    required: Boolean(username && password),
     username,
     password,
-    token,
     sessionTtlMs: (Number.isFinite(sessionHours) && sessionHours > 0 ? sessionHours : 12) * 3600_000,
   };
 }
@@ -58,7 +57,11 @@ export class AuthService {
     return this.config.required;
   }
 
-  publicConfig(): { authRequired: boolean; username: string; sessionTtlHours: number } {
+  publicConfig(): {
+    authRequired: boolean;
+    username: string;
+    sessionTtlHours: number;
+  } {
     return {
       authRequired: this.config.required,
       username: this.config.username,
@@ -66,7 +69,9 @@ export class AuthService {
     };
   }
 
-  /** 用户名口令登录；成功返回会话 Token。 */
+  /**
+   * 认证：用户名 + 口令。这是唯一的凭据。
+   */
   login(username: string, password: string): string | null {
     if (!this.config.username || !this.config.password) return null;
     if (!safeEqual(username, this.config.username) || !safeEqual(password, this.config.password)) {
@@ -107,22 +112,24 @@ export class AuthService {
     }
   }
 
-  /** Bearer Token 校验（常量时间比较）。 */
-  verifyToken(token: string | undefined): boolean {
-    if (!this.config.token || !token) return false;
-    return safeEqual(token, this.config.token);
+  /** Bearer 里的口令校验（常量时间比较）：脚本用的就是登录口令，不是第二把钥匙。 */
+  verifyPassword(secret: string | undefined): boolean {
+    if (!this.config.password || !secret) return false;
+    return safeEqual(secret, this.config.password);
   }
 
-  /** 从请求中提取并校验身份：Cookie 会话或 Bearer Token。 */
+  /**
+   * 从请求中提取并校验身份：Cookie 会话，或 `Bearer <口令>`。
+   *
+   * SSE 不需要 query 兜底：前端 EventSource 一直开着 withCredentials，
+   * 会话 Cookie 会自动随请求走。
+   */
   authenticate(req: Request): boolean {
     if (!this.config.required) return true;
     const header = req.headers.authorization;
     if (header?.startsWith("Bearer ")) {
-      if (this.verifyToken(header.slice(7))) return true;
+      if (this.verifyPassword(header.slice(7))) return true;
     }
-    // EventSource 无法自定义请求头，支持 query token
-    const q = req.query.token;
-    if (typeof q === "string" && this.verifyToken(q)) return true;
     const cookies = parseCookies(req.headers.cookie);
     return this.verifySession(cookies[COOKIE_NAME]) !== null;
   }

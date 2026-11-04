@@ -83,7 +83,11 @@ export function App() {
   const [route, setRoute] = useState<RouteState>(readRoute);
   // 机器人详情是机器人页的子页：/bots/<id>；编辑状态是临时 UI，不必写进 URL
   const [botEditId, setBotEditId] = useState<string | null>(null);
-  const [auth, setAuth] = useState<{ required: boolean; username: string; ok: boolean } | null>(null);
+  const [auth, setAuth] = useState<{
+    required: boolean;
+    username: string;
+    ok: boolean;
+  } | null>(null);
   // 使用指引：首访自动播；顶栏 ? 递增此 key 重播
   const [tourKey, setTourKey] = useState(0);
   /** 窄屏抽屉侧栏 */
@@ -92,7 +96,11 @@ export function App() {
   const checkAuth = useCallback(async () => {
     try {
       const s = await api.authStatus();
-      setAuth({ required: s.authRequired, username: s.username, ok: s.authenticated });
+      setAuth({
+        required: s.authRequired,
+        username: s.username,
+        ok: s.authenticated,
+      });
     } catch {
       // 鉴权接口不可用时（例如旧版本服务端）直接放行
       setAuth({ required: false, username: "", ok: true });
@@ -231,6 +239,20 @@ export function App() {
     }
   };
 
+  /**
+   * 登录成功：先确认会话已生效，再把首屏数据重拉一遍。
+   *
+   * 首屏那几个请求是在登录页挂载时就发出去的（当时还没 cookie），全部 401 被吞，
+   * 于是 connections/adapters 停在空数组 ——「模拟对照」的连接下拉会一个选项都没有。
+   * 只在登录成功后补这一次重拉，退出登录时不用清空（下次登录会再刷）。
+   */
+  const handleLoggedIn = useCallback(async () => {
+    // 顺手清掉旧版存过 localStorage 的凭据残留：现在统一走会话 Cookie。
+    window.localStorage.removeItem("aaaai.token");
+    await checkAuth();
+    await store.reloadAll();
+  }, [checkAuth, store]);
+
   const handleLogout = useCallback(async () => {
     try {
       await api.logout();
@@ -242,7 +264,12 @@ export function App() {
   }, [checkAuth]);
 
   if (auth?.required && !auth.ok) {
-    return <LoginPage username={auth.username} onSuccess={() => void checkAuth()} />;
+    return (
+      <LoginPage
+        username={auth.username}
+        onSuccess={() => void handleLoggedIn()}
+      />
+    );
   }
 
   return (

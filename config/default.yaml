@@ -16,11 +16,11 @@ server:
   host: 0.0.0.0
   port: 8787                 # WebUI / API 端口
 
-# 可选鉴权：留空 = 不启用。启用后可用 AAAAI_AUTH_USERNAME/PASSWORD 登录面板，
-# 或用 AAAAI_AUTH_TOKEN 走 Authorization: Bearer <token>
+# 可选鉴权：留空 = 不启用。启用后用 AAAAI_AUTH_USERNAME/PASSWORD 登录面板。
 # 鉴权不在这里配置：密码不该写进配置文件，因此整段只由环境变量决定 ——
-#   AAAAI_AUTH_USERNAME + AAAAI_AUTH_PASSWORD（两者都设才生效）或 AAAAI_AUTH_TOKEN
+#   AAAAI_AUTH_USERNAME + AAAAI_AUTH_PASSWORD（两者都设才生效）
 #   AAAAI_AUTH_SESSION_HOURS（默认 12）
+# 脚本调用 API 用同一个口令：Authorization: Bearer <口令>。没有第二把钥匙。
 # 面板上的「鉴权」显示的是实际生效状态（由环境变量派生，只读），
 # 不再是配置文件里一个改了也没用的开关。
 

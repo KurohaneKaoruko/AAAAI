@@ -35,7 +35,6 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [showTrades, setShowTrades] = useState(true);
   /** 上一次 SSE 触发的刷新时刻（节流用） */
   const lastSseFetch = useRef(0);
 
@@ -82,8 +81,9 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
     void load();
   }, [bot, load]);
 
+  // 成交标记始终显示：这是「这台机器人到底按什么价位成交」的唯一可视化证据，
+  // 藏起来只会在核对成交与 K 线关系时制造麻烦
   const trades: TradeMarker[] = useMemo(() => {
-    if (!showTrades) return [];
     return bot.state.trades
       .filter((t) => t.symbol === symbol)
       .map((t) => ({
@@ -94,7 +94,7 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
         quantity: t.quantity,
         reason: t.reason,
       }));
-  }, [bot.state.trades, symbol, showTrades]);
+  }, [bot.state.trades, symbol]);
 
   const ma = useMemo(
     () => ({ fastWindow: bot.strategy.fastWindow, slowWindow: bot.strategy.slowWindow }),
@@ -126,9 +126,6 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
           </div>
           <Button small onClick={() => void load()} title="立即拉取最新 K 线">
             刷新
-          </Button>
-          <Button small variant={showTrades ? "primary" : "ghost"} onClick={() => setShowTrades((v) => !v)}>
-            {showTrades ? "隐藏成交" : "显示成交"}
           </Button>
         </div>
       }

@@ -83,7 +83,7 @@ export function createServer(controller: EngineController, options: ServerOption
       return;
     }
     auth.setSessionCookie(res, token);
-    log.info("用户 %s 登录成功", String(body.username));
+    log.info("用户 %s 登录成功", String(body.username || "(未知)"));
     ok(res, { ok: true });
   });
 

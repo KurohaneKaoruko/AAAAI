@@ -43,12 +43,29 @@ export function Field({
 }) {
   return (
     <label className="field">
-      <span className="field-label">
-        {label}
-        {hint && <em className="field-hint">{hint}</em>}
-      </span>
+      <FieldLabel label={label} hint={hint} />
       {children}
     </label>
+  );
+}
+
+/**
+ * 字段标题行：标题独占，描述跟在后面但**永不换行**。
+ *
+ * 之前 label 与 hint 同处一行且都允许折行：像「每标的 K 线数量」这种标题
+ * 会被长描述挤成两行，同一行的输入框高低不齐。现在标题 nowrap（候选里省略号），
+ * 描述单行省略并用 title 提示全文，保证同一行字段的输入框基线对齐。
+ */
+function FieldLabel({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <span className="field-label">
+      <span className="field-label-text">{label}</span>
+      {hint && (
+        <em className="field-hint" title={hint}>
+          {hint}
+        </em>
+      )}
+    </span>
   );
 }
 
@@ -69,10 +86,7 @@ export function FieldBox({
 }) {
   return (
     <div className="field">
-      <span className="field-label">
-        {label}
-        {hint && <em className="field-hint">{hint}</em>}
-      </span>
+      <FieldLabel label={label} hint={hint} />
       {children}
     </div>
   );

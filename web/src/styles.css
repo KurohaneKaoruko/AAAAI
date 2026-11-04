@@ -542,8 +542,19 @@ code {
 /* ---------- 表单 ---------- */
 
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-.field-label { font-size: 12px; color: var(--text-dim); display: flex; gap: 6px; align-items: baseline; }
-.field-hint { font-size: 11px; opacity: 0.85; font-style: normal; }
+/* 标题行不允许折行：长描述会挤爆标题、把同一行字段的输入框顶得高低不齐。
+   标题 nowrap，描述单行省略（title 属性可看全文）。 */
+.field-label { font-size: 12px; color: var(--text-dim); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.field-label-text { white-space: nowrap; }
+.field-hint {
+  font-size: 11px;
+  opacity: 0.85;
+  font-style: normal;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 input, select, textarea {
   background: var(--bg-input);

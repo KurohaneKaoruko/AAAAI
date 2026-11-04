@@ -13,13 +13,9 @@ test("loadAuthConfig: 默认关闭", () => {
   assert.equal(c.sessionTtlMs, 12 * 3600_000);
 });
 
-test("loadAuthConfig: 用户名+口令 或 Token 任一存在即启用", () => {
+test("loadAuthConfig: 用户名+口令齐备才启用", () => {
   const withUser = loadAuthConfig({ AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "pw" } as NodeJS.ProcessEnv);
   assert.equal(withUser.required, true);
-
-  const withToken = loadAuthConfig({ AAAAI_AUTH_TOKEN: "abc" } as NodeJS.ProcessEnv);
-  assert.equal(withToken.required, true);
-  assert.equal(withToken.username, "");
 
   // 只有用户名没有口令 -> 不启用（避免误锁死）
   const half = loadAuthConfig({ AAAAI_AUTH_USERNAME: "admin" } as NodeJS.ProcessEnv);
@@ -71,15 +67,16 @@ test("AuthService: 会话令牌防伪改/过期", () => {
   assert.equal(auth.verifySession(`${forged}.${sig}`), null, "重放伪造 payload 必须失效");
 });
 
-test("AuthService: Bearer Token 认证", () => {
-  const auth = new AuthService(loadAuthConfig({ AAAAI_AUTH_TOKEN: "tok-123" } as NodeJS.ProcessEnv));
-  assert.equal(auth.authenticate(req({ authorization: "Bearer tok-123" })), true);
+test("AuthService: Bearer 携带的就是登录口令（脚本与面板同一凭据）", () => {
+  // 回归：曾经单独配 AAAAI_AUTH_TOKEN 当第二把钥匙，面板一个密码、脚本另一个
+  // 密码，用户记不住哪个用在哪儿。现在 Bearer 里放的必须是配置的口令本身。
+  const auth = new AuthService(
+    loadAuthConfig({ AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "pw" } as NodeJS.ProcessEnv),
+  );
+  assert.equal(auth.authenticate(req({ authorization: "Bearer pw" })), true, "Bearer <口令> 必须放行");
   assert.equal(auth.authenticate(req({ authorization: "Bearer nope" })), false);
   assert.equal(auth.authenticate(req({ authorization: "Basic xxx" })), false);
-  assert.equal(auth.authenticate(req()), false);
-
-  // EventSource 无法设置请求头，支持 query token
-  assert.equal(auth.authenticate(req({}, { token: "tok-123" })), true);
+  assert.equal(auth.authenticate(req()), false, "无 Cookie 无 Bearer 必须拒绝");
 });
 
 test("AuthService: Cookie 会话认证", () => {
@@ -94,7 +91,7 @@ test("AuthService: Cookie 会话认证", () => {
 
 test("AuthService: 会话有效期可配置", () => {
   const auth = new AuthService(
-    loadAuthConfig({ AAAAI_AUTH_TOKEN: "t", AAAAI_AUTH_SESSION_HOURS: "0.02" } as NodeJS.ProcessEnv),
+    loadAuthConfig({ AAAAI_AUTH_USERNAME: "a", AAAAI_AUTH_PASSWORD: "t", AAAAI_AUTH_SESSION_HOURS: "0.02" } as NodeJS.ProcessEnv),
   );
   const payload = auth.issue("admin") as unknown as string;
   const [body] = payload.split(".");
@@ -105,7 +102,7 @@ test("AuthService: 会话有效期可配置", () => {
 
 test("AuthService: 开启鉴权后健康检查放行、其他 API 拦截", () => {
   // 健康检查由容器编排调用且不带凭据：被 401 挡住会让服务被误判为不健康
-  const auth = new AuthService(loadAuthConfig({ AAAAI_AUTH_TOKEN: "tok" } as NodeJS.ProcessEnv));
+  const auth = new AuthService(loadAuthConfig({ AAAAI_AUTH_USERNAME: "a", AAAAI_AUTH_PASSWORD: "tok" } as NodeJS.ProcessEnv));
   const middleware = auth.middleware();
 
   let nexted = false;
@@ -134,14 +131,20 @@ test("AuthService: 开启鉴权后健康检查放行、其他 API 拦截", () =>
 
 test("AuthService: publicConfig 不泄露任何密钥", () => {
   const auth = new AuthService(
-    loadAuthConfig({
-      AAAAI_AUTH_USERNAME: "admin",
-      AAAAI_AUTH_PASSWORD: "super-secret",
-      AAAAI_AUTH_TOKEN: "token-secret",
-    } as NodeJS.ProcessEnv),
+    loadAuthConfig({ AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "super-secret" } as NodeJS.ProcessEnv),
   );
   const json = JSON.stringify(auth.publicConfig());
   assert.ok(!json.includes("super-secret"), "不得泄露口令");
-  assert.ok(!json.includes("token-secret"), "不得泄露 Token");
   assert.equal(json.includes("admin"), true, "用户名可展示用于登录页预填");
+});
+
+test("AuthService: 只有用户名口令一条路（Token 这第二把钥匙已废除）", () => {
+  // 回归：曾经 AAAAI_AUTH_TOKEN 与口令并存，两把钥匙都能开门 —— 用户面对
+  // 「两个密码」根本分不清哪个用在哪儿。现在登录只认用户名+口令。
+  const auth = new AuthService(
+    loadAuthConfig({ AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "pw" } as NodeJS.ProcessEnv),
+  );
+  assert.equal(auth.login("admin", "pw") !== null, true, "口令登录必须可用");
+  assert.equal(auth.login("", ""), null);
+  assert.equal(auth.login("admin", ""), null);
 });

@@ -48,12 +48,8 @@ export interface LogLineView {
 
 /** 带鉴权与 BASE 的请求；apiGet 等外部模块也复用这一条。 */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = window.localStorage.getItem("aaaai.token");
   const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     credentials: "include",
     ...init,
   });
@@ -266,9 +262,12 @@ export const api = {
 
   // 鉴权
   authStatus: () =>
-    request<{ authRequired: boolean; authenticated: boolean; username: string; sessionTtlHours: number }>(
-      "/api/auth/status",
-    ),
+    request<{
+      authRequired: boolean;
+      authenticated: boolean;
+      username: string;
+      sessionTtlHours: number;
+    }>("/api/auth/status"),
   /**
    * 登录失败必须显示服务端的真实原因（口令错 ? 用户名错），
    * 不能走 request() 的统一 401 映射——那里会显示「需要登录」，
@@ -330,8 +329,7 @@ export function subscribeEvents(
   onMessage: (b: Broadcast) => void,
   onStatus?: (connected: boolean) => void,
 ): () => void {
-  const token = window.localStorage.getItem("aaaai.token");
-  const url = token ? `${BASE}/api/events?token=${encodeURIComponent(token)}` : `${BASE}/api/events`;
+  const url = `${BASE}/api/events`;
   let es: EventSource | null = null;
   let timer: number | null = null;
   let closed = false;
