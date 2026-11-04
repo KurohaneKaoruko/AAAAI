@@ -1,89 +1,124 @@
 /**
- * 可选鉴权：默认关闭。**只有一个凭据：用户名 + 口令。**
+ * 可选鉴权：**只有一个密码，没有用户名。**
  *
- * - 浏览器：登录后签发 HMAC 签名的会话 Cookie（HttpOnly）
- * - 脚本：`Authorization: Bearer <口令>` —— 用的就是同一个口令，
- *   不存在第二把钥匙。曾经单独配过 AAAAI_AUTH_TOKEN，结果面板一个密码、
- *   脚本另一个密码，谁也记不住哪个用在哪儿 —— 那个口子已经废除。
+ * 设计（最朴素的一条线）：
+ * - 密码哈希存在 `data/auth.json`（0600），不进配置文件、不进环境变量；
+ * - 第一次启动时 `auth.json` 不存在 → 服务端报告 needsSetup，
+ *   前端显示「设置密码」页；**直接跳过 = 不设密码，面板裸奔**；
+ * - 已设密码：浏览器登录拿 HMAC 会话 Cookie；脚本 `Authorization: Bearer <密码>`；
+ * - 想改密码 / 删密码：面板「设置」页里操作，不需要碰文件和终端。
  *
- * 配置全部来自环境变量，配置文件里只记录是否开启与用户名：
- *   AAAAI_AUTH_USERNAME / AAAAI_AUTH_PASSWORD
- *   AAAAI_AUTH_SESSION_HOURS
+ * 历史：曾经有过环境变量口令、更早还有独立的 API Token，结果是
+ * 「面板一个密码、脚本另一个密码、重启后哪个是哪个谁也说不清」。
+ * 全部废除 —— 事实来源只有 data/auth.json 这一个文件。
  */
 
-import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import type { NextFunction, Request, Response } from "express";
 import { getLogger } from "../core/logger.js";
-import { envKey } from "../env.js";
 
 const log = getLogger("auth");
 
 export const COOKIE_NAME = "aaaai_session";
 
-export interface AuthConfig {
-  /** 是否需要登录 */
-  required: boolean;
-  username: string;
-  password: string;
-  sessionTtlMs: number;
+/** auth.json 的结构：只存散列和盐，从不存明文。 */
+interface AuthFile {
+  /** scrypt 散列（hex） */
+  passwordHash: string;
+  /** 随机盐（hex） */
+  salt: string;
+  /** 设置时间（ISO） */
+  createdAt: string;
 }
 
-export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
-  const username = env[envKey("AUTH_USERNAME")] ?? "";
-  const password = env[envKey("AUTH_PASSWORD")] ?? "";
-  const sessionHours = Number(env[envKey("AUTH_SESSION_HOURS")] ?? 12);
-  return {
-    // 两个都设了才启用：只设用户名不设口令等于把门锁上却没发钥匙，直接不开
-    required: Boolean(username && password),
-    username,
-    password,
-    sessionTtlMs: (Number.isFinite(sessionHours) && sessionHours > 0 ? sessionHours : 12) * 3600_000,
-  };
-}
-
-export interface SessionPayload {
-  sub: string;
-  exp: number;
-  nonce: string;
-}
+/** 会话有效期：固定 7 天。不做配置项 —— 又少一个要理解的概念。 */
+const SESSION_TTL_MS = 7 * 24 * 3600_000;
 
 export class AuthService {
   /** 会话签名密钥：进程内随机，重启后旧会话失效（可接受且更安全）。 */
   private readonly sessionSecret = randomBytes(32).toString("hex");
+  private readonly path: string;
+  private file: AuthFile | null = null;
 
-  constructor(private readonly config: AuthConfig) {}
-
-  isRequired(): boolean {
-    return this.config.required;
+  constructor(dataDir: string) {
+    this.path = join(dataDir, "auth.json");
+    this.load();
   }
 
-  publicConfig(): {
-    authRequired: boolean;
-    username: string;
-    sessionTtlHours: number;
-  } {
-    return {
-      authRequired: this.config.required,
-      username: this.config.username,
-      sessionTtlHours: Math.round(this.config.sessionTtlMs / 3600_000),
-    };
-  }
-
-  /**
-   * 认证：用户名 + 口令。这是唯一的凭据。
-   */
-  login(username: string, password: string): string | null {
-    if (!this.config.username || !this.config.password) return null;
-    if (!safeEqual(username, this.config.username) || !safeEqual(password, this.config.password)) {
-      return null;
+  private load(): void {
+    if (!existsSync(this.path)) return;
+    try {
+      const raw = JSON.parse(readFileSync(this.path, "utf8")) as AuthFile;
+      if (raw.passwordHash && raw.salt) this.file = raw;
+    } catch (err) {
+      log.warn("auth.json 解析失败，按未设密码处理: %s", (err as Error).message);
     }
-    return this.issue(username);
   }
 
-  issue(username: string): string {
+  private persist(file: AuthFile | null): void {
+    if (file === null) {
+      if (existsSync(this.path)) rmSync(this.path);
+      this.file = null;
+      return;
+    }
+    mkdirSync(this.path.slice(0, this.path.lastIndexOf("/")), { recursive: true });
+    writeFileSync(this.path, JSON.stringify(file, null, 2), { mode: 0o600 });
+    chmodSync(this.path, 0o600);
+    this.file = file;
+  }
+
+  /** 是否已设置密码（没设 = 面板免登录）。 */
+  hasPassword(): boolean {
+    return this.file !== null;
+  }
+
+  /** 首次设置密码；已有密码时不可用（改密码走 changePassword）。 */
+  setupPassword(password: string): boolean {
+    if (this.file) return false;
+    this.persist(hashPassword(password));
+    log.info("已设置面板密码");
+    return true;
+  }
+
+  /** 修改密码：必须验证旧密码。 */
+  changePassword(oldPassword: string, newPassword: string): boolean {
+    if (!this.file || !this.verify(oldPassword)) return false;
+    this.persist(hashPassword(newPassword));
+    log.info("面板密码已修改");
+    return true;
+  }
+
+  /** 删除密码：验证旧密码后回到「无密码」状态。 */
+  removePassword(oldPassword: string): boolean {
+    if (!this.file || !this.verify(oldPassword)) return false;
+    this.persist(null);
+    log.info("面板密码已删除（免登录）");
+    return true;
+  }
+
+  /** 校验密码（常量时间比较）。 */
+  verify(password: string): boolean {
+    if (!this.file) return false;
+    const expected = Buffer.from(this.file.passwordHash, "hex");
+    const actual = scryptSync(password, this.file.salt, expected.length);
+    return timingSafeEqual(expected, actual);
+  }
+
+  /** 首次进入：需要设置密码吗（没设过密码且不是跳过状态）。 */
+  needsSetup(): boolean {
+    return this.file === null;
+  }
+
+  login(password: string): string | null {
+    if (!this.file || !this.verify(password)) return null;
+    return this.issue();
+  }
+
+  private issue(): string {
     const payload: SessionPayload = {
-      sub: username,
-      exp: Date.now() + this.config.sessionTtlMs,
+      exp: Date.now() + SESSION_TTL_MS,
       nonce: randomBytes(6).toString("hex"),
     };
     const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -112,30 +147,21 @@ export class AuthService {
     }
   }
 
-  /** Bearer 里的口令校验（常量时间比较）：脚本用的就是登录口令，不是第二把钥匙。 */
-  verifyPassword(secret: string | undefined): boolean {
-    if (!this.config.password || !secret) return false;
-    return safeEqual(secret, this.config.password);
+  /** Bearer 里的密码校验：脚本用的就是面板密码，不是第二把钥匙。 */
+  private verifyBearer(secret: string | undefined): boolean {
+    return this.file !== null && !!secret && this.verify(secret);
   }
 
-  /**
-   * 从请求中提取并校验身份：Cookie 会话，或 `Bearer <口令>`。
-   *
-   * SSE 不需要 query 兜底：前端 EventSource 一直开着 withCredentials，
-   * 会话 Cookie 会自动随请求走。
-   */
   authenticate(req: Request): boolean {
-    if (!this.config.required) return true;
+    if (!this.file) return true; // 没设密码 = 全放行
     const header = req.headers.authorization;
-    if (header?.startsWith("Bearer ")) {
-      if (this.verifyPassword(header.slice(7))) return true;
-    }
+    if (header?.startsWith("Bearer ") && this.verifyBearer(header.slice(7))) return true;
     const cookies = parseCookies(req.headers.cookie);
     return this.verifySession(cookies[COOKIE_NAME]) !== null;
   }
 
   setSessionCookie(res: Response, token: string): void {
-    const maxAge = Math.floor(this.config.sessionTtlMs / 1000);
+    const maxAge = Math.floor(SESSION_TTL_MS / 1000);
     res.setHeader(
       "Set-Cookie",
       `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`,
@@ -146,16 +172,16 @@ export class AuthService {
     res.setHeader("Set-Cookie", `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
   }
 
-  /** Express 中间件：保护 /api 与页面资源。 */
+  /** Express 中间件：保护 /api。 */
   middleware() {
     return (req: Request, res: Response, next: NextFunction): void => {
-      if (!this.config.required) return next();
-      // 登录接口、状态查询与健康检查必须放行：
-      // 健康检查不带凭据，若被挡会让容器编排层误判服务已死
+      // 没设密码：一切放行（包括 setup 接口之外的全部 API —— 跳过设置就是裸奔，说到做到）
+      if (!this.file) return next();
+      // 已设密码：这几个接口必须免鉴权，否则永远进不去
       if (
-        req.path === "/api/auth/login" ||
-        req.path === "/api/auth/logout" ||
         req.path === "/api/auth/status" ||
+        req.path === "/api/auth/login" ||
+        req.path === "/api/auth/setup" ||
         req.path === "/api/health"
       ) {
         return next();
@@ -172,6 +198,21 @@ export class AuthService {
   }
 }
 
+export interface SessionPayload {
+  exp: number;
+  nonce: string;
+}
+
+/** scrypt 加盐散列。scrypt 是内存困难型 KDF，专为低熵口令设计。 */
+function hashPassword(password: string): AuthFile {
+  const salt = randomBytes(16).toString("hex");
+  return {
+    passwordHash: scryptSync(password, salt, 32).toString("hex"),
+    salt,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -185,7 +226,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
     if (idx <= 0) continue;
-    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    out[part.slice(0, idx).trim()!] = decodeURIComponent(part.slice(idx + 1).trim());
   }
   return out;
 }

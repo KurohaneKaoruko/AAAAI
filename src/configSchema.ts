@@ -5,7 +5,6 @@
 
 import { bool, dig, fromEnv, num, str } from "./config.js";
 import { readEnv } from "./env.js";
-import { loadAuthConfig } from "./auth/auth.js";
 import type { BalanceStrategy } from "./llm/llmManager.js";
 
 const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random", "latency"]);
@@ -256,9 +255,8 @@ export interface ExecutionSection {
 }
 
 export interface AuthSection {
-  /** 是否启用鉴权（用户名+口令 或 API Token 任一存在即启用） */
+  /** 是否启用鉴权（事实来源是 data/auth.json，这里只是配置占位） */
   enabled: boolean;
-  username: string;
   /** 会话有效期（小时） */
   sessionTtlHours: number;
 }
@@ -290,7 +288,6 @@ function parseSlicingAlgo(value: string): "none" | "twap" | "vwap" {
  */
 export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): AppConfig {
   const symbols = dig(raw, "market", "symbols", []);
-  const authEnv = loadAuthConfig(env);
   const llmApiKeyEnv = str(raw, ["llm", "api_key_env"], "OPENAI_API_KEY");
 
   return {
@@ -298,15 +295,9 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
       name: str(raw, ["app", "name"], "AAAAI"),
       logLevel: str(raw, ["app", "log_level"], "info"),
     },
-    // 鉴权只由环境变量决定（密码不该进配置文件）。
-    // 这里是从 AuthService 派生的**只读视图**，保证 /api/config 报告的状态
-    // 与真正生效的状态一致 —— 以前写成「YAML 或有 AUTH_USERNAME 即为真」，
-    // 只设了用户名没设密码时，配置里显示已启用，实际却是关闭的。
-    auth: {
-      enabled: authEnv.required,
-      username: authEnv.username,
-      sessionTtlHours: Math.round(authEnv.sessionTtlMs / 3600_000),
-    },
+    // 鉴权状态的事实来源是 data/auth.json（有没有设过密码），
+    // 不在 YAML/环境变量里 —— 这里只占位，真实状态由 /api/auth/status 报告。
+    auth: { enabled: false, sessionTtlHours: 24 },
     server: {
       port: num(raw, ["server", "port"], 8787),
       host: str(raw, ["server", "host"], "0.0.0.0"),

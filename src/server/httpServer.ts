@@ -70,21 +70,63 @@ export function createServer(controller: EngineController, options: ServerOption
   // ---------- 鉴权接口（需在中间件后、但自身免鉴权） ----------
   app.get("/api/auth/status", (req, res) => {
     ok(res, {
-      ...auth.publicConfig(),
+      needsSetup: auth.needsSetup(),
+      hasPassword: auth.hasPassword(),
       authenticated: auth.authenticate(req),
     });
   });
 
+  // 首次设置密码（只在没设过时可用；跳过 = 不设密码，面板免登录）
+  app.post("/api/auth/setup", (req, res) => {
+    const body = (req.body ?? {}) as { password?: string; skip?: boolean };
+    if (auth.hasPassword()) {
+      res.status(400).json({ error: "密码已设置，请用修改密码功能" });
+      return;
+    }
+    const password = String(body.password ?? "");
+    if (!body.skip && password.length < 4) {
+      res.status(400).json({ error: "密码至少 4 位" });
+      return;
+    }
+    if (body.skip) {
+      ok(res, { ok: true, skipped: true });
+      return;
+    }
+    auth.setupPassword(password);
+    const token = auth.login(password);
+    if (token) auth.setSessionCookie(res, token);
+    ok(res, { ok: true });
+  });
+
   app.post("/api/auth/login", (req, res) => {
-    const body = (req.body ?? {}) as { username?: string; password?: string };
-    const token = auth.login(String(body.username ?? ""), String(body.password ?? ""));
+    const body = (req.body ?? {}) as { password?: string };
+    const token = auth.login(String(body.password ?? ""));
     if (!token) {
-      res.status(401).json({ error: "用户名或口令不正确" });
+      res.status(401).json({ error: "密码不正确" });
       return;
     }
     auth.setSessionCookie(res, token);
-    log.info("用户 %s 登录成功", String(body.username || "(未知)"));
     ok(res, { ok: true });
+  });
+
+  // 修改 / 删除密码（设置页用；已有密码时必须验证旧密码）
+  app.post("/api/auth/change", (req, res) => {
+    const body = (req.body ?? {}) as { oldPassword?: string; newPassword?: string };
+    if (!auth.changePassword(String(body.oldPassword ?? ""), String(body.newPassword ?? ""))) {
+      res.status(400).json({ error: "旧密码不正确" });
+      return;
+    }
+    ok(res, { ok: true });
+  });
+
+  app.post("/api/auth/remove", (req, res) => {
+    const body = (req.body ?? {}) as { oldPassword?: string };
+    if (!auth.removePassword(String(body.oldPassword ?? ""))) {
+      res.status(400).json({ error: "旧密码不正确" });
+      return;
+    }
+    auth.clearSessionCookie(res);
+    ok(res, { ok: true, removed: true });
   });
 
   app.post("/api/auth/logout", (_req, res) => {

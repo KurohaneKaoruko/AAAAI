@@ -84,8 +84,8 @@ export function App() {
   // 机器人详情是机器人页的子页：/bots/<id>；编辑状态是临时 UI，不必写进 URL
   const [botEditId, setBotEditId] = useState<string | null>(null);
   const [auth, setAuth] = useState<{
+    /** 有密码 = 需要登录；没密码 = 免登录直进 */
     required: boolean;
-    username: string;
     ok: boolean;
   } | null>(null);
   // 使用指引：首访自动播；顶栏 ? 递增此 key 重播
@@ -96,14 +96,10 @@ export function App() {
   const checkAuth = useCallback(async () => {
     try {
       const s = await api.authStatus();
-      setAuth({
-        required: s.authRequired,
-        username: s.username,
-        ok: s.authenticated,
-      });
+      setAuth({ required: s.hasPassword, ok: s.authenticated });
     } catch {
       // 鉴权接口不可用时（例如旧版本服务端）直接放行
-      setAuth({ required: false, username: "", ok: true });
+      setAuth({ required: false, ok: true });
     }
   }, []);
 
@@ -264,12 +260,7 @@ export function App() {
   }, [checkAuth]);
 
   if (auth?.required && !auth.ok) {
-    return (
-      <LoginPage
-        username={auth.username}
-        onSuccess={() => void handleLoggedIn()}
-      />
-    );
+    return <LoginPage needsSetup={false} onSuccess={() => void handleLoggedIn()} />;
   }
 
   return (
@@ -297,8 +288,7 @@ export function App() {
           onToggleTheme={toggle}
           onMenu={() => setNavOpen((v) => !v)}
           navOpen={navOpen}
-          username={auth?.required ? auth.username : undefined}
-          onLogout={() => void handleLogout()}
+          onLogout={auth?.required ? () => void handleLogout() : undefined}
           onTourRestart={() => setTourKey((k) => k + 1)}
         />
         <main className="content">

@@ -224,33 +224,21 @@ test("开关：execution 段不再暴露从不生效的下单凭证字段", () =
   assert.equal(typeof exec.connectionId, "string");
   assert.equal(typeof exec.slicingAlgo, "string");
 });
-test("开关：配置报告的鉴权状态必须与真正生效的一致", () => {
+test("开关：鉴权的事实来源是 data/auth.json，配置/环境变量都不算数", () => {
   const base = testConfig();
 
-  // 1) 什么都不设：配置必须说「未启用」
+  // 1) 配置里 auth 只是占位视图（enabled 恒 false），真实状态由 /api/auth/status 报告
   const none = buildConfig({});
-  assert.equal(none.auth.enabled, false, "无环境变量时不应显示已启用");
+  assert.equal(none.auth.enabled, false, "配置占位视图不开启鉴权");
 
-  // 2) 只设用户名没设密码：AuthService 判定为「未启用」，
-  //    配置必须跟着说未启用 —— 以前这里是 || AUTH_USERNAME，会报成已启用。
-  const userOnly = buildConfig({}, { AAAAI_AUTH_USERNAME: "admin" });
-  assert.equal(userOnly.auth.enabled, false, "只有用户名、没有密码或 token 时不得显示已启用");
+  // 2) 环境变量（旧体系的残留）不能再影响鉴权
+  const legacy = buildConfig({}, { AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "pw" });
+  assert.equal(legacy.auth.enabled, false, "旧环境变量口令体系已废除，不得复活");
 
-  // 3) 用户名 + 密码：两者齐备才启用
-  const both = buildConfig({}, { AAAAI_AUTH_USERNAME: "admin", AAAAI_AUTH_PASSWORD: "pw" });
-  assert.equal(both.auth.enabled, true, "用户名+密码齐备应显示已启用");
-  assert.equal(both.auth.username, "admin");
-
-  // 4) YAML 里写 enabled: true 也不能凭空开启（配置不是事实来源）
+  // 3) YAML 里写 enabled: true 也不能凭空开启
   const yamlOnly = buildConfig({ auth: { enabled: true, username: "ghost", session_ttl_hours: 99 } });
   assert.equal(yamlOnly.auth.enabled, false, "YAML 不得单独把鉴权打开");
-  assert.equal(yamlOnly.auth.sessionTtlHours, 12, "YAML 里的会话时长也不再生效");
 
-  // 5) 会话时长由环境变量决定
-  const ttl = buildConfig({}, { AAAAI_AUTH_SESSION_HOURS: "3" });
-  assert.equal(ttl.auth.sessionTtlHours, 3);
-
-  // 6) 运行中改配置也不能篡改这个只读视图
   assert.equal(base.auth.enabled, false);
 });
 

@@ -131,7 +131,6 @@ export function TopBar({
   onToggleTheme,
   onMenu,
   navOpen,
-  username,
   onLogout,
   onTourRestart,
 }: {
@@ -141,8 +140,7 @@ export function TopBar({
   /** 窄屏打开/关闭导航抽屉 */
   onMenu: () => void;
   navOpen: boolean;
-  /** 鉴权已启用时传入：undefined = 未启用鉴权（不显示退出入口），空串 = 仅 Token 模式 */
-  username?: string;
+  /** 设了密码时传入（显示退出入口）；没密码 = undefined（不显示） */
   onLogout?: () => void;
   /** 重看使用指引 */
   onTourRestart: () => void;
@@ -228,15 +226,15 @@ export function TopBar({
         >
           ?
         </button>
-        {/* username 传 undefined = 鉴权未启用；传空串 = 仅 Token 模式（没有用户名），也显示退出 */}
-        {username !== undefined && onLogout && (
+        {/* onLogout 传入 = 有密码（显示退出入口）；没密码不显示 */}
+        {onLogout && (
           <button
             type="button"
             className="chip"
-            title="退出登录（清除本地 Token 并结束服务端会话）"
+            title="退出登录（结束服务端会话）"
             onClick={() => void onLogout()}
           >
-            {username !== "" ? `${username} · 退出` : "退出登录"}
+            退出
           </button>
         )}
       </div>

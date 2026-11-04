@@ -21,7 +21,7 @@ import { NewsService } from "../src/news/newsService.js";
 import { EvolutionEngine } from "../src/evolution/engine.js";
 import { StrategyStore } from "../src/strategies/profileStore.js";
 import { BotManager } from "../src/bots/botManager.js";
-import { AuthService, loadAuthConfig } from "../src/auth/auth.js";
+import { AuthService } from "../src/auth/auth.js";
 import { testConfig } from "./helpers.js";
 
 /** 按 index.ts 的方式接线，好让 HTTP 路由跑的是真实链路（与 isolation.test.ts 同构）。 */
@@ -46,7 +46,7 @@ async function wire(dir: string) {
     bots,
     news,
     evolution,
-    auth: new AuthService(loadAuthConfig({})),
+    auth: new AuthService(mkdtempSync(join(tmpdir(), "aaaai-auth-"))),
   });
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));

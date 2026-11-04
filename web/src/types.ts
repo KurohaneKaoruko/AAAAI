@@ -186,10 +186,10 @@ export interface LlmOverview {
 }
 
 export interface AuthStatus {
-  authRequired: boolean;
+  /** 还没设过密码 = 首启，前端显示设置密码页（可跳过） */
+  needsSetup: boolean;
+  hasPassword: boolean;
   authenticated: boolean;
-  username: string;
-  sessionTtlHours: number;
 }
 
 export type RunnerKind = "baseline" | "rules" | "chat" | "systemone" | "hybrid";
@@ -636,7 +636,7 @@ export interface AppConfig {
     slicingSpacingBars: number;
     slicingVolumeProfileBars: number;
   };
-  auth: { enabled: boolean; username: string; sessionTtlHours: number };
+  auth: { enabled: boolean; sessionTtlHours: number };
 }
 
 /**

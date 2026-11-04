@@ -9,7 +9,7 @@ import { createServer } from "./server/httpServer.js";
 import { EngineController } from "./server/engineController.js";
 import { ConnectionManager } from "./exchanges/connectionManager.js";
 import { LlmManager } from "./llm/llmManager.js";
-import { AuthService, loadAuthConfig } from "./auth/auth.js";
+import { AuthService } from "./auth/auth.js";
 import { BotManager } from "./bots/botManager.js";
 import { StrategyStore } from "./strategies/profileStore.js";
 import { NewsService } from "./news/newsService.js";
@@ -33,9 +33,10 @@ async function main(): Promise<void> {
 
   const connections = new ConnectionManager(dataDir);
   const watchlist = new WatchlistManager(dataDir);
-  const auth = new AuthService(loadAuthConfig());
-  if (auth.isRequired()) {
-    log.warn("鉴权已启用：未认证的请求将被拒绝（用户名=%s）", config.auth.username || "仅 Token");
+  // 鉴权：密码哈希存 data/auth.json；没设 = 免登录。
+  const auth = new AuthService(dataDir);
+  if (auth.hasPassword()) {
+    log.warn("面板密码已启用：未认证的请求将被拒绝");
   }
   const llm = new LlmManager(dataDir, config.llm.strategy);
   seedLegacyLlmProfile(llm, config);
