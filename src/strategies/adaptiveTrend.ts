@@ -36,6 +36,8 @@ export interface AdaptiveOptions {
   /** 均值回归布林窗口 / 触发 z */
   rangeWindow: number;
   rangeZ: number;
+  /** 震荡仓位最长持有根数（超时即撤；趋势单不受此限） */
+  maxHold: number;
 }
 
 export const ADAPTIVE_DEFAULTS: AdaptiveOptions = {
@@ -48,12 +50,19 @@ export const ADAPTIVE_DEFAULTS: AdaptiveOptions = {
   volWindow: 60,
   rangeWindow: 40,
   rangeZ: 1.4,
+  /** 震荡仓位最长持有根数：均值回归单超时即撤（趋势单不受此限，靠 ATR 止损管） */
+  maxHold: 24,
 };
 
 export class AdaptiveTrendStrategy implements Strategy {
   readonly name = "adaptive-trend";
   readonly warmup: number;
   private readonly opt: AdaptiveOptions;
+  /** 持仓状态：进场方向、进场价、定死的仓位大小（见 generate 内注释） */
+  private readonly hold = new Map<string, { dir: 1 | -1; sinceBar: number; entry: number; size: number }>();
+  private readonly barSeq = new Map<string, number>();
+  /** 冷却状态：上一次离场的方向；同方向重进需要先出现反向信号（见 generate 内注释） */
+  private readonly cooldown = new Map<string, 1 | -1>();
 
   constructor(
     private readonly fast = 2,
@@ -116,31 +125,102 @@ export class AdaptiveTrendStrategy implements Strategy {
       range.position <= 0.5 &&
       close <= lowWater + o.atrMult * atr;
 
-    let target = 0;
-    let regime = "flat";
-    if (longOk) {
-      target = this.maxWeight * Math.max(0.25, strength) * quality * volScale;
-      regime = "trend-long";
-    } else if (shortOk && this.allowShort) {
-      target = -this.maxWeight * Math.max(0.25, strength) * quality * volScale;
-      regime = "trend-short";
-    } else if (!trendRegime && Math.abs(z) < ENTER_Z * 1.5) {
+    /**
+     * 持仓状态机：进场定仓、拿住、衰减才出（与 momentum 引擎同一迟滞结构）。
+     *
+     * 旧版无状态，每根 K 线重新判定 regime 并重算仓位：
+     * - 震荡模式仓位 = f(|bz|)，bz 每根都变 → 仓位每根都微调 → 每根都是成交；
+     * - regime 在 trend↔flat↔range 之间翻转 → 每次翻转全额平仓再重进。
+     * 实测 500 根真实 5m 行情 162 笔成交、摩擦 1512U，方向亏损反而是小事。
+     * 现在：进场时一次定死仓位大小；持仓期间只要不触发离场条件就原样输出；
+     * 离场条件 = ATR 移动止损（同向依据被破坏）或反向信号越过进场带。
+     */
+    const held = this.hold.get(symbol);
+    const seq = (this.barSeq.get(symbol) ?? 0) + 1;
+    this.barSeq.set(symbol, seq);
+
+    let target: number;
+    let regime: string;
+    if (!held) {
       /**
-       * 震荡模式：只在区间边缘做小仓位均值回归。
-       * 这部分不是主收益来源，目的是让低效率比行情也有可控的参与度，
-       * 而不是为了“有交易”在中间位置来回挨打。
+       * 冷却：刚从方向 D 离场后，同方向立即重进被禁止，直到出现新鲜证据：
+       * 同方向 z 重新越过进场带（趋势真的又来了），或反向越过（换故事了）。
+       * 没有这道闸，「止损 → z 还在门槛外 → 下一根重进 → 再止损」的循环
+       * 会持续交手续费。注意冷却不删状态：证据不足就一直冷却着。
        */
-      const band = bollinger(closes, o.rangeWindow);
-      if (band.sd > 0) {
-        const bz = (close - band.mean) / band.sd;
-        const size = this.maxWeight * 0.35 * clamp((Math.abs(bz) - 1) / 1.8, 0, 1);
-        if (bz <= -o.rangeZ) {
-          target = size;
-          regime = "range-long";
-        } else if (bz >= o.rangeZ && this.allowShort) {
-          target = -size;
-          regime = "range-short";
+      const cooling = this.cooldown.get(symbol);
+      if (cooling !== undefined) {
+        const sameDirStrength = cooling === 1 ? z : -z;
+        const rearmOk = Math.abs(sameDirStrength) >= ENTER_Z || Math.abs(z) >= ENTER_Z * 1.2;
+        if (!rearmOk) {
+          return {
+            symbol,
+            timestamp: bars[bars.length - 1]!.timestamp,
+            targetWeight: 0,
+            confidence: round(clamp(Math.abs(z) / FULL_Z, 0, 1)),
+            reason: `cooldown z=${z.toFixed(2)} er=${er.toFixed(2)} range=${range.position.toFixed(2)} atr=${(atrPct * 100).toFixed(2)}% vol=${volScale.toFixed(2)}`,
+          };
         }
+        this.cooldown.delete(symbol);
+      }
+      if (longOk) {
+        target = this.maxWeight * Math.max(0.25, strength) * quality * volScale;
+        this.hold.set(symbol, { dir: 1, sinceBar: seq, entry: close, size: target });
+        this.cooldown.delete(symbol);
+        regime = "trend-long";
+      } else if (shortOk && this.allowShort) {
+        target = -this.maxWeight * Math.max(0.25, strength) * quality * volScale;
+        this.hold.set(symbol, { dir: -1, sinceBar: seq, entry: close, size: -target });
+        this.cooldown.delete(symbol);
+        regime = "trend-short";
+      } else if (!trendRegime && Math.abs(z) < ENTER_Z * 1.5) {
+        /**
+         * 震荡模式：只在区间边缘做一次小仓位均值回归，仓位进场时定死。
+         * 这部分不是主收益来源，目的是让低效率比行情也有可控的参与度，
+         * 而不是为了“有交易”在中间位置来回挨打。
+         */
+        const band = bollinger(closes, o.rangeWindow);
+        if (band.sd > 0) {
+          const bz = (close - band.mean) / band.sd;
+          const size = this.maxWeight * 0.35 * clamp((Math.abs(bz) - 1) / 1.8, 0, 1);
+          if (bz <= -o.rangeZ) {
+            target = size;
+            this.hold.set(symbol, { dir: 1, sinceBar: seq, entry: close, size });
+            regime = "range-long";
+          } else if (bz >= o.rangeZ && this.allowShort) {
+            target = -size;
+            this.hold.set(symbol, { dir: -1, sinceBar: seq, entry: close, size });
+            regime = "range-short";
+          } else {
+            target = 0;
+            regime = "flat";
+          }
+        } else {
+          target = 0;
+          regime = "flat";
+        }
+      } else {
+        target = 0;
+        regime = "flat";
+      }
+    } else {
+      const heldBars = seq - held.sinceBar;
+      const stop = held.dir > 0 ? held.entry - o.atrMult * atr : held.entry + o.atrMult * atr;
+      const stopped = held.dir > 0 ? close < stop : close > stop;
+      const oppositeStrength = held.dir > 0 ? -z : z;
+      const flipped = oppositeStrength >= ENTER_Z;
+      // 震荡仓位的时间盒：均值回归单不是趋势单，回归逻辑有半衰期，超时即撤
+      const timedOut = heldBars >= this.opt.maxHold;
+      if (stopped || flipped || timedOut) {
+        this.hold.delete(symbol);
+        // 离场即进入同方向冷却（见空仓分支的注释）
+        this.cooldown.set(symbol, held.dir);
+        target = 0;
+        regime = stopped ? "atr-stop" : flipped ? "flip-exit" : "timeout-exit";
+      } else {
+        // 拿住：输出进场时定死的仓位，一字不改
+        target = held.dir * held.size;
+        regime = held.dir > 0 ? "hold-long" : "hold-short";
       }
     }
 

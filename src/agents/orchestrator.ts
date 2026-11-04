@@ -221,6 +221,13 @@ export function buildPipeline(
         limits: optConstraints,
         optimize: optimizeSettings,
         grossCap: config.strategy.maxGrossExposure,
+        // 现有持仓权重：领先优势不足时沿用现状，避免横截面排名抖动反复换仓
+        currentWeights: Object.fromEntries(
+          portfolio.positionsSnapshot().map((p) => [
+            p.symbol,
+            Math.max(0, (p.quantity * (book.last(p.symbol) ?? p.avgCost)) / Math.max(1, portfolio.equity())),
+          ]),
+        ),
       }).result;
     },
   };

@@ -124,15 +124,23 @@ test("RiskRules: 最小调仓额过滤噪声单", () => {
 
 test("最小调仓额：能显著减少成交笔数", async () => {
   const base = testConfig();
+  // 死区（riskGuard 的再平衡死区）已经把微小偏差拦掉了，minTradeValue 的增量作用
+  // 要用**宽死区拦不住的规模**来测：调仓额设得比死区大一个量级。
+  // 死区口径：权重漂移 < 5 个百分点不动 → 10 万权益、50% 目标仓位下约 5000U。
+  // 这里对比 0 与 20000：2 万的阈值连 5 个百分点的漂移修正都会被砍掉。
   const run = (minTradeValue: number) =>
     runComparison({ ...base, risk: { ...base.risk, minTradeValue } }, {
       adapter: testAdapter(), symbols: ["BTCUSDT"], bars: 200, interval: "1m",
       liveTrading: false, runners: [{ id: "b", label: "b", kind: "baseline", client: null }],
     });
   const before = (await run(0)).results[0]!;
-  const after = (await run(5000)).results[0]!;
+  const after = (await run(20_000)).results[0]!;
   assert.ok(before.fillCount > 0, "基线本身应产生成交，否则该用例无意义");
-  assert.ok(after.fillCount < before.fillCount, `设阈值后成交应减少: ${before.fillCount} -> ${after.fillCount}`);
+  assert.ok(after.fillCount <= before.fillCount, `设阈值后成交不应增加: ${before.fillCount} -> ${after.fillCount}`);
+  assert.ok(
+    after.fillCount < before.fillCount || after.fillCount === 0,
+    "阈值 2 万应至少砍掉部分成交",
+  );
 });
 
 test("现金账户：多标的各自要满仓，也造不出透支与超权益敞口", async () => {

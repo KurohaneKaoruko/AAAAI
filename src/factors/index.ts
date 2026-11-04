@@ -39,30 +39,35 @@ export const FACTORS: FactorSpec[] = FACTOR_META.map((meta) => ({
 const IMPL: Record<FactorName, (input: FactorInput) => number> = {
   trend: ({ bars }) => {
     const closes = bars.map((b) => b.close);
-    if (closes.length < 21) return 0;
-    const fast = mean(closes.slice(-5));
-    const slow = mean(closes.slice(-20));
+    if (closes.length < 49) return 0;
+    // 16/48 双均线（与 momentum 引擎的真实行情调优参数同源）：
+    // 旧版 5/20 在 5m 上贴脸，因子分每轮翻转 → 横截面排名跟着翻转 → 全换仓喂手续费。
+    const fast = mean(closes.slice(-16));
+    const slow = mean(closes.slice(-48));
     if (slow <= 0) return 0;
     const maGap = (fast - slow) / slow;
-    const recent = bars.slice(-20);
+    const recent = bars.slice(-48);
     const upRatio = recent.filter((b) => b.close >= b.open).length / recent.length;
     return maGap * 2 + (upRatio - 0.5) * 0.4;
   },
 
   momentum: ({ bars }) => {
     const closes = bars.map((b) => b.close);
-    if (closes.length < 21) return 0;
-    const from = closes[closes.length - 21]!;
+    if (closes.length < 49) return 0;
+    // 48 根动量（≈4 小时）配波动率归一：与 trend 因子同一窗口量级，避免快慢混搭互相打架
+    const span = 48;
+    const from = closes[closes.length - 1 - span]!;
     const to = closes[closes.length - 1]!;
     if (from <= 0) return 0;
     const ret = (to - from) / from;
-    const vol = std(closes.slice(-21));
+    const vol = std(closes.slice(-(span + 1)));
     if (vol <= 0) return ret;
-    return ret / (vol * Math.sqrt(21));
+    return ret / (vol * Math.sqrt(span));
   },
 
   breakout: ({ bars }) => {
-    if (bars.length < 20) return 0;
+    if (bars.length < 60) return 0;
+    // 60 根通道（5 小时）：与 breakout 引擎的入场通道同源；20 根通道在 5m 上两小时破一次
     const window = bars.slice(-60);
     const close = window[window.length - 1]!.close;
     const hi = Math.max(...window.map((b) => b.high));
@@ -73,16 +78,16 @@ const IMPL: Record<FactorName, (input: FactorInput) => number> = {
 
   reversal: ({ bars }) => {
     const closes = bars.map((b) => b.close);
-    if (closes.length < 21) return 0;
-    const base = mean(closes.slice(-20));
-    const sd = std(closes.slice(-20));
+    if (closes.length < 49) return 0;
+    const base = mean(closes.slice(-48));
+    const sd = std(closes.slice(-48));
     if (sd <= 0) return 0;
     return -(mean(closes.slice(-5)) - base) / sd;
   },
 
   volume: ({ bars }) => {
-    if (bars.length < 21) return 0;
-    const window = bars.slice(-20);
+    if (bars.length < 49) return 0;
+    const window = bars.slice(-48);
     let obv = 0;
     for (let i = 1; i < window.length; i++) {
       const prev = window[i - 1]!;

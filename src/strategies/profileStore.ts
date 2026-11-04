@@ -143,6 +143,7 @@ export class StrategyStore {
       this.defaultId = this.profiles[0]!.id;
     }
     this.ensurePresets();
+    this.ensurePresetV2();
     this.persist();
   }
 
@@ -216,6 +217,64 @@ export class StrategyStore {
     }
     this.presetVersion = 1;
     if (added > 0) log.info("已补入 %d 条官方策略预设", added);
+    return;
+  }
+
+  /**
+   * 预设 v2：参数按**真实行情**重新调优。
+   *
+   * v1 的参数（尤其动量 2/8）是在本地模拟走向上调出来的：人造趋势干净、
+   * 噪声极小，z 轻松冲过门槛。放到真实 5m 行情上，2/8 的 t 统计量每两根
+   * K 线翻转一次，迟滞引擎一天也要进出二十多次，手续费把方向收益吃穿
+   * （实测 -8.6%/1000根，其中摩擦占九成）。
+   * 在真实 Binance 5m 行情上重扫参数：12~24/36~64 是一片正收益高原
+   * （16/48：+0.66%/500根、+0.47%/1000根），选高原中位 16/48，不追孤立尖峰。
+   * 只改官方预设的参数与说明；用户自建/改过的策略一律不碰。
+   */
+  private ensurePresetV2(): void {
+    if (!this.seedPresets || this.presetVersion >= 2) return;
+    const tune: Record<string, { fastWindow: number; slowWindow: number; note: string }> = {
+      // 时序动量：2/8 → 16/48（真实 5m 行情参数高原的中位）
+      "preset-momentum": {
+        fastWindow: 16,
+        slowWindow: 48,
+        note: "经典双均线 t 统计量 + 迟滞带；参数在真实 Binance 5m 行情上调优",
+      },
+      // 自适应趋势：5/20 → 12/48（同一片高原，效率比过滤吃掉短窗口噪声）
+      "preset-adaptive": {
+        fastWindow: 12,
+        slowWindow: 48,
+        note: "效率比 + 突破 + ATR 移动止损 + 波动率缩放；真实行情调优",
+      },
+      // 唐奇安突破：20/10 → 60/30（5m 上 20 根通道太窄，半个多小时就破一次）
+      "preset-breakout": {
+        fastWindow: 30,
+        slowWindow: 60,
+        note: "60 根通道突破入场、30 根反向通道离场，ATR 止损；真实行情调优",
+      },
+      // 均值回归窗口同步放宽：5/20 的布林带在 5m 上贴脸，1.5σ 满地都是
+      "preset-meanrev": {
+        fastWindow: 12,
+        slowWindow: 48,
+        note: "布林均值回归 + 回归出场/止损/超时；真实行情调优",
+      },
+      // 横截面与动量同引擎：跟随调到 16/48
+      "preset-xsmom": {
+        fastWindow: 16,
+        slowWindow: 48,
+        note: "趋势/动量/突破/量价因子排名取前 3，适合多标的候选池；真实行情调优",
+      },
+    };
+    let tuned = 0;
+    for (const [id, patch] of Object.entries(tune)) {
+      const idx = this.profiles.findIndex((p) => p.id === id);
+      if (idx < 0) continue;
+      const current = this.profiles[idx]!;
+      this.profiles[idx] = this.hydrate({ ...this.pick(current), ...patch, id, createdAt: current.createdAt });
+      tuned += 1;
+    }
+    this.presetVersion = 2;
+    if (tuned > 0) log.info("官方预设已按真实行情调优（v2）：更新 %d 条参数", tuned);
   }
 
   /** 补齐缺省字段：老数据/手改文件里少字段时不至于 undefined 满天飞。 */

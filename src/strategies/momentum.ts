@@ -16,14 +16,36 @@
 import type { Bar, Signal } from "../core/types.js";
 import type { Strategy, StrategyContext } from "./strategy.js";
 
-/** 进场门槛：趋势强度至少要盖过 1 倍噪声（t 统计量的常见显著性水位）。 */
-export const ENTER_Z = 1;
+/** 进场门槛：趋势强度至少要盖过 1.5 倍噪声才值得进场（含手续费的安全边际）。 */
+export const ENTER_Z = 1.5;
 /** 满配门槛：2 倍噪声以上不再加仓（再高的 z 只是更确定，不是更多趋势）。 */
 export const FULL_Z = 2;
+/**
+ * 出场门槛：持仓后趋势衰减到 0.5 倍噪声以下才离场。
+ *
+ * 进场带(1.5) ≠ 出场带(0.5)，中间是**迟滞带**：已有仓位在带内保持不动。
+ * 旧版进出同一门槛（1.0），z 在门槛附近每根 K 线来回穿越 —— 真实行情里
+ * 一天能进出几十次，每次一个来回 ≈30bps 摩擦，方向还没亏钱、手续费先亏穿。
+ * 迟滞不是新发明：恒温器、施密特触发器、唐奇安通道（本仓库 breakout 引擎）
+ * 全是「宽条件进、窄条件出」的同款结构。
+ */
+export const EXIT_Z = 0.5;
+/** 最短持仓：进场后至少持有几根 K 线，出场所不适用于刚进场的单（防单根反向噪声）。 */
+export const MIN_HOLD_BARS = 3;
 
 export class MomentumStrategy implements Strategy {
   readonly name = "momentum";
   readonly warmup: number;
+  /**
+   * 迟滞状态：每个标的记住当前持仓方向与进场时的 K 线序号。
+   *
+   * 策略实例在机器人/回测里与标的一一对应（每个标的独立实例），所以按实例
+   * 记一份即可。旧版无状态、每根 K 线从零算目标权重，z 在门槛附近抖一下
+   * 目标就从 50% 跳到 0 再跳回来 —— 每次跳变都是一笔真实成交。
+   */
+  private readonly hold = new Map<string, { dir: 1 | -1; sinceBar: number }>();
+  /** 只用于统计进场的递增计数（按 symbol 记） */
+  private readonly barSeq = new Map<string, number>();
 
   constructor(
     private readonly fast = 2,
@@ -43,19 +65,48 @@ export class MomentumStrategy implements Strategy {
     const score = trendScore(bars, this.fast, this.slow);
     if (!score) return null;
     const { z, fastMa, slowMa, sigma } = score;
-    // t 统计量换算仓位：[ENTER_Z, FULL_Z] 线性映射到 [0, maxWeight]。
-    // z<ENTER_Z → 0（趋势弱于噪声，进场等于掷硬币还搭上手续费）。
-    // 合约模式且 allowShort 时，向下的强趋势映射成负仓位（做空）。
-    const strength = Math.abs(z);
-    const magnitude =
-      strength <= ENTER_Z ? 0 : clamp((strength - ENTER_Z) / (FULL_Z - ENTER_Z), 0, 1) * this.maxWeight;
-    const targetWeight = z < 0 ? (this.allowShort ? -magnitude : 0) : magnitude;
+
+    const seq = (this.barSeq.get(symbol) ?? 0) + 1;
+    this.barSeq.set(symbol, seq);
+    const held = this.hold.get(symbol);
+
+    let targetWeight = 0;
+    let event = "";
+    if (!held) {
+      // 空仓：强度盖过进场带（ENTER_Z 倍噪声）才建仓，一次给满目标权重。
+      // 旧版在这里按 z 连续定仓位 —— 持仓后每根 K 线重新算一遍，z 抖一下
+      // 权重就变，每次变化都是一笔真实成交。仓位只在进场时定一次。
+      if (Math.abs(z) >= ENTER_Z) {
+        const dir = z > 0 ? 1 : -1;
+        if (dir > 0 || this.allowShort) {
+          this.hold.set(symbol, { dir: dir as 1 | -1, sinceBar: seq });
+          targetWeight = dir * this.maxWeight;
+          event = `enter${dir > 0 ? "long" : "short"}`;
+        }
+      }
+    } else {
+      // 持仓：迟滞带。趋势还没衰减到出场带（EXIT_Z 倍噪声）以下 → 满仓拿住，什么都不做。
+      // 反向信号强到越过进场带 → 立刻翻仓（不等衰减，趋势已经掉头了）。
+      const sameDirStrength = held.dir > 0 ? z : -z;
+      const oppositeStrength = -sameDirStrength;
+      const heldBars = seq - held.sinceBar;
+      const flipped = oppositeStrength >= ENTER_Z;
+      const decayed = sameDirStrength < EXIT_Z && heldBars >= MIN_HOLD_BARS;
+      if (flipped || decayed) {
+        this.hold.delete(symbol);
+        targetWeight = 0;
+        event = `exit${held.dir > 0 ? "long" : "short"}${flipped ? "-flip" : ""}`;
+      } else {
+        targetWeight = held.dir * this.maxWeight;
+      }
+    }
+
     return {
       symbol,
       timestamp: bars[bars.length - 1]!.timestamp,
       targetWeight: round(targetWeight),
-      confidence: round(Math.min(strength / FULL_Z, 1)),
-      reason: `fast_ma=${fastMa.toFixed(4)} slow_ma=${slowMa.toFixed(4)} z=${z.toFixed(2)} noise=${sigma.toFixed(4)}${targetWeight < 0 ? " short" : ""}`,
+      confidence: round(Math.min(Math.abs(z) / FULL_Z, 1)),
+      reason: `fast_ma=${fastMa.toFixed(4)} slow_ma=${slowMa.toFixed(4)} z=${z.toFixed(2)} noise=${sigma.toFixed(4)}${event ? ` ${event}` : ""}${targetWeight < 0 ? " short" : ""}`,
     };
   }
 }

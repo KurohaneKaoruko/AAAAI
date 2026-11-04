@@ -80,12 +80,14 @@ function bars(closes: number[], volumes: number[] = closes.map(() => 100)): Fact
 }
 
 test("因子：横截面 z-score 后排名，强弱方向正确", () => {
+  // 因子窗口已按真实 5m 行情调到 48 根量级（trend/momentum/reversal/volume 均以 48 根为窗口），
+  // 序列长度用 60 根保证各因子都有足够数据
   const upTrend = scoreFactors(
-    [{ symbol: "UP", bars: bars(Array.from({ length: 40 }, (_, i) => 100 + i * 2)) }],
+    [{ symbol: "UP", bars: bars(Array.from({ length: 60 }, (_, i) => 100 + i * 2)) }],
     defaultFactorConfig(),
   );
   const downTrend = scoreFactors(
-    [{ symbol: "DOWN", bars: bars(Array.from({ length: 40 }, (_, i) => 200 - i * 2)) }],
+    [{ symbol: "DOWN", bars: bars(Array.from({ length: 60 }, (_, i) => 200 - i * 2)) }],
     defaultFactorConfig(),
   );
   assert.ok(upTrend[0]!.raw.trend! > 0, "上涨序列的趋势分应为正");
@@ -95,8 +97,8 @@ test("因子：横截面 z-score 后排名，强弱方向正确", () => {
   // 两个标的同池时，强者综合分更高
   const pair = scoreFactors(
     [
-      { symbol: "UP", bars: bars(Array.from({ length: 40 }, (_, i) => 100 + i * 2)) },
-      { symbol: "DOWN", bars: bars(Array.from({ length: 40 }, (_, i) => 200 - i * 2)) },
+      { symbol: "UP", bars: bars(Array.from({ length: 60 }, (_, i) => 100 + i * 2)) },
+      { symbol: "DOWN", bars: bars(Array.from({ length: 60 }, (_, i) => 200 - i * 2)) },
     ],
     defaultFactorConfig(),
   );
@@ -110,8 +112,8 @@ test("因子：横截面 z-score 后排名，强弱方向正确", () => {
 
 test("因子：只有被选中的因子参与打分；权重为 0 的因子不影响排名", () => {
   const inputs: FactorInput[] = [
-    { symbol: "A", bars: bars(Array.from({ length: 40 }, (_, i) => 100 + i)) },
-    { symbol: "B", bars: bars(Array.from({ length: 40 }, (_, i) => 100 - i)) },
+    { symbol: "A", bars: bars(Array.from({ length: 60 }, (_, i) => 100 + i)) },
+    { symbol: "B", bars: bars(Array.from({ length: 60 }, (_, i) => 100 - i)) },
   ];
   const onlyTrend = scoreFactors(inputs, { weights: { trend: 1, momentum: 0, breakout: 0, reversal: 0, volume: 0 } });
   assert.ok(onlyTrend.every((s) => s.factors.length === 1 && s.factors[0] === "trend"), "只有选中的因子参与");

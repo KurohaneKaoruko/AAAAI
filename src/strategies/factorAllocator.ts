@@ -36,7 +36,15 @@ export interface ScoreAllocationOptions {
   optimize: OptimizeSettings;
   /** 组合总仓位上限 */
   grossCap: number;
+  /**
+   * 当前持仓权重（symbol -> 权重，0/缺省 = 未持有）。
+   * 用于「领先优势不足时沿用现有持仓」，避免横截面排名抖动导致反复换仓。
+   */
+  currentWeights?: Record<string, number>;
 }
+
+/** 领先优势门槛（标准差单位）：第一名领先不足此值时不算「明确领先」。 */
+const LEAD_EDGE = 0.5;
 
 const DEFAULT_FACTORS: FactorConfig = {
   weights: { trend: 1, momentum: 1, breakout: 0.6, reversal: 0, volume: 0.4 },
@@ -56,8 +64,29 @@ export function allocateByFactors(
       : DEFAULT_FACTORS;
 
   const scored = scoreFactors(inputs, factorConfig);
+  /**
+   * 领先优势门槛：第一名领先第二名不足 LEAD_EDGE 个标准差，且现任领先者
+   * 仍在正分池里 → 沿用现任领先者，不换仓。
+   *
+   * 横截面排名的摩擦全在换仓：领先者在 BTC/ETH 之间来回换，每次换仓是
+   * 「平旧领先 + 买新领先」两笔全额单。真实行情里两个高度相关标的的因子分
+   * 差本来就小且抖，没有优势门槛的排名就是噪声放大器。只有现任领先者
+   * **掉出正分池**或被明显反超（≥ LEAD_EDGE）才交棒。
+   */
   const positive = scored.filter((s) => s.score > 0);
-  const pool = positive.length > 0 ? positive : scored.slice(0, 1);
+  const incumbent = Object.entries(options.currentWeights ?? {})
+    .filter(([, w]) => w > 0.01)
+    .sort((a, b) => b[1] - a[1])[0]?.[0];
+  let pool = positive.length > 0 ? positive : scored.slice(0, 1);
+  if (
+    incumbent &&
+    positive.length > 1 &&
+    pool.some((s) => s.symbol === incumbent) &&
+    Math.abs(pool[0]!.score - (pool.find((s) => s.symbol === incumbent)?.score ?? 0)) < LEAD_EDGE
+  ) {
+    // 优势不足：把现任领先者顶到池首，权重计算自然延续现有持仓格局
+    pool = [pool.find((s) => s.symbol === incumbent)!, ...pool.filter((s) => s.symbol !== incumbent)];
+  }
 
   // 分数 -> 权重：以池内最高分为 1，其余按比例；再过额度裁剪
   const top = pool[0]?.score ?? 1;
@@ -71,6 +100,19 @@ export function allocateByFactors(
     grossCap: options.grossCap,
     minPositions: options.optimize.minPositions,
   });
+
+  /**
+   * 权重量化：按 0.1 一档取整。
+   *
+   * 因子分每轮都在动，连续权重意味着每次决策都产生几厘米的仓位差 ——
+   * 0.357 → 0.341 也值得下一笔单吗？量化后权重只在档位间跳，
+   * 分数的小幅漂移不再触发交易；真正的排名变化（跨档）才调仓。
+   * 与风控侧的再平衡死区（漂移 < 5 个百分点不动）配合，横截面换手
+   * 从「每轮都动」降到「排名/档位真的变了才动」。
+   */
+  for (const [symbol, w] of Object.entries(weights)) {
+    weights[symbol] = Math.round(w * 10) / 10;
+  }
 
   // 风险平价修正：只在显式选择时启用，它会改写相对权重
   if (options.optimize.method === "risk_parity" && Object.keys(weights).length > 1) {

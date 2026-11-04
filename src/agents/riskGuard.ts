@@ -50,6 +50,35 @@ export class RiskGuardAgent extends Agent {
     const currentValue = position ? position.quantity * price : 0;
     const targetValue = signal.targetWeight * equity;
     const rawDelta = targetValue - currentValue;
+
+    /**
+     * 再平衡死区：已有同向持仓时，微小偏差不下单。
+     *
+     * 没有这道闸，策略输出的「目标权重 0.5」会被当成每根 K 线都要强制对齐的锚：
+     * 价格每动 1%，持仓市值就动约 maxWeight×equity×1%（50% 仓位即 500U），
+     * 而权益几乎不动 —— rawDelta 稳定超过任何小死区，于是每根 K 线微调一次，
+     * 策略明明说「拿住不动」，风控却每根都在交易。真实行情 200 根能多出 200 笔。
+     *
+     * 死区宽度按**持仓市值占比**算：偏差 < 持仓的 10%（或权益 0.5%，取小者）不动。
+     * 10% 看着宽，实际语义是「仓位比例漂移到 45%~55% 区间内都不管」——
+     * 对 50% 目标仓位而言这正是「拿住」的本义。方向翻转 / 建仓 / 清仓
+     * （无持仓或目标为 0）不走死区，必须立即执行。
+     */
+    const hasPosition = Math.abs(currentValue) > 1e-9;
+    const sameDirection =
+      hasPosition &&
+      (position!.quantity > 0 ? signal.targetWeight > 0 : signal.targetWeight < 0);
+    if (sameDirection) {
+      // 带宽 5 个百分点：目标 50% 时，实际权重在 45%~55% 内都不动。
+      // 这正是「拿住」的本义 —— 权重漂移是价格波动的自然结果，
+      // 漂移出带宽才值得花一笔手续费修正。再叠 minTradeValue 兜底。
+      const drift = Math.abs(currentValue / equity - Math.abs(signal.targetWeight));
+      const deadband = Math.max(0.05, this.rules.limits.minTradeValue / equity);
+      if (drift < deadband) {
+        return;
+      }
+    }
+
     // 低于最小调仓额：视为噪声调整，不下单
     if (!this.rules.worthTrading(rawDelta)) {
       logger.debug("调仓金额 %s 低于最小调仓额，忽略", rawDelta.toFixed(2));
