@@ -28,7 +28,7 @@ import { testConfig } from "./helpers.js";
 async function wire(dir: string) {
   const config = testConfig();
   const connections = new ConnectionManager(dir);
-  const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+  const conn = connections.create({ adapterId: "testbed", label: "模拟" });
   const watchlist = new WatchlistManager(dir);
   const llm = new LlmManager(dir);
   const news = new NewsService(dir, config.news);

@@ -25,13 +25,8 @@ delete process.env.AAAAI_SIM_NOW;
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SimulatedAdapter } from "../src/exchanges/simulated.js";
-import { runBacktest } from "../src/backtest/runner.js";
-import { runComparison, type RunnerSpec } from "../src/bench/comparison.js";
-import { StrategyStore } from "../src/strategies/profileStore.js";
+import { SimulatedAdapter } from "./lib/simMarket.js";
 import { testConfig } from "./helpers.js";
 
 /** 一个新的模拟适配器（不带固定种子 → 每次构造都是随机情景）。 */
@@ -186,96 +181,4 @@ test("行情量级：波动率落在可信区间，价格不会在窗口内飘�
     const maxSpan = Math.max(...spans);
     assert.ok(maxSpan < 2, `${symbol} 200 日区间跨度 ${maxSpan.toFixed(2)} 过大（价格已失真）`);
   }
-});
-
-test("回测：每次自动掷新路径，且把种子记进结果", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "aaaaai-scn-"));
-  try {
-    const strategies = new StrategyStore(dir);
-    const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
-    const input = { symbols: ["单边上行"], interval: "1d", barCount: 150, strategyId: profile.id };
-
-    const first = await runBacktest(testConfig(), randomAdapter(), profile, input);
-    const second = await runBacktest(testConfig(), randomAdapter(), profile, input);
-
-    assert.equal(first.marketData, "simulated");
-    assert.ok(typeof first.scenarioSeed === "number", "随机行情的结果必须带情景种子");
-    assert.notEqual(first.scenarioSeed, second.scenarioSeed, "两次回测必须换路径（否则就是同一条路重跑）");
-    const equity = (r: typeof first) => r.equityCurve.map((p) => `${p.timestamp}:${p.equity}`).join(",");
-    assert.notEqual(equity(first), equity(second), "两条不同路径的权益曲线不应完全一致");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("回测：填入种子即可原样重现整段流水（随机结果也得能被核对）", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "aaaaai-scn-"));
-  try {
-    const strategies = new StrategyStore(dir);
-    const profile = strategies.create({ name: "双均线", fastWindow: 5, slowWindow: 20 });
-    const adapter = randomAdapter();
-    const input = { symbols: ["单边上行"], interval: "1d", barCount: 150, strategyId: profile.id, scenarioSeed: 424242 };
-
-    const first = await runBacktest(testConfig(), adapter, profile, input);
-    // 同一个适配器实例、同一根种子：必须逐笔一致
-    const again = await runBacktest(testConfig(), adapter, profile, input);
-    assert.equal(first.scenarioSeed, 424242, "结果应记下实际用的种子");
-    assert.deepEqual(
-      again.trades.map((t) => [t.timestamp, t.side, t.quantity, t.price]),
-      first.trades.map((t) => [t.timestamp, t.side, t.quantity, t.price]),
-      "同一种子的两次回测必须逐笔一致",
-    );
-    assert.equal(again.metrics.finalEquity, first.metrics.finalEquity);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("对照：所有参赛者共用同一条路径（换路径等于换一套题，名次就没意义了）", async () => {
-  const adapter = randomAdapter();
-  const runners: RunnerSpec[] = [
-    { id: "baseline", label: "基线", kind: "baseline", decisionSource: "rules" },
-    { id: "s-1", label: "策略一", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 3, slowWindow: 8 } },
-    { id: "s-2", label: "策略二", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 8, slowWindow: 30 } },
-  ];
-  const opts = { adapter, symbols: ["单边上行"], bars: 150, interval: "1d", liveTrading: false, runners };
-
-  const first = await runComparison(testConfig(), opts);
-  const second = await runComparison(testConfig(), opts);
-
-  assert.equal(first.marketData, "simulated");
-  assert.ok(typeof first.scenarioSeed === "number", "随机行情的对照结果必须带情景种子");
-  assert.notEqual(first.scenarioSeed, second.scenarioSeed, "不同次对照应换路径");
-  assert.deepEqual(
-    first.results.map((r) => r.id),
-    runners.map((r) => r.id),
-    "每位选手都必须在同一条路径上跑完",
-  );
-  // 所有选手的权益曲线点数一致 = 吃的是同一份行情
-  const lens = new Set(first.results.map((r) => r.equityCurve.length));
-  assert.equal(lens.size, 1, `同一份行情下所有选手权益点数应一致，实际 ${[...lens].join(",")}`);
-});
-
-test("对照：传种子可复现整场名次", async () => {
-  const adapter = randomAdapter();
-  const runners: RunnerSpec[] = [
-    { id: "baseline", label: "基线", kind: "baseline", decisionSource: "rules" },
-    { id: "s-1", label: "策略一", kind: "rules", decisionSource: "rules", strategyPatch: { fastWindow: 3, slowWindow: 8 } },
-  ];
-  const opts = {
-    adapter,
-    symbols: ["单边上行"],
-    bars: 150,
-    interval: "1d",
-    liveTrading: false,
-    runners,
-    scenarioSeed: 8888,
-  };
-  const first = await runComparison(testConfig(), opts);
-  const again = await runComparison(testConfig(), opts);
-  assert.deepEqual(
-    again.results.map((r) => [r.id, r.finalEquity, r.fillCount]),
-    first.results.map((r) => [r.id, r.finalEquity, r.fillCount]),
-    "同一种子的两次对照必须完全一致",
-  );
 });

@@ -172,7 +172,7 @@ test("策略列表：引用同一策略的两个机器人，改策略两边同�
   const d = dir();
   try {
     const connections = new ConnectionManager(d);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const strategies = new StrategyStore(d);
     const bots = new BotManager(d, testConfig(), connections, new LlmManager(d), strategies);
 
@@ -201,7 +201,7 @@ test("策略列表：引用失效时退回默认策略，而不是让机器人�
   const d = dir();
   try {
     const connections = new ConnectionManager(d);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const strategies = new StrategyStore(d);
     const bots = new BotManager(d, testConfig(), connections, new LlmManager(d), strategies);
 
@@ -221,7 +221,7 @@ test("策略列表：老机器人（内联参数、无 strategyId）迁移后不
   const d = dir();
   try {
     const connections = new ConnectionManager(d);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     // 造一份旧格式 bots.json：策略参数内联，且用的是对话模型
     const legacy = [
       {
@@ -278,7 +278,7 @@ test("策略列表：新建机器人未指定策略时，也会得到一条自�
   const d = dir();
   try {
     const connections = new ConnectionManager(d);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const strategies = new StrategyStore(d);
     const bots = new BotManager(d, testConfig(), connections, new LlmManager(d), strategies);
 

@@ -56,7 +56,7 @@ function newsItem(symbol: string, title: string): NewsItem {
  */
 function botsWith(dir: string, config: AppConfig, items: NewsItem[]) {
   const cm = new ConnectionManager(dir);
-  const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+  const conn = cm.create({ adapterId: "testbed", label: "模拟" });
   const news = new NewsService(dir, config.news);
   (news as unknown as { items: ItemList }).items = items;
   const strategies = new StrategyStore(dir, { seed: { ...config.strategy, name: "默认策略" } });
@@ -67,7 +67,7 @@ type ItemList = NewsItem[];
 
 function controllerWith(dir: string, config: AppConfig, items: NewsItem[]) {
   const cm = new ConnectionManager(dir);
-  cm.create({ adapterId: "simulated", label: "模拟" });
+  cm.create({ adapterId: "testbed", label: "模拟" });
   const wm = new WatchlistManager(dir);
   const llm = new LlmManager(dir);
   const news = new NewsService(dir, config.news);

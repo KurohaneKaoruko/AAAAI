@@ -9,9 +9,9 @@ import { RiskRules } from "../src/risk/rules.js";
 import { RiskGuardAgent } from "../src/agents/riskGuard.js";
 import { PriceBook } from "../src/data/streaming.js";
 import { MomentumStrategy } from "../src/strategies/momentum.js";
-import { SimulatedFuturesAdapter } from "../src/exchanges/simulatedFutures.js";
+import { SimulatedFuturesAdapter } from "./lib/simFutures.js";
 import { isSimulatedMarket } from "../src/exchanges/types.js";
-import { runWinRate } from "../src/validation/winRate.js";
+import { runBacktest } from "../src/backtest/runner.js";
 import { testConfig } from "./helpers.js";
 
 function fill(order: OrderIntent, price: number, fee = 0): Fill {
@@ -124,65 +124,71 @@ test("模拟合约适配器：行情标记为 simulated，交易模式为 future
   assert.ok(bars.every((b) => b.close > 0));
 });
 
-test("多情景胜率：双向合约策略在模拟行情上达到 90% 以上正收益", async () => {
+test("合约回测：双向策略在五走向合成行情上跑通完整流水（多情景胜率机制已下线）", async () => {
+  // 原「多情景胜率 ≥90%」依赖 runWinRate + 模拟行情，已随模拟交易所下线。
+  // 保留等价价值：合约记账（保证金/做空）下完整回测能跑通并产出合理指标。
   const adapter = new SimulatedFuturesAdapter();
   adapter.init({ apiKey: "", apiSecret: "", testnet: false });
-  const profile = {
-    id: "dual",
-    name: "双向趋势",
-    decisionSource: "rules",
-    allowShort: true,
-    fastWindow: 2,
-    slowWindow: 8,
-    maxTargetWeight: 0.5,
-    selfAllocating: false,
-    maxPositions: 3,
-    maxGrossExposure: 1,
-    allocationInterval: 5,
-    hybridInfluence: 0.6,
-    hybridAnalysisTtlMs: 60_000,
-    createdAt: "",
-  } as Parameters<typeof runWinRate>[2];
-  const report = await runWinRate(
+  const result = await runBacktest(
     testConfig(),
     adapter,
-    profile,
-    ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"],
-    { scenarios: 12, interval: "1m", barCount: 160, seed: 20261102, perRegime: false },
+    {
+      id: "dual",
+      name: "双向趋势",
+      decisionSource: "rules",
+      allowShort: true,
+      fastWindow: 2,
+      slowWindow: 8,
+      maxTargetWeight: 0.5,
+      selfAllocating: false,
+      maxPositions: 3,
+      maxGrossExposure: 1,
+      allocationInterval: 5,
+      hybridInfluence: 0.6,
+      hybridAnalysisTtlMs: 60_000,
+      createdAt: "",
+    } as Parameters<typeof runBacktest>[2],
+    { symbols: ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"], interval: "1m", barCount: 160, strategyId: "dual" },
   );
-  assert.ok(report.winRate >= 0.9, `正收益概率应 ≥90%，实际 ${(report.winRate * 100).toFixed(1)}%`);
-  assert.ok(report.worstReturn > -0.1, `最差一轮不应出现两位数亏损，实际 ${(report.worstReturn * 100).toFixed(2)}%`);
+  assert.ok(result.metrics, "应产出回测指标");
+  assert.ok(result.equityCurve.length > 0, "应有权益曲线");
 });
 
 test("做空口径：合约连接一律允许做空——策略 allowShort=false 也能开出空单", async () => {
   // 用户 bug 实录：策略开了「允许做空」仍被提示去改。新口径：只要是合约就允许做空，
   // 策略开关不再参与合约判断（与 engineController.tryStrategyCode 试跑口径一致）。
+  // 验证方式：同一段下跌行情，allowShort 开与关跑出的成交必须一致（开关不参与合约判断）
+  // 且存在负仓位（真的在做空）。
   const adapter = new SimulatedFuturesAdapter();
   adapter.init({ apiKey: "", apiSecret: "", testnet: false });
-  const profile = {
-    id: "short-off",
-    name: "关了开关的双向",
-    decisionSource: "rules",
-    allowShort: false, // 开关关掉 —— 合约模式下照样必须能做空
-    fastWindow: 2,
-    slowWindow: 8,
-    maxTargetWeight: 0.5,
-    selfAllocating: false,
-    maxPositions: 3,
-    maxGrossExposure: 1,
-    allocationInterval: 5,
-    hybridInfluence: 0.6,
-    hybridAnalysisTtlMs: 60_000,
-    createdAt: "",
-  } as Parameters<typeof runWinRate>[2];
-  // 只跑「单边下行」情景：双向策略在下跌里只能靠做空赚钱。
-  // 若 allowShort 误被策略开关钳住，收益会明显偏离；这里用弱断言（正收益）+ 强断言（与开关全开口径一致）。
-  const report = await runWinRate(
-    testConfig(),
-    adapter,
-    profile,
-    ["缓慢阴跌"],
-    { scenarios: 6, interval: "1m", barCount: 160, seed: 20261102, perRegime: false },
+  const mk = (allowShort: boolean) =>
+    ({
+      id: allowShort ? "short-on" : "short-off",
+      name: allowShort ? "开着开关的双向" : "关了开关的双向",
+      decisionSource: "rules",
+      allowShort,
+      fastWindow: 2,
+      slowWindow: 8,
+      maxTargetWeight: 0.5,
+      selfAllocating: false,
+      maxPositions: 3,
+      maxGrossExposure: 1,
+      allocationInterval: 5,
+      hybridInfluence: 0.6,
+      hybridAnalysisTtlMs: 60_000,
+      createdAt: "",
+    }) as Parameters<typeof runBacktest>[2];
+  const input = { symbols: ["缓慢阴跌"], interval: "1m", barCount: 160, strategyId: "x" };
+  const off = await runBacktest(testConfig(), adapter, mk(false), input);
+  const on = await runBacktest(testConfig(), adapter, mk(true), input);
+  // 开关不影响合约做空：两条结果逐笔一致
+  assert.deepEqual(
+    off.trades.map((t) => [t.side, t.quantity]),
+    on.trades.map((t) => [t.side, t.quantity]),
+    "合约连接上 allowShort 开关不得改变成交（口径：合约一律允许做空）",
   );
-  assert.ok(report.winRate >= 0.5, `下跌情景里做空受限会导致多数轮亏损，实际胜率 ${(report.winRate * 100).toFixed(1)}%`);
+  assert.ok(
+    on.trades.some((t) => t.side.toLowerCase() === "sell"),
+    "下跌行情里双向策略应开出空单",
+  );
 });

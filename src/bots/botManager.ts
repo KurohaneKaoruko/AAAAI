@@ -29,7 +29,6 @@ import type { LlmManager, LlmProfile, ModelKind } from "../llm/llmManager.js";
 import { StrategyStore, type StrategyProfile } from "../strategies/profileStore.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
-import { isSimulatedMarket } from "../exchanges/types.js";
 import type { ConnectionManager } from "../exchanges/connectionManager.js";
 import type {
   BotAction,
@@ -968,14 +967,15 @@ export class BotManager {
      * "历史成交" —— 那是回放，不是这台机器人在实时的作为；
      * 用它统计盈亏、甚至照着人工模仿，模仿的是一段与实时无关的回放。
      */
-    const simulated = isSimulatedMarket(adapter);
     const rawWarm = mergeBarsByTime(
       await Promise.all(bot.symbols.map((s) => adapter.fetchKlines(s, bot.interval, bot.barCount))),
     );
-    // 真实行情只喂已收盘 K 线；模拟交易所的“当前周期”是本地完整合成 K 线，保留旧行为
-    const warmBars = simulated ? rawWarm : closedBars(rawWarm, bot.interval);
-    // 真实行情预热最后一条已收盘 K 线：实时轮询器从这里之后才开始，避免重复喂同一根
-    const warmLastMs = simulated ? 0 : (warmBars[warmBars.length - 1]?.timestamp.getTime() ?? 0);
+    // 真实行情只喂已收盘 K 线（未收盘的这根还在变，拿它决策等于用半根 K 线
+    // 下结论）。marketData=simulated 的测试/演示行情没有"未收盘"概念——
+    // 当前钟点的 K 线就是完整合成的，沿用全量预热。
+    const synthetic = adapter.meta.marketData === "simulated";
+    const warmBars = synthetic ? rawWarm : closedBars(rawWarm, bot.interval);
+    const warmLastMs = synthetic ? 0 : (warmBars[warmBars.length - 1]?.timestamp.getTime() ?? 0);
     // 历史 K 线照样进 historyLog（get_history 工具的数据源）——
     // 只是不决策、不成交。工具看到的是真实行情，与预热是否成交无关。
     for (const bar of warmBars) this.trackHistory(bar);
@@ -1009,7 +1009,7 @@ export class BotManager {
       interval: bot.interval,
       pollMs: bot.pollMs,
       sinceMs: warmLastMs,
-      closedOnly: !simulated,
+      closedOnly: !synthetic,
     });
     rt.poller = poller;
     poller.start((bars) => {
@@ -1253,13 +1253,9 @@ export class BotManager {
     };
   }
 
-  /** 该机器人连接的行情来源；连接不可用时按真实处理，避免把数据问题说成随机行情。 */
-  private marketDataOf(bot: BotConfig): "real" | "simulated" {
-    try {
-      return isSimulatedMarket(this.connections.adapter(bot.connectionId)) ? "simulated" : "real";
-    } catch {
-      return "real";
-    }
+  /** 该机器人连接的行情来源；模拟交易所下线后恒为真实行情，字段保留给历史数据兼容。 */
+  private marketDataOf(_bot: BotConfig): "real" {
+    return "real";
   }
 
   /** 该机器人连接的交易模式；取不到时按现货（更保守）。 */

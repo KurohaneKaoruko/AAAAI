@@ -1,17 +1,20 @@
 /**
- * 模拟合约交易所：复用模拟交易所的五条行情走向，但按**合约账户**记账。
+ * 测试专用的模拟合约行情生成器（原「模拟合约交易所」适配器）。
  *
- * 和现货模拟交易所的区别只在交易层：
+ * 产品里的模拟合约已下线（一切以实盘数据为准）；搬进测试基建继续服役，
+ * 专供合约记账/做空链路的单元测试：离线、确定性、无需密钥。
+ *
+ * 复用模拟现货的五条行情走向，但按**合约账户**记账：
  * - 允许策略做空（由策略的 allowShort 决定）；
  * - 组合权益 = 保证金现金 + 未实现盈亏，而不是「现金 + 持仓市值」；
  * - 开仓不占用全额现金，但组合总名义敞口仍受风控上限约束。
  *
  * 仍然不模拟资金费、逐仓强平与交易所保证金率 —— 这些是真实合约才有的风险，
- * 界面必须如实说明；本适配器只用于验证方向/仓位逻辑，不构成收益证据。
+ * 因此拿它得出的结论只验证方向/仓位逻辑，不构成收益证据。
  */
 
-import type { AdapterMeta, ConnectionTest, ExchangeAdapter, SymbolInfo } from "./types.js";
-import { SimulatedAdapter } from "./simulated.js";
+import type { AdapterMeta, ConnectionTest, ExchangeAdapter, SymbolInfo } from "../../src/exchanges/types.js";
+import { SimulatedAdapter } from "./simMarket.js";
 
 const CONTRACT_SYMBOLS: SymbolInfo[] = [
   { symbol: "单边上行", name: "稳步抬升的上涨行情", assetClass: "crypto", currency: "USDT", lotSize: 1, pricePrecision: 2, qtyPrecision: 6, contractSize: 1 },

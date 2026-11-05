@@ -15,7 +15,7 @@ import { getLogger } from "../core/logger.js";
 import { strategyFields, StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
 import { CustomStrategy } from "../strategies/customStrategy.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
-import { isSimulatedMarket, tradingModeOf } from "../exchanges/types.js";
+import { tradingModeOf } from "../exchanges/types.js";
 
 /**
  * 候选池行情：交易所行情 + 它来自哪个连接。
@@ -63,12 +63,12 @@ export interface EngineState {
 export interface RunTarget {
   connectionId: string | null;
   connectionLabel: string | null;
-  /** 适配器 id（如 simulated）：界面据此说明"这次跑在随机行情上" */
+  /** 适配器 id（如 gate）：界面据此展示连接的行情来源 */
   connectionAdapterId: string | null;
   /** spot 现货 / futures 合约；界面据此显示做空、保证金相关提示 */
   tradingMode: "spot" | "futures";
-  /** real 真实行情 / simulated 本地随机行情 */
-  marketData: "real" | "simulated";
+  /** 行情来源；模拟交易所下线后恒为 real。保留字段：前端类型还在引用，语义不变。 */
+  marketData: "real";
   interval: string;
   symbols: string[];
   /** 解析不出标的时的原因（能跑则为 null） */
@@ -409,7 +409,7 @@ export class EngineController {
         connectionLabel: t.connection.label,
         connectionAdapterId: t.connection.adapterId,
         tradingMode: tradingModeOf(adapter),
-        marketData: isSimulatedMarket(adapter) ? "simulated" : "real",
+        marketData: "real",
         interval: t.interval,
         symbols: t.symbols,
         error: null,
@@ -442,8 +442,6 @@ export class EngineController {
     bars?: number;
     symbols?: string[];
     interval?: string;
-    /** 复现用：指定随机情景种子（仅模拟交易所有效） */
-    scenarioSeed?: number;
   }): Promise<ComparisonResult> {
     if (this.state.comparing) {
       throw new Error("对照实验正在进行中");
@@ -479,7 +477,6 @@ export class EngineController {
         interval: options.interval ?? target.interval,
         liveTrading: false, // 对照实验始终用本地模拟成交，避免动真钱
         runners,
-        ...(options.scenarioSeed !== undefined ? { scenarioSeed: options.scenarioSeed } : {}),
       });
       // 行情连接名一并给出：让人知道这份名次的数据来自哪儿
       const withSource = { ...result, connectionLabel: target.connection.label };

@@ -304,12 +304,10 @@ export interface BotView extends BotConfig {
   /** 生效的模型实例名称，便于一眼确认"这个机器人在用谁" */
   modelLabels: string[];
   /**
-   * 行情来源：real = 真实行情；simulated = 模拟交易所的本地随机行情。
-   *
-   * 必须在卡片上标出来：跑在随机行情上的机器人，它的成交与盈亏是随机数
-   * 与规则的产物，不是任何真实市场的结果。
+   * 行情来源；模拟交易所下线后恒为 real。保留字段：历史状态文件与
+   * 前端类型还在引用，语义不变。
    */
-  marketData: "real" | "simulated";
+  marketData: "real";
   /** 交易模式：现货 / 合约（合约允许做空与保证金记账） */
   tradingMode: "spot" | "futures";
 }

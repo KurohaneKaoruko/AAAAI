@@ -15,7 +15,6 @@ import type { AppConfig } from "../configSchema.js";
 import type { Bar, TradeRecord } from "../core/types.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import { strategyFields, type StrategyProfile } from "../strategies/profileStore.js";
-import { isSimulatedMarket } from "../exchanges/types.js";
 import { getLogger } from "../core/logger.js";
 
 const log = getLogger("backtest");
@@ -32,11 +31,6 @@ export interface BacktestInput {
   maxDrawdownPct?: number;
   /** 最小调仓额（不填用全局风控配置） */
   minTradeValue?: number;
-  /**
-   * 复现用：指定随机情景的种子（仅模拟交易所有效）。
-   * 不填 = 每次都掷新路径；填了 = 沿用那一条，用来核对某次具体结果。
-   */
-  scenarioSeed?: number;
 }
 
 export interface BacktestCandle {
@@ -64,12 +58,10 @@ export interface BacktestStrategyParams {
 
 export interface BacktestResult {
   /**
-   * 行情来源：real = 交易所/数据商的真实行情；simulated = 本地随机生成的演示行情。
-   *
-   * 这一栏必须透出到界面：随机行情跑出来的收益曲线再漂亮也不构成任何证据，
-   * 用户有权知道这份结果是"策略表现"还是"随机数表演"。
+   * 行情来源；模拟交易所下线后恒为 real。
+   * 保留字段：历史结果 JSON 与前端类型还在引用，语义不变。
    */
-  marketData: "real" | "simulated";
+  marketData: "real";
   /** 现货 / 合约：合约结果可能含负持仓与保证金记账 */
   tradingMode: "spot" | "futures";
   /** 行情连接名（让人知道数据来自哪个交易所/数据源） */
@@ -85,14 +77,6 @@ export interface BacktestResult {
   strategyParams: BacktestStrategyParams;
   /** 初始资金（权益曲线基准，不能被页面当前输入框覆盖） */
   initialCash: number;
-  /**
-   * 随机行情的情景种子（真实行情为 undefined）。
-   *
-   * 模拟行情每次回测都是新掷的一条路径，结果因此不可复现 —— 这是刻意的：
-   * 同一条路径重跑一遍只能证明"那条路上赚过钱"，换一条路才知道是不是运气。
-   * 想复现某一次的具体结果，把这个种子填回去即可。
-   */
-  scenarioSeed?: number;
   durationMs: number;
   strategyId: string;
   strategyName: string;
@@ -148,11 +132,6 @@ export async function runBacktest(
   // 回测永远是本地撮合：它回答"策略行不行"，不碰任何真实账户
   const pipeline = buildPipeline(cfg, { adapter, liveTrading: false });
 
-  // 随机行情每次回测都掷一条新路径：同一条路重跑一遍只能证明"那条路上赚过钱"，
-  // 换一条路才知道策略是本事还是运气。传了种子则沿用那一条（复现用）。
-  // 真实行情不受影响（适配器没有这个方法）。
-  const scenarioSeed = adapter.newScenario?.(input.scenarioSeed);
-
   const groups = await Promise.all(
     input.symbols.map((s) => adapter.fetchKlines(s, input.interval, input.barCount)),
   );
@@ -201,7 +180,8 @@ export async function runBacktest(
     .filter((k) => k.bars.length > 0);
 
   return {
-    marketData: isSimulatedMarket(adapter) ? "simulated" : "real",
+    // 行情来源；模拟交易所下线后恒为 real。保留字段：历史结果与前端类型还在引用。
+    marketData: "real",
     tradingMode: adapter.meta.tradingMode ?? "spot",
     symbols: input.symbols,
     interval: input.interval,
@@ -216,7 +196,6 @@ export async function runBacktest(
       allowShort: profile.allowShort,
     },
     initialCash,
-    ...(scenarioSeed !== undefined ? { scenarioSeed } : {}),
     durationMs: Date.now() - started,
     strategyId: profile.id,
     strategyName: profile.name,

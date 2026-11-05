@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConnectionManager } from "../src/exchanges/connectionManager.js";
 import { WatchlistManager } from "../src/watchlist.js";
-import { SimulatedAdapter } from "../src/exchanges/simulated.js";
+import { SimulatedAdapter } from "./lib/simMarket.js";
 import { EngineController } from "../src/server/engineController.js";
 import { LlmManager } from "../src/llm/llmManager.js";
 import { BotManager } from "../src/bots/botManager.js";
@@ -45,7 +45,7 @@ test("ConnectionManager: 持久化后可重新加载", () => {
   const dir = tmpDataDir();
   try {
     const cm1 = new ConnectionManager(dir);
-    const conn = cm1.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm1.create({ adapterId: "testbed", label: "模拟" });
     const cm2 = new ConnectionManager(dir);
     assert.equal(cm2.list().length, 1);
     assert.equal(cm2.list()[0]!.id, conn.id);
@@ -97,7 +97,7 @@ test("机器人: 连接不存在 / 没选标的 时给出明确错误", () => {
     // 原来这些校验挂在单账户引擎上，引擎删除后由机器人自己把关
     assert.throws(() => bots.create({ name: "X", connectionId: "不存在的连接", symbols: ["单边上行"] }), /连接不存在/);
     // 模拟交易所自带标的：不传标的照样能建（这个交易所没有"挑标的"这回事）
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     const auto = bots.create({ name: "自带标的", connectionId: conn.id, symbols: [] });
     assert.ok(auto.symbols.length > 0, "模拟交易所应自带标的");
     // 真实交易所没有自带标的：必须自己选
@@ -116,7 +116,7 @@ test("机器人: 实时运行状态完整（引擎删除后，运行数据都来
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     const wm = new WatchlistManager(dir);
     wm.add({ symbol: "单边上行", name: "演示走向", assetClass: "crypto", currency: "USDT", connectionId: conn.id });
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
@@ -185,7 +185,7 @@ test("模拟交易所自带标的：候选池空着也能开跑", async () => {
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     // 候选池空 + 配置里也没有全局标的：模拟交易所不该因此跑不起来
     const config = testConfig();
     config.market = { ...config.market, symbols: [] };
@@ -210,7 +210,7 @@ test("候选池行情只按候选池取，并带上是哪个连接的", async ()
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     const watchlist = new WatchlistManager(dir);
     // 模拟连接的行情由它自己编，这里只是借它验证"按候选池取行情 + 带上连接"这条链路
     watchlist.add({ connectionId: conn.id, symbol: "单边上行", name: "演示走向", assetClass: "crypto", currency: "USDT" });
@@ -250,7 +250,7 @@ test("自带标的的连接：机器人的标的被拉齐到自带清单（不�
   const dir = tmpDataDir();
   try {
     const cm = new ConnectionManager(dir);
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     const bots = new BotManager(dir, testConfig(), cm, new LlmManager(dir));
     // 模拟交易所的标的由它自带：界面上没有"挑标的"这一步，
     // 所以老机器人存着的那套必须收敛掉，否则就是一份谁也改不到的隐藏配置
@@ -279,11 +279,47 @@ test("运行目标是派生值：连接后加的，界面也不能一直说跑�
     const controller = new EngineController(testConfig(), cm, new WatchlistManager(dir), new LlmManager(dir));
     assert.match(controller.snapshot().runTarget.error ?? "", /尚未配置任何交易所连接/);
 
-    const conn = cm.create({ adapterId: "simulated", label: "模拟" });
+    const conn = cm.create({ adapterId: "testbed", label: "模拟" });
     const target = controller.snapshot().runTarget;
     assert.equal(target.connectionId, conn.id);
     assert.equal(target.error, null);
     assert.ok(target.symbols.length > 0, "自带标的的连接应解析出标的");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("适配器迁移：gate-futures → gate（合约模式），模拟交易所连接被移除", () => {
+  const dir = tmpDataDir();
+  try {
+    // 手工写入一份带旧适配器 ID 的连接清单：老版本升级后的真实数据就长这样
+    writeFileSync(
+      join(dir, "connections.json"),
+      JSON.stringify([
+        { id: "oldsim1", adapterId: "simulated", label: "模拟交易所（默认）", testnet: false, enabled: true, createdAt: "2026-01-01T00:00:00Z" },
+        { id: "oldsim2", adapterId: "simulated-futures", label: "模拟合约（默认）", testnet: false, enabled: true, createdAt: "2026-01-01T00:00:00Z" },
+        { id: "oldgate", adapterId: "gate-futures", label: "Gate 合约（主网行情）", testnet: false, enabled: true, createdAt: "2026-01-01T00:00:00Z" },
+        { id: "keepbin", adapterId: "binance", label: "币安", testnet: true, enabled: true, createdAt: "2026-01-01T00:00:00Z" },
+      ]),
+      "utf8",
+    );
+    const cm = new ConnectionManager(dir);
+    const list = cm.list();
+    // 模拟连接整体消失；gate-futures 变成 gate + 合约模式；binance 原样保留
+    assert.equal(list.length, 2, "两条模拟连接应被移除");
+    const gate = list.find((c) => c.id === "oldgate")!;
+    assert.equal(gate.adapterId, "gate");
+    assert.equal(gate.tradingMode, "futures", "老 gate-futures 连接应迁移为统一 gate 的合约模式");
+    assert.equal(list.find((c) => c.id === "keepbin")!.adapterId, "binance");
+    // 迁移是原位改写：重新加载后仍是迁移后的样子
+    const cm2 = new ConnectionManager(dir);
+    assert.equal(cm2.list().length, 2);
+    assert.equal(cm2.get("oldgate")!.tradingMode, "futures");
+    // 统一 gate 合约模式实例的 tradingMode 派生自连接（引擎记账依据）
+    assert.equal(cm2.adapter("oldgate").meta.tradingMode, "futures");
+    // 现货模式（未设 tradingMode 的 gate 连接）默认 spot
+    const spotGate = cm2.create({ adapterId: "gate", label: "Gate 现货" });
+    assert.equal(cm2.adapter(spotGate.id).meta.tradingMode, "spot");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

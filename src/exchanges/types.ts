@@ -89,6 +89,15 @@ export interface Connection {
   testnet: boolean;
   enabled: boolean;
   createdAt: string;
+  /**
+   * 连接级交易模式（现货/合约）。
+   *
+   * 只对同时支持两种模式的适配器有意义（如 Gate：一条连接既可跑现货对也可跑
+   * USDT 永续）。缺省 spot：老连接一律按现货处理，行为不变。
+   * 引擎侧（记账/风控/做空许可）以连接实例的 meta.tradingMode 为准，
+   * 适配器工厂会把它写进实例 meta。
+   */
+  tradingMode?: TradingMode;
 }
 
 /** UI 展示用的适配器元信息。 */

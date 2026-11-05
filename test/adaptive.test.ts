@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPipeline } from "../src/agents/orchestrator.js";
 import type { AppConfig } from "../src/configSchema.js";
-import { SimulatedFuturesAdapter } from "../src/exchanges/simulatedFutures.js";
+import { SimulatedFuturesAdapter } from "./lib/simFutures.js";
 import { AdaptiveTrendStrategy, atrOf, efficiencyRatio } from "../src/strategies/adaptiveTrend.js";
-import { runWinRate } from "../src/validation/winRate.js";
+import { runBacktest } from "../src/backtest/runner.js";
 import { makeBars, testAdapter, testConfig } from "./helpers.js";
 
 function barsOf(closes: number[]) {
@@ -48,33 +48,35 @@ test("自适应趋势：编排层按 engine 选择策略", () => {
   assert.equal(pipeline.strategy.name, "adaptive-trend");
 });
 
-test("自适应趋势：模拟合约多情景胜率仍达到 90% 目标", async () => {
+test("自适应趋势：模拟合约上跑通完整回测（多情景胜率机制已随模拟交易所下线）", async () => {
+  // 原「多情景胜率 ≥90%」用例依赖 runWinRate + 模拟行情——该机制已按
+  // 「一切以实盘数据为准」下线。保留等价价值的部分：自适应引擎在合约
+  // 记账（保证金/做空）下能走完整条回测流水线并产出指标。
   const adapter = new SimulatedFuturesAdapter();
   adapter.init({ apiKey: "", apiSecret: "", testnet: false });
   const base = testConfig();
-  const profile = {
-    id: "adaptive",
-    name: "自适应趋势",
-    decisionSource: "rules",
-    engine: "adaptive",
-    allowShort: true,
-    fastWindow: 2,
-    slowWindow: 8,
-    maxTargetWeight: 0.5,
-    selfAllocating: false,
-    maxPositions: 3,
-    maxGrossExposure: 1,
-    allocationInterval: 5,
-    hybridInfluence: 0.6,
-    hybridAnalysisTtlMs: 60_000,
-    createdAt: "",
-  } as Parameters<typeof runWinRate>[2];
-  const report = await runWinRate(
+  const result = await runBacktest(
     { ...base, strategy: { ...base.strategy, engine: "adaptive" } },
     adapter,
-    profile,
-    ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"],
-    { scenarios: 12, interval: "1m", barCount: 200, seed: 20261102, perRegime: false },
+    {
+      id: "adaptive",
+      name: "自适应趋势",
+      decisionSource: "rules",
+      engine: "adaptive",
+      allowShort: true,
+      fastWindow: 2,
+      slowWindow: 8,
+      maxTargetWeight: 0.5,
+      selfAllocating: false,
+      maxPositions: 3,
+      maxGrossExposure: 1,
+      allocationInterval: 5,
+      hybridInfluence: 0.6,
+      hybridAnalysisTtlMs: 60_000,
+      createdAt: "",
+    } as Parameters<typeof runBacktest>[2],
+    { symbols: ["单边上行", "缓慢阴跌", "震荡整理", "急速跳水", "急涨急跌"], interval: "1m", barCount: 200, strategyId: "adaptive" },
   );
-  assert.ok(report.winRate >= 0.9, `自适应策略正收益概率应 ≥90%，实际 ${(report.winRate * 100).toFixed(0)}%`);
+  assert.ok(result.metrics, "自适应策略在合约记账下应产出回测指标");
+  assert.ok(result.equityCurve.length > 0, "应有权益曲线");
 });

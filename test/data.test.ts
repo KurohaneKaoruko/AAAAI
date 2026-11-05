@@ -5,7 +5,7 @@ import { PriceBook, streamBars, closedBars, intervalMs, LivePoller } from "../sr
 import type { ExchangeAdapter } from "../src/exchanges/types.js";
 import { PortfolioManager } from "../src/portfolio/portfolioManager.js";
 import { PaperBroker } from "../src/execution/paperBroker.js";
-import { SimulatedAdapter } from "../src/exchanges/simulated.js";
+import { SimulatedAdapter } from "./lib/simMarket.js";
 import { BinanceAdapter } from "../src/exchanges/binance.js";
 import { OkxAdapter } from "../src/exchanges/okx.js";
 import { StooqAdapter } from "../src/exchanges/stooq.js";
@@ -77,22 +77,20 @@ test("SimulatedAdapter: 模拟成交含手续费", async () => {
 test("适配器元信息完整：现货与合约适配器", () => {
   const metas = listAdapterMetas();
   const ids = metas.map((m) => m.id);
-  assert.deepEqual(ids.sort(), ["binance", "gate", "gate-futures", "okx", "simulated", "simulated-futures", "stooq"]);
+  // 模拟交易所已下线（一切以实盘数据为准）；Gate 现货/合约合并成一条 gate 连接
+  assert.deepEqual(ids.sort(), ["binance", "gate", "okx", "stooq"]);
   for (const m of metas) {
     assert.ok(m.name.length > 0, `${m.id} 缺少名称`);
     assert.ok(m.description.length > 0, `${m.id} 缺少描述`);
     assert.ok(Array.isArray(m.klineIntervals) && m.klineIntervals.length > 0, `${m.id} 缺少周期列表`);
     assert.ok(["crypto", "stock", "mixed"].includes(m.assetClass));
+    assert.notEqual(m.marketData ?? "real", "simulated", "注册表里不应再有本地生成行情的交易所");
   }
   // 股票源仅行情，加密源支持下单
   assert.equal(metas.find((m) => m.id === "stooq")!.supportsTrading, false);
   assert.equal(metas.find((m) => m.id === "binance")!.supportsTrading, true);
   assert.equal(metas.find((m) => m.id === "okx")!.supportsTrading, true);
-  assert.equal(metas.find((m) => m.id === "gate")!.supportsTrading, true);
-  assert.equal(metas.find((m) => m.id === "gate-futures")!.supportsTrading, false, "Gate 合约只提供行情，真实下单未开放");
-  assert.equal(metas.find((m) => m.id === "gate-futures")!.tradingMode, "futures");
-  assert.equal(metas.find((m) => m.id === "simulated-futures")!.tradingMode, "futures");
-  assert.equal(metas.find((m) => m.id === "simulated")!.tradingMode, "spot");
+  assert.equal(metas.find((m) => m.id === "gate")!.supportsTrading, true, "Gate 统一连接：现货可下单，合约模式行情+本地撮合");
 });
 
 test("createAdapter 按连接创建对应实例", () => {
@@ -213,23 +211,16 @@ test("常用标的：股票源覆盖美股代码", async () => {
   assert.ok(byId.get("binance")!.defaultSymbols!.some((s) => s.symbol.endsWith("USDT")));
   assert.ok(byId.get("okx")!.defaultSymbols!.some((s) => s.symbol.includes("-")));
   assert.ok(byId.get("gate")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
-  assert.ok(byId.get("gate-futures")!.defaultSymbols!.some((s) => s.symbol.includes("_")));
 });
 
-test("标的由交易所自带：模拟现货/合约是这种（界面据此不再要求挑标的）", async () => {
+test("注册表不再有「标的由交易所自带」的连接：一切以实盘数据为准", async () => {
   const { listAdapterMetas } = await import("../src/exchanges/registry.js");
   const metas = listAdapterMetas();
+  // builtinSymbols 是为模拟交易所设计的（标的=本地走向，用户无需挑）。
+  // 模拟交易所下线后注册表里不应再有人标它 —— 标了界面就会跳过挑标的步骤。
   const builtin = metas.filter((m) => m.builtinSymbols);
-  assert.deepEqual(
-    builtin.map((m) => m.id),
-    ["simulated", "simulated-futures"],
-    "自带标的 = 用户不需要挑的连接：模拟现货与模拟合约",
-  );
-  // 标了自带就必须真有一套清单，否则"自带"就是空话
-  for (const m of builtin) {
-    assert.ok((m.defaultSymbols ?? []).length > 0, `${m.id} 标了自带标的却没有清单`);
-  }
-  // 真实交易所反过来：没有自带标的，必须由用户在候选池里选
+  assert.deepEqual(builtin, [], "自带标的的交易所应已全部下线");
+  // 真实交易所必须由用户在连接卡片下挑选标的
   for (const m of metas.filter((x) => !x.builtinSymbols)) {
     assert.equal(m.builtinSymbols ?? false, false);
   }

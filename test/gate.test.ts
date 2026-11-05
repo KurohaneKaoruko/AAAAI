@@ -24,15 +24,24 @@ test("Gate 元信息完整且支持测试网", () => {
   assert.equal(meta.keyFields.length, 2);
 });
 
-test("Gate 已注册到目录与工厂", () => {
+test("Gate 已注册到目录与工厂（统一连接：现货 + 合约）", () => {
   const metas = listAdapterMetas();
   assert.ok(metas.some((m) => m.id === "gate"), "目录应包含 gate");
-  const adapter = createAdapter(
+  assert.ok(!metas.some((m) => m.id === "gate-futures"), "gate-futures 已并入 gate，不应再有独立目录项");
+  // 不带 tradingMode 的连接 = 现货模式（老 gate 连接的行为不变）
+  const spot = createAdapter(
     { id: "x", adapterId: "gate", label: "g", testnet: false, enabled: true, createdAt: "" },
     { apiKey: "", apiSecret: "" },
   );
-  assert.ok(adapter instanceof GateAdapter);
-  assert.equal(adapter.meta.id, "gate");
+  assert.equal(spot.meta.id, "gate");
+  assert.equal(spot.meta.tradingMode, "spot", "缺省按现货");
+  // tradingMode=futures 的连接 = 合约模式（老 gate-futures 的行为）
+  const futures = createAdapter(
+    { id: "x", adapterId: "gate", label: "g", testnet: false, enabled: true, createdAt: "", tradingMode: "futures" },
+    { apiKey: "", apiSecret: "" },
+  );
+  assert.equal(futures.meta.tradingMode, "futures", "连接选了合约模式");
+  assert.ok((futures.meta.defaultSymbols ?? []).some((s) => s.name.includes("永续")), "合约模式的常用清单应是永续合约");
 });
 
 test("Gate: 未配置 Key 时下单被拒绝而不是抛错", async () => {

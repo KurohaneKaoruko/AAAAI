@@ -17,7 +17,7 @@ import { testConfig } from "./helpers.js";
 function setup(): { dir: string; bots: BotManager; connectionId: string } {
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-bots-"));
   const connections = new ConnectionManager(dir);
-  const conn = connections.create({ adapterId: "simulated", label: "模拟盘" });
+  const conn = connections.create({ adapterId: "testbed", label: "模拟盘" });
   const llm = new LlmManager(dir);
   const bots = new BotManager(dir, testConfig(), connections, llm);
   return { dir, bots, connectionId: conn.id };
@@ -232,7 +232,7 @@ test("机器人：配置持久化到 bots.json，重启后仍在", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-bots-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟盘" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟盘" });
     const first = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const created = first.create({
       name: "持久化",
@@ -263,7 +263,7 @@ test("机器人：配置持久化到 bots.json，重启后仍在", async () => {
 function liveSetup(mode: "paper" | "live") {
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-live-"));
   const connections = new ConnectionManager(dir);
-  const conn = connections.create({ adapterId: "simulated", label: "模拟盘" });
+  const conn = connections.create({ adapterId: "testbed", label: "模拟盘" });
   const config = { ...testConfig(), execution: { ...testConfig().execution, mode } };
   const bots = new BotManager(dir, config, connections, new LlmManager(dir));
   return { dir, bots, conn: conn.id };
@@ -337,8 +337,8 @@ test("实盘：不同连接之间互不干扰", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-live2-"));
   try {
     const connections = new ConnectionManager(dir);
-    const c1 = connections.create({ adapterId: "simulated", label: "盘一" });
-    const c2 = connections.create({ adapterId: "simulated", label: "盘二" });
+    const c1 = connections.create({ adapterId: "testbed", label: "盘一" });
+    const c2 = connections.create({ adapterId: "testbed", label: "盘二" });
     const config = { ...testConfig(), execution: { ...testConfig().execution, mode: "live" } };
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
@@ -358,7 +358,7 @@ test("机器人也会给自我进化留痕（否则用了机器人等于关掉�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-bot-evo-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const config: AppConfig = {
       ...testConfig(),
       evolution: {
@@ -411,7 +411,7 @@ test("配置热更新会同步到机器人（否则实盘判定读到旧的执�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-cfg-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
@@ -442,7 +442,7 @@ test("模拟成交（默认）：实时机器人用真实行情本地撮合，�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-paper-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const config = testConfig(); // execution.mode = paper
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
@@ -472,7 +472,7 @@ test("模拟成交：实时机器人不受实盘互斥限制，可多个并行",
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-paper2-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
 
@@ -492,7 +492,7 @@ test("交易统计：成交流水与分标的盈亏来自机器人自己的成�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-trade-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "统计", connectionId: conn.id, symbols: ["单边上行", "震荡整理"], barCount: 120, pollMs: 100 });
     const st = await bots.start(bot.id);
@@ -529,7 +529,7 @@ test("老数据迁移：没有 paperTrading 字段的机器人补默认值 true�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-mig-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const config = testConfig();
     // 直接写一份"旧版"bots.json：没有 paperTrading 字段
     const legacy = [
@@ -573,7 +573,7 @@ test("实时机器人启动后必须保持 running（轮询器在跑，start 返
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-running-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
 
     const bot = bots.create({ name: "常驻", connectionId: conn.id, symbols: ["单边上行"], paperTrading: true, barCount: 40, pollMs: 200 });
@@ -605,7 +605,7 @@ test("运行存档：stop 后写盘，重启进程（重建 BotManager）后历�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const config = testConfig();
     const bots = new BotManager(dir, config, connections, new LlmManager(dir));
     const bot = bots.create({ name: "存档", connectionId: conn.id, symbols: ["单边上行"], barCount: 120, pollMs: 100 });
@@ -647,7 +647,7 @@ test("运行存档汇总：多次运行求和、胜负统计只算已结束的�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist2-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "两轮", connectionId: conn.id, symbols: ["单边上行"], barCount: 120, pollMs: 100 });
 
@@ -684,7 +684,7 @@ test("运行存档：明细被截断时必须如实标注（不能让人以为�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist3-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "高频", connectionId: conn.id, symbols: ["单边上行"], barCount: 400 });
     await bots.start(bot.id);
@@ -707,7 +707,7 @@ test("运行存档：机器人删除后存档一并消失（不留幽灵数据�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist4-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "瞬逝", connectionId: conn.id, symbols: ["单边上行"], barCount: 60 });
     bots.stop(bot.id);
@@ -731,7 +731,7 @@ test("运行存档：正在运行的快照有节流，不会每次轮询都写�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-runhist5-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "节流", connectionId: conn.id, symbols: ["单边上行"], mode: "live", paperTrading: true, barCount: 40, pollMs: 200 });
     await bots.start(bot.id);
@@ -760,7 +760,7 @@ test("运行存档：上次进程遗留的 running 存档必须标为中断（�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-stale-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const config = testConfig();
 
     // 先建机器人拿到 id，再写一份"上次进程"留下的运行中存档
@@ -815,7 +815,7 @@ test("操作指引：把机器人的目标仓位换算成可人工照做的交�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-actions-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "指引", connectionId: conn.id, symbols: ["单边上行"], barCount: 60, pollMs: 100 });
 
@@ -860,7 +860,7 @@ test("预热的历史 K 线仍进 get_history 数据源（否则模型查不到�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-histlog-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "历史", connectionId: conn.id, symbols: ["单边上行"], barCount: 50, pollMs: 100 });
     await bots.start(bot.id);
@@ -881,7 +881,7 @@ test("老数据迁移：旧的回测机器人改为实时 + 模拟成交（历�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-migbt-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟" });
     const legacy = [
       {
         id: "oldbt",
@@ -917,7 +917,7 @@ test("事件日志：实时决策要记进状态（界面的事件面板不是�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-events-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({ name: "事件", connectionId: conn.id, symbols: ["单边上行"], barCount: 60, pollMs: 100 });
 
@@ -945,7 +945,7 @@ test("资产配置：权重必须自洽（持仓之和 + 现金 = 100%，市值�
   const dir = mkdtempSync(join(tmpdir(), "aaaaai-weight-"));
   try {
     const connections = new ConnectionManager(dir);
-    const conn = connections.create({ adapterId: "simulated", label: "模拟行情" });
+    const conn = connections.create({ adapterId: "testbed", label: "模拟行情" });
     const bots = new BotManager(dir, testConfig(), connections, new LlmManager(dir));
     const bot = bots.create({
       name: "权重",

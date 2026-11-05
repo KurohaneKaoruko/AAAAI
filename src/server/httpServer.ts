@@ -28,7 +28,6 @@ import type { BotInput } from "../bots/types.js";
 import type { StrategyProfileInput } from "../strategies/profileStore.js";
 import { compileCustomCode } from "../strategies/customStrategy.js";
 import { robustness, walkForward } from "../validation/walkForward.js";
-import { runWinRate } from "../validation/winRate.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
 import { STRATEGY_LABEL, SYSTEM_ONE_PRESETS, DEFAULT_LEVELS, DEFAULT_LEVEL_WEIGHTS, DEFAULT_INSTRUCTIONS } from "../llm/llmManager.js";
 import { getLogger, logLines } from "../core/logger.js";
@@ -484,8 +483,6 @@ export function createServer(controller: EngineController, options: ServerOption
       initialCash?: number;
       maxDrawdownPct?: number;
       minTradeValue?: number;
-      /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 每次掷新路径） */
-      scenarioSeed?: number;
     };
     if (!body.connectionId) return fail(res, new Error("缺少 connectionId"), 400);
     try {
@@ -512,9 +509,6 @@ export function createServer(controller: EngineController, options: ServerOption
           ...(body.initialCash !== undefined ? { initialCash: body.initialCash } : {}),
           ...(body.maxDrawdownPct !== undefined ? { maxDrawdownPct: body.maxDrawdownPct } : {}),
           ...(body.minTradeValue !== undefined ? { minTradeValue: body.minTradeValue } : {}),
-          ...(parseScenarioSeed(body.scenarioSeed) !== undefined
-            ? { scenarioSeed: parseScenarioSeed(body.scenarioSeed) }
-            : {}),
         },
       );
       // 把行情连接名一并给出：让人知道这份结果的数据来自哪儿
@@ -534,61 +528,6 @@ export function createServer(controller: EngineController, options: ServerOption
     });
   });
 
-  /**
-   * 多情景胜率：同一策略掷 N 条随机路径，统计正收益率场景占比。
-   *
-   * 只在模拟交易所上有意义（真实行情给不出「不同场景」），其余连接直接拒绝。
-   */
-  app.post("/api/validation/win-rate", async (req, res) => {
-    const body = (req.body ?? {}) as {
-      connectionId?: string;
-      strategyId?: string;
-      symbols?: string[];
-      interval?: string;
-      barCount?: number;
-      scenarios?: number;
-      seed?: number;
-    };
-    if (!body.connectionId) return fail(res, new Error("缺少 connectionId"), 400);
-    try {
-      const profile = body.strategyId
-        ? bots.strategyList().find((p) => p.id === body.strategyId)
-        : bots.strategyList().find((p) => p.id === controller.defaultStrategyId());
-      if (!profile) return fail(res, new Error("策略不存在"), 400);
-      const symbols =
-        Array.isArray(body.symbols) && body.symbols.length > 0
-          ? body.symbols
-          : controller.resolveRunTarget(body.connectionId).symbols;
-      // 独立实例：每条路径都要 newScenario，不能掷在实时机器人正用的实例上
-      const adapter = controller.independentAdapter(body.connectionId);
-      const report = await runWinRate(controller.getConfig(), adapter, profile, symbols, {
-        interval: body.interval ?? "1m",
-        barCount: Math.max(60, Math.min(1000, Math.floor(body.barCount ?? 200))),
-        scenarios: Math.max(2, Math.min(200, Math.floor(body.scenarios ?? 24))),
-        ...(parseScenarioSeed(body.seed) !== undefined
-          ? { seed: parseScenarioSeed(body.seed) }
-          : {}),
-      });
-      ok(res, report);
-    } catch (err) {
-      fail(res, err);
-    }
-  });
-
-  /**
- * 解析"复现用情景种子"。
- *
- * 随机数种子没有"大概对"，错一个字符就是另一条路，所以这里宁可不认：
- * 非法输入直接当没填（= 掷新路径），而不是悄悄用一个错的种子去跑，
- * 让用户以为在复现某次结果、其实跑的是完全不相干的一条路径。
- */
-function parseScenarioSeed(raw: unknown): number | undefined {
-  if (raw === undefined || raw === null || raw === "") return undefined;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return undefined;
-  return n >>> 0;
-}
-
 /** 模拟对照：勾选参赛者 -> 并行模拟盘 -> 战绩排名 */
   app.post("/api/bench/compare", (req, res) => {
     const body = (req.body ?? {}) as {
@@ -599,8 +538,6 @@ function parseScenarioSeed(raw: unknown): number | undefined {
       symbols?: string[];
       bars?: number;
       interval?: string;
-      /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 掷一条新路径） */
-      scenarioSeed?: number;
     };
     void controller
       .runSimulationComparison({
@@ -609,9 +546,6 @@ function parseScenarioSeed(raw: unknown): number | undefined {
         symbols: body.symbols,
         bars: typeof body.bars === "number" ? body.bars : undefined,
         interval: body.interval,
-        ...(parseScenarioSeed(body.scenarioSeed) !== undefined
-          ? { scenarioSeed: parseScenarioSeed(body.scenarioSeed) }
-          : {}),
       })
       .then((result) => ok(res, { result }))
       .catch((err) => fail(res, err, 409));
@@ -766,12 +700,10 @@ function parseScenarioSeed(raw: unknown): number | undefined {
     try {
       const connection = connections.get(connectionId);
       if (!connection) throw new Error(`连接不存在: ${connectionId}`);
-      const adapter =
-        connection.adapterId === "simulated"
-          ? connections.adapter(connectionId)
-          : controller.independentAdapter(connectionId);
+      // 独立实例：K 线面板的一次性拉取不该挤占实时机器人正在用的适配器状态
+      const adapter = controller.independentAdapter(connectionId);
       // Binance/Gate 本来就返回最新一根；OKX 只回已收盘 K 线，latest 补拉一根
-      // 未收盘的；模拟交易所按当前钟点生成 —— 三种语义都由适配器自己决定，这里只透传。
+      // 未收盘的 —— 各家语义由适配器自己决定，这里只透传。
       void adapter
         .fetchKlines(symbol, interval, limit)
         .then((bars) =>

@@ -3,10 +3,32 @@
 import { buildConfig } from "../src/configSchema.js";
 import type { AppConfig } from "../src/configSchema.js";
 import type { Bar } from "../src/core/types.js";
-import { SimulatedAdapter } from "../src/exchanges/simulated.js";
+import { SimulatedAdapter } from "./lib/simMarket.js";
 import type { ExchangeAdapter } from "../src/exchanges/types.js";
+import { registerTestAdapter } from "../src/exchanges/registry.js";
 
 export type { AppConfig, Bar };
+
+// 测试运行时标记 + testbed 适配器注册（一次性）。
+//
+// 产品注册表里没有模拟交易所了（一切以实盘数据为准）；测试需要离线确定
+// 行情，于是通过这个仅测试可用的注入口把行情生成器挂成 "testbed" ID：
+// ConnectionManager.create({adapterId:"testbed"}) 与真实适配器走完全相同
+// 的链路，生产环境却见不到它。
+process.env.AAAAI_TESTBED ??= "1";
+// meta.id 必须改成 "testbed"：create/get 的校验按 ID 匹配，生成器原 meta
+// 的 id（simulated）属于已下线的产品 ID，不能再当注册键用。
+{
+  const meta = { ...new SimulatedAdapter().meta, id: "testbed" as const };
+  registerTestAdapter(
+    () => {
+      const adapter = new SimulatedAdapter();
+      adapter.init({ apiKey: "", apiSecret: "", testnet: false });
+      return adapter;
+    },
+    meta,
+  );
+}
 
 export function makeBars(closes: number[], symbol = "TEST"): Bar[] {
   const now = Date.now();
