@@ -119,3 +119,80 @@ test("资金费：现货模式与未注入 provider 时均为 no-op", () => {
   const futuresNoProvider = new PortfolioManager(new EventBus(), 1000, "futures");
   assert.equal(futuresNoProvider.settleFunding(Date.now()), 0);
 });
+
+/* ---------- K 线成交量参与率上限（回测真实性约束） ---------- */
+
+import { PriceBook } from "../src/data/streaming.js";
+import { PaperBroker } from "../src/execution/paperBroker.js";
+import type { OrderIntent, Bar } from "../src/core/types.js";
+
+async function pump(bus: EventBus, bars: Bar[], book?: PriceBook): Promise<void> {
+  for (const b of bars) {
+    book?.update(b);
+    await bus.publishAsync(Topic.BAR, b);
+  }
+  await new Promise((r) => setTimeout(r, 5));
+}
+
+test("成交量约束：单根 K 线内成交量不超过 bar volume × participation", async () => {
+  const bus = new EventBus();
+  const book = new PriceBook();
+  const fills: Fill[] = [];
+  const rejected: unknown[] = [];
+  const broker = new PaperBroker(bus, book, { feeRate: 0, slippageBps: 0, volumeParticipation: 0.25 });
+  bus.subscribe(Topic.FILL, (e) => fills.push(e.payload as Fill));
+  bus.subscribe(Topic.ORDER_REJECTED, (e) => rejected.push(e.payload));
+  bus.subscribe(Topic.ORDER_INTENT, async (e) => {
+    await broker.handle(e.payload as OrderIntent);
+  });
+
+  const t0 = Date.UTC(2026, 0, 1);
+  // 量 10 的 K 线：参与率 0.25 → 最多成交 2.5
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0), open: 100, high: 100, low: 100, close: 100, volume: 10 }], book);
+  await bus.publishAsync(Topic.ORDER_INTENT, {
+    symbol: "X", side: "BUY", quantity: 9, price: 100, timestamp: new Date(t0), reason: "test",
+  } satisfies OrderIntent);
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0 + 60_000), open: 100, high: 101, low: 99, close: 100, volume: 10 }], book);
+
+  assert.equal(fills.length, 1, "应有一笔部分成交");
+  assert.ok(Math.abs((fills[0]!.order.quantity as number) - 2.5) < 1e-9, `成交量应为 2.5，实际 ${fills[0]!.order.quantity}`);
+  assert.equal(rejected.length, 1, "剩余部分应广播部分成交语义（拒单事件）");
+});
+
+test("成交量约束：同根同 symbol 第二笔只吃剩余容量（新决策取代旧单语义下用连续两根验证）", async () => {
+  const bus = new EventBus();
+  const book = new PriceBook();
+  const fills: Fill[] = [];
+  const broker = new PaperBroker(bus, book, { feeRate: 0, slippageBps: 0, volumeParticipation: 0.5 });
+  bus.subscribe(Topic.FILL, (e) => fills.push(e.payload as Fill));
+  bus.subscribe(Topic.ORDER_INTENT, async (e) => {
+    await broker.handle(e.payload as OrderIntent);
+  });
+
+  const t0 = Date.UTC(2026, 0, 1);
+  // 第 1 根：量 10，容量 5。第一笔要 3 → 全成
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0), open: 100, high: 100, low: 100, close: 100, volume: 10 }], book);
+  await bus.publishAsync(Topic.ORDER_INTENT, { symbol: "X", side: "BUY", quantity: 3, price: 100, timestamp: new Date(t0), reason: "a" } satisfies OrderIntent);
+  // 第 2 根：新决策（同 symbol 旧单已被取代语义不适用——上一笔已在第 2 根开盘成交）
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0 + 60_000), open: 100, high: 101, low: 99, close: 100, volume: 10 }], book);
+  assert.equal(fills.length, 1);
+  assert.ok(Math.abs((fills[0]!.order.quantity as number) - 3) < 1e-9, "第一笔全额成交");
+});
+
+test("成交量约束：participation=0 或量缺失时不限制（旧行为）", async () => {
+  const bus = new EventBus();
+  const book = new PriceBook();
+  const fills: Fill[] = [];
+  const broker = new PaperBroker(bus, book, { feeRate: 0, slippageBps: 0, volumeParticipation: 0 });
+  bus.subscribe(Topic.FILL, (e) => fills.push(e.payload as Fill));
+  bus.subscribe(Topic.ORDER_INTENT, async (e) => {
+    await broker.handle(e.payload as OrderIntent);
+  });
+  const t0 = Date.UTC(2026, 0, 1);
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0), open: 100, high: 100, low: 100, close: 100, volume: 1 }], book);
+  await bus.publishAsync(Topic.ORDER_INTENT, { symbol: "X", side: "BUY", quantity: 100, price: 100, timestamp: new Date(t0), reason: "t" } satisfies OrderIntent);
+  await pump(bus, [{ symbol: "X", timestamp: new Date(t0 + 60_000), open: 100, high: 101, low: 99, close: 100, volume: 1 }], book);
+
+  assert.equal(fills.length, 1);
+  assert.equal(fills[0]!.order.quantity, 100, "不限制时应全额成交");
+});

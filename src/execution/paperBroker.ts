@@ -68,6 +68,12 @@ export interface PaperBrokerOptions {
    * 凭空造出一个实盘不存在的杠杆账户 —— 大跌时权益甚至能穿成负数。
    */
   availableCash?: () => number;
+  /**
+   * 单根 K 线成交量参与率上限（0 = 不限制，旧行为）。
+   * 一根量 10 的 K 线里成交 1000 是回测虚增收益的经典漏洞 ——
+   * 开源引擎（backtrader VolumeFiller / QuantConnect）的标准防线。
+   */
+  volumeParticipation?: number;
 }
 
 export interface SlicedOrderReport {
@@ -313,7 +319,7 @@ export class PaperBroker implements Broker {
         this.queued.push(intent);
         continue;
       }
-      this.fillWholeOrder(intent, open, bar.timestamp);
+      this.fillWholeOrder(intent, open, bar.timestamp, bar.volume);
     }
   }
 
@@ -384,13 +390,15 @@ export class PaperBroker implements Broker {
    * 决策发生在第 t 根收盘，成交发生在第 t+1 根开盘，两者是不同的时刻，
    * 流水里写错时间会让人按错误的价格去核对甚至照着追单。
    */
-  private fillWholeOrder(intent: OrderIntent, mid: number, executedAt?: Date): Fill | null {
+  private fillWholeOrder(intent: OrderIntent, mid: number, executedAt?: Date, barVolume?: number): Fill | null {
     const stats = this.micro?.(intent.symbol);
     const bps = this.cost.slippageBps(intent.quantity * mid, stats);
     const execPrice = this.cost.execPrice(mid, intent.side, bps);
     const affordable = this.affordableQuantity(intent, execPrice);
     if (affordable === null) return null;
-    const order = affordable < intent.quantity ? { ...intent, quantity: affordable } : intent;
+    const capped = this.volumeCap(intent, affordable, barVolume);
+    if (capped <= 0) return null; // 容量为 0：volumeCap 已广播拒单
+    const order = capped < intent.quantity ? { ...intent, quantity: capped } : intent;
     const notional = order.quantity * execPrice;
     const fee = notional * this.opts.feeRate;
     const fill: Fill = {
@@ -408,6 +416,77 @@ export class PaperBroker implements Broker {
     );
     this.bus.publish(Topic.FILL, fill);
     return fill;
+  }
+
+  /**
+   * 单根 K 线的成交量参与率上限（回测真实性约束）。
+   *
+   * 一根量 10 的 K 线里成交 1000，等于假设自己一个人贡献了这根 K 线
+   * 100 倍的流动性 —— 回测虚增收益的经典漏洞。开源引擎的标准防线：
+   * 单根内成交量 ≤ 该 K 线成交量 × participation（backtrader 默认
+   * 0.2，QuantConnect 常用 0.25；这里默认 0.25，可在 execution 段配置）。
+   * 0 = 不限制（旧行为）。同根内多笔订单**共享**同一份容量，先到先得 ——
+   * 一根 K 线的总成交量不应该因为下了两笔单就翻倍。
+   */
+  private volumeCap(intent: OrderIntent, desired: number, barVolume: number | undefined): number {
+    const p = this.opts.volumeParticipation;
+    if (!p || p <= 0 || !(barVolume !== undefined && barVolume > 0)) return desired;
+    const key = this.volumeCapKey(intent.symbol, this.barIndex);
+    const capacity = barVolume * p;
+    const used = this.volumeCapUsed.get(key) ?? 0;
+    const allowed = Math.max(0, capacity - used);
+    if (allowed >= desired) {
+      this.volumeCapUsed.set(key, used + desired);
+      return desired;
+    }
+    this.volumeCapUsed.set(key, capacity);
+    if (allowed > 0) {
+      log.info(
+        "K 线容量已满，部分成交: %s 需要 %s，本根剩余 %s（参与率 %s）",
+        intent.symbol,
+        desired.toFixed(6),
+        allowed.toFixed(6),
+        p,
+      );
+      // 剩余量按 IOC 语义广播撤销，让上层流水与持仓对得上
+      this.bus.publish(Topic.ORDER_REJECTED, {
+        ...intent,
+        quantity: desired - allowed,
+        reason: `${intent.reason}｜K 线容量上限，剩余撤销（参与率 ${p}）`,
+      });
+      return allowed;
+    }
+    log.info(
+      "K 线容量已满，本单作废: %s 需要 %s，本根容量 %s（参与率 %s）",
+      intent.symbol,
+      desired.toFixed(6),
+      capacity.toFixed(6),
+      p,
+    );
+    this.bus.publish(Topic.ORDER_REJECTED, {
+      ...intent,
+      reason: `${intent.reason}｜K 线成交量参与率上限（${p}）`,
+    });
+    return 0;
+  }
+
+  private volumeCapKey(symbol: string, barIndex: number): string {
+    return `${symbol}#${barIndex}`;
+  }
+
+  /** barIndex -> 已用容量（同根多单共享容量；超过一定条目自动清理）。 */
+  private volumeCapUsed = new Map<string, number>();
+  /** 容量账本只留最近两根 K 线的条目：每根推进时丢弃过期键，防长跑泄漏。 */
+  private volumeCapCurrentBar = -1;
+
+  private sweepVolumeCap(): void {
+    if (this.volumeCapCurrentBar === this.barIndex) return;
+    this.volumeCapCurrentBar = this.barIndex;
+    if (this.volumeCapUsed.size === 0 || this.volumeCapCurrentBar <= 0) return;
+    const prev = `#${this.volumeCapCurrentBar - 1}`;
+    for (const k of this.volumeCapUsed.keys()) {
+      if (!k.endsWith(prev)) this.volumeCapUsed.delete(k);
+    }
   }
 
   /**
@@ -452,6 +531,7 @@ export class PaperBroker implements Broker {
     this.recordVolume(bar);
     this.recordWindow(bar);
     this.barIndex += 1;
+    this.sweepVolumeCap();
     this.executeQueued(bar);
     if (!this.slicingOn || this.pending.size === 0) return;
     for (const order of [...this.pending.values()]) {
@@ -507,7 +587,8 @@ export class PaperBroker implements Broker {
       this.pushCompleted(report(order, false));
       return null;
     }
-    const filled = Math.min(slice.quantity, affordable);
+    // 量能上限与现金上限同时生效：能成交多少取两者的小
+    const filled = Math.min(slice.quantity, affordable, this.volumeCap(sliceOrder, slice.quantity, bar?.volume));
     const notional = filled * execPrice;
     const fee = notional * this.opts.feeRate;
     recordSliceFill(order, { quantity: filled, price: execPrice, fee });

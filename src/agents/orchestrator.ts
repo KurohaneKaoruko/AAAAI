@@ -127,6 +127,7 @@ export function buildPipeline(
           // 合约：开仓不占用全额现金，靠 RiskGuard 的总名义敞口上限兜底；
           // 绝不能把现货的“现金不足”逻辑套到合约上，否则空单和保证金交易全被拒。
           ...(tradingMode === "spot" ? { availableCash: () => portfolio.cash } : {}),
+          volumeParticipation: config.execution.volumeParticipation,
           slicing: {
             algo: config.execution.slicingAlgo,
             slices: config.execution.slicingSlices,

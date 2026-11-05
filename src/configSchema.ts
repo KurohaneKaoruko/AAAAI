@@ -264,6 +264,12 @@ export interface ExecutionSection {
   slicingSpacingBars: number;
   /** VWAP 权重所用的历史成交量窗口（根） */
   slicingVolumeProfileBars: number;
+  /**
+   * 单根 K 线内最大可成交量占该 K 线成交量的比例（0 = 不限制）。
+   * 回测真实性约束：一根量 10 的 K 线不可能成交 1000 —— 按开源引擎
+   * （backtrader VolumeFiller / QuantConnect fill model）的惯例取 0.25。
+   */
+  volumeParticipation: number;
 }
 
 export interface AuthSection {
@@ -407,6 +413,8 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
         Math.max(Math.round(num(raw, ["execution", "slicing_volume_profile_bars"], 20)), 1),
         200,
       ),
+      /** 单根 K 线内最大可成交量占该 K 线成交量的比例（0 = 不限制）。 */
+      volumeParticipation: Math.min(Math.max(num(raw, ["execution", "volume_participation"], 0.25), 0), 1),
     },
   };
 }
@@ -496,6 +504,7 @@ export function serializeConfig(config: AppConfig): Record<string, unknown> {
       slicing_slices: config.execution.slicingSlices,
       slicing_spacing_bars: config.execution.slicingSpacingBars,
       slicing_volume_profile_bars: config.execution.slicingVolumeProfileBars,
+      volume_participation: config.execution.volumeParticipation,
       connection_id: config.execution.connectionId,
     },
   };
