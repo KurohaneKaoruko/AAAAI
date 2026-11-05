@@ -21,16 +21,20 @@ const STATUS: Record<string, { text: string; cls: string }> = {
 export function BotsPage({
   store,
   onOpenDetail,
+  onNavigate,
   initialEditId,
 }: {
   store: AppStore;
   onOpenDetail: (id: string) => void;
+  /** 空态里的下一步入口：没连接/没策略时直接跳过去 */
+  onNavigate?: (page: "exchanges" | "strategy") => void;
   /** 从详情页点「编辑」进来时，直接打开这台机器人的表单 */
   initialEditId?: string | null;
 }) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +59,8 @@ export function BotsPage({
       setStrategies(st.strategies);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -64,50 +70,79 @@ export function BotsPage({
     return () => clearInterval(t);
   }, [reload]);
 
+  const nameOf = (id: string) => bots.find((b) => b.id === id)?.name ?? id;
+
   const start = async (id: string) => {
     setBusyId(id);
     setError(null);
     try {
       const r = await api.startBot(id);
       const s = r.state as { status: string; error?: string | null };
-      if (s.status === "error") setError(s.error ?? "启动失败");
+      if (s.status === "error") {
+        const msg = s.error ?? "启动失败";
+        setError(msg);
+        store.toast("error", `${nameOf(id)} 启动失败：${msg}`);
+      } else {
+        store.toast("success", `${nameOf(id)} 已启动`);
+      }
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      setError(msg);
+      store.toast("error", `${nameOf(id)} 启动失败：${msg}`);
     } finally {
       setBusyId(null);
     }
   };
 
   const stop = async (id: string) => {
-    await api.stopBot(id).catch(() => undefined);
-    await reload();
+    // 以前这里把错误吞掉：服务端拒绝停止时用户点完什么反馈都没有，只能猜。
+    try {
+      await api.stopBot(id);
+      store.toast("info", `${nameOf(id)} 已停止`);
+    } catch (err) {
+      store.toast("error", `${nameOf(id)} 停止失败：${(err as Error).message}`);
+    } finally {
+      await reload();
+    }
   };
 
   const startAll = async () => {
     setBusyId("all");
     try {
       await api.startAllBots();
+      store.toast("success", "已启动全部启用的机器人");
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      setError(msg);
+      store.toast("error", `批量启动失败：${msg}`);
     } finally {
       setBusyId(null);
     }
   };
 
   const stopAll = async () => {
-    await api.stopAllBots();
-    await reload();
+    try {
+      await api.stopAllBots();
+      store.toast("info", "已停止全部机器人");
+    } catch (err) {
+      store.toast("error", `批量停止失败：${(err as Error).message}`);
+    } finally {
+      await reload();
+    }
   };
 
   const doDelete = async () => {
     if (!confirmDel) return;
     setDeleting(true);
     try {
-      await api.deleteBot(confirmDel.id).catch(() => undefined);
+      await api.deleteBot(confirmDel.id);
+      store.toast("success", `已删除机器人「${confirmDel.name}」`);
       setConfirmDel(null);
       await reload();
+    } catch (err) {
+      store.toast("error", `删除失败：${(err as Error).message}`);
     } finally {
       setDeleting(false);
     }
@@ -156,17 +191,46 @@ export function BotsPage({
 
         {bots.some((b) => b.state.allocation) && <AllocationOverview bots={bots} />}
 
-        {bots.length === 0 && !creating && (
-          <div className="btn-row" style={{ marginTop: -4, marginBottom: 12 }}>
-            <Button small variant="primary" onClick={() => setCreating(true)}>
-              + 新建第一个机器人
-            </Button>
-          </div>
-        )}
-
-        {bots.length === 0 && !creating ? (
+        {!loaded && bots.length === 0 ? (
+          <div className="loading-inline">正在读取机器人…</div>
+        ) : bots.length === 0 && !creating ? (
           <Empty>
-            还没有机器人。每个机器人有自己的标的、模型、策略和资金，互不干扰、可并行运行。
+            {store.connections.length === 0 ? (
+              <>
+                还没有行情连接 —— 机器人得先知道去哪儿取行情。
+                <div className="btn-row" style={{ marginTop: 12, justifyContent: "center" }}>
+                  <Button
+                    small
+                    variant="primary"
+                    onClick={() => (onNavigate ? onNavigate("exchanges") : setCreating(true))}
+                  >
+                    {onNavigate ? "去交易所连接 →" : "+ 新建第一个机器人"}
+                  </Button>
+                </div>
+              </>
+            ) : strategies.length === 0 ? (
+              <>
+                还没有策略 —— 机器人需要一条策略来决定买什么、买多少。
+                <div className="btn-row" style={{ marginTop: 12, justifyContent: "center" }}>
+                  <Button
+                    small
+                    variant="primary"
+                    onClick={() => (onNavigate ? onNavigate("strategy") : setCreating(true))}
+                  >
+                    {onNavigate ? "去创建策略 →" : "+ 新建第一个机器人"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                还没有机器人。每个机器人有自己的标的、模型、策略和资金，互不干扰、可并行运行。
+                <div className="btn-row" style={{ marginTop: 12, justifyContent: "center" }}>
+                  <Button small variant="primary" onClick={() => setCreating(true)}>
+                    + 新建第一个机器人
+                  </Button>
+                </div>
+              </>
+            )}
           </Empty>
         ) : (
           <div className="bot-list">
@@ -184,8 +248,13 @@ export function BotsPage({
                   setConfirmDel(b);
                 }}
                 onToggle={async (v) => {
-                  await api.updateBot(b.id, { enabled: v });
-                  void reload();
+                  try {
+                    await api.updateBot(b.id, { enabled: v });
+                    store.toast("success", `${b.name} ${v ? "已加入" : "已移出"}「全部启动」`);
+                    void reload();
+                  } catch (err) {
+                    store.toast("error", `保存失败：${(err as Error).message}`);
+                  }
                 }}
                 onOpenDetail={onOpenDetail}
               />
@@ -542,8 +611,10 @@ function BotForm({
     try {
       if (editing) {
         await api.updateBot(editing.id, body);
+        store.toast("success", `已保存机器人「${name.trim() || editing.name}」`);
       } else {
         await api.createBot(body);
+        store.toast("success", `已创建机器人「${name.trim()}」`);
       }
       onDone();
     } catch (e) {
@@ -555,6 +626,11 @@ function BotForm({
 
   return (
     <div className="connection-form">
+      {connections.length === 0 && (
+        <Notice tone="warn">
+          还没有行情连接：先到「交易所连接」页添加一条并挑好标的，再回来建机器人。
+        </Notice>
+      )}
       <div className="grid-2">
         <TextField label="名称" value={name} onChange={setName} placeholder="如：BTC 趋势跟踪" />
         {strategies.length > 0 ? (

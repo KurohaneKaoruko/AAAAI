@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { Button, Empty, Panel } from "../components/ui";
+import { Button, Empty, Notice, Panel } from "../components/ui";
 import { Sparkline } from "../components/Sparkline";
 import { describe } from "../components/StrategyProfiles";
 import { EquityChart } from "../components/EquityChart";
@@ -42,6 +42,7 @@ export function BotDetailPage({
   const [strategies, setStrategies] = useState<StrategyProfile[]>([]);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -63,9 +64,13 @@ export function BotDetailPage({
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
+    setActionError(null);
     try {
       await fn();
       await reload();
+    } catch (err) {
+      // 以前没有 catch：启动/停止失败会变成未处理的 Promise 拒绝，界面毫无反应。
+      setActionError((err as Error).message);
     } finally {
       setBusy(false);
     }
@@ -103,6 +108,11 @@ export function BotDetailPage({
 
   return (
     <div className="page page-bots">
+      {actionError && (
+        <Notice tone="error" onClose={() => setActionError(null)}>
+          操作失败：{actionError}
+        </Notice>
+      )}
       <Panel
         title={bot.name}
         subtitle={

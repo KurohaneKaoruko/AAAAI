@@ -195,6 +195,7 @@ export function App() {
           <BotsPage
             store={store}
             onOpenDetail={(id) => navigate("bots", { botId: id })}
+            onNavigate={navigate}
             initialEditId={botEditId}
           />
         );
