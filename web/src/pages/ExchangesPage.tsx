@@ -1,6 +1,6 @@
 /** 交易所连接：目录浏览 + 连接 CRUD + 连通性测试。 */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { AdapterMeta, Connection } from "../types";
@@ -13,18 +13,34 @@ import { ASSET_LABEL, dateTime } from "../lib/format";
 export function ExchangesPage({ store }: { store: AppStore }) {
   const { adapters, connections, state } = store;
   const [creating, setCreating] = useState(false);
+  /** 从目录卡片点「添加连接」时预选的交易所；null = 表单自己取第一条 */
+  const [createAdapterId, setCreateAdapterId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [testing, setTesting] = useState<Record<string, "loading" | "ok" | "fail">>({});
   const [results, setResults] = useState<Record<string, string>>({});
   /** 待确认删除的连接 */
   const [confirmDel, setConfirmDel] = useState<Connection | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  // 表单在目录上方：从下方卡片点「添加连接」后如果不滚过去，用户会以为没反应。
+  useEffect(() => {
+    if (creating) formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [creating, createAdapterId]);
 
   const doDelete = async () => {
     if (!confirmDel) return;
-    await api.deleteConnection(confirmDel.id);
-    setConfirmDel(null);
-    await store.reloadConnections();
-    store.toast("info", "连接已删除");
+    setDeleting(true);
+    try {
+      await api.deleteConnection(confirmDel.id);
+      setConfirmDel(null);
+      await store.reloadConnections();
+      store.toast("success", `已删除连接「${confirmDel.label}」`);
+    } catch (err) {
+      store.toast("error", `删除失败：${(err as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const defaultConnectionId = state?.config?.execution?.connectionId ?? "";
@@ -42,8 +58,14 @@ export function ExchangesPage({ store }: { store: AppStore }) {
   };
 
   const setDefault = async (c: Connection) => {
-    await store.patchConfig({ execution: { ...state!.config.execution, connectionId: c.id } });
-    store.toast("success", `已将 ${c.label} 设为默认连接`);
+    if (!state?.config) {
+      store.toast("error", "配置还没加载好，请稍后重试");
+      return;
+    }
+    const ok = await store.patchConfig({
+      execution: { ...state.config.execution, connectionId: c.id },
+    });
+    if (ok) store.toast("success", `已将 ${c.label} 设为默认连接`);
   };
 
   return (
@@ -52,12 +74,33 @@ export function ExchangesPage({ store }: { store: AppStore }) {
         title="交易所目录"
         subtitle="支持加密货币与股票，点击卡片可快速添加连接"
         actions={
-          <Button variant="primary" onClick={() => setCreating((v) => !v)}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              const next = !creating;
+              setCreating(next);
+              setCreateAdapterId(null);
+              // 新建和编辑是两张表单，别让它们同时挂在页面上
+              if (next) setEditing(null);
+            }}
+          >
             {creating ? "取消" : "+ 新建连接"}
           </Button>
         }
       >
-        {creating && <ConnectionForm store={store} onDone={() => setCreating(false)} />}
+        {creating && (
+          <div ref={formRef}>
+            <ConnectionForm
+              key={createAdapterId ?? "auto"}
+              store={store}
+              initialAdapterId={createAdapterId ?? undefined}
+              onDone={() => {
+                setCreating(false);
+                setCreateAdapterId(null);
+              }}
+            />
+          </div>
+        )}
 
         <div className="adapter-grid">
           {adapters.map((a) => (
@@ -80,7 +123,14 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                 {a.supportsTestnet && <span className="cap-on">支持测试网</span>}
                 <span className="cap-off">{a.klineIntervals.join(" / ")}</span>
               </div>
-              <Button small onClick={() => { setCreating(true); setEditing(null); (window as unknown as { __pickAdapter?: string }).__pickAdapter = a.id; }}>
+              <Button
+                small
+                onClick={() => {
+                  setEditing(null);
+                  setCreateAdapterId(a.id);
+                  setCreating(true);
+                }}
+              >
                 添加连接
               </Button>
             </div>
@@ -90,7 +140,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
 
       <Panel title="我的连接" subtitle={`${connections.length} 个`}>
         {connections.length === 0 ? (
-          <Empty>还没有连接。点击上方「新建连接」或从目录里选一个交易所。</Empty>
+          <Empty>还没有连接。点上方「新建连接」，或直接点交易所目录卡片里的「添加连接」。</Empty>
         ) : (
           <div className="connection-list">
             {connections.map((c) => (
@@ -121,10 +171,15 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                   <Button small onClick={() => void test(c)} busy={testing[c.id] === "loading"}>
                     测试
                   </Button>
-                  <Button small onClick={() => void setDefault(c)}>
-                    设为默认
+                  <Button
+                    small
+                    onClick={() => void setDefault(c)}
+                    disabled={defaultConnectionId === c.id}
+                    title={defaultConnectionId === c.id ? "已经是默认连接" : "新机器人默认使用这个连接"}
+                  >
+                    {defaultConnectionId === c.id ? "默认连接" : "设为默认"}
                   </Button>
-                  <Button small onClick={() => setEditing(c)}>
+                  <Button small onClick={() => { setEditing(c); setCreating(false); }}>
                     编辑
                   </Button>
                   <Button
@@ -144,7 +199,14 @@ export function ExchangesPage({ store }: { store: AppStore }) {
             ))}
           </div>
         )}
-        {editing && <ConnectionForm store={store} editing={editing} onDone={() => setEditing(null)} />}
+        {editing && (
+          <ConnectionForm
+            key={editing.id}
+            store={store}
+            editing={editing}
+            onDone={() => setEditing(null)}
+          />
+        )}
       </Panel>
 
       {/* 删除连接不可撤销：机器人可能还挂在上面。自绘弹窗把后果说清再让用户按。 */}
@@ -153,6 +215,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
         title={`删除连接「${confirmDel?.label ?? ""}」？`}
         message="删除后引用这条连接的机器人将无法拉取行情，需要重新配置。此操作不可恢复。"
         confirmText="删除连接"
+        busy={deleting}
         onConfirm={() => void doDelete()}
         onCancel={() => setConfirmDel(null)}
       />
@@ -163,13 +226,16 @@ export function ExchangesPage({ store }: { store: AppStore }) {
 function ConnectionForm({
   store,
   editing,
+  initialAdapterId,
   onDone,
 }: {
   store: AppStore;
   editing?: Connection | null;
+  /** 从目录卡片点进来的交易所；不传则用目录第一条 */
+  initialAdapterId?: string;
   onDone: () => void;
 }) {
-  const [adapterId, setAdapterId] = useState(editing?.adapterId ?? "");
+  const [adapterId, setAdapterId] = useState(editing?.adapterId ?? initialAdapterId ?? "");
   const [label, setLabel] = useState(editing?.label ?? "");
   const [testnet, setTestnet] = useState(editing?.testnet ?? true);
   const [apiKey, setApiKey] = useState("");
@@ -178,10 +244,7 @@ function ConnectionForm({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!adapterId && store.adapters.length > 0) {
-      const pre = (window as unknown as { __pickAdapter?: string }).__pickAdapter;
-      setAdapterId(pre ?? store.adapters[0]!.id);
-    }
+    if (!adapterId && store.adapters.length > 0) setAdapterId(store.adapters[0]!.id);
   }, [store.adapters, adapterId]);
 
   const adapter: AdapterMeta | undefined = store.adapters.find((a) => a.id === adapterId);
@@ -208,7 +271,6 @@ function ConnectionForm({
         store.toast("success", "连接已创建");
       }
       await store.reloadConnections();
-      (window as unknown as { __pickAdapter?: string }).__pickAdapter = undefined;
       onDone();
     } catch (err) {
       setError((err as Error).message);

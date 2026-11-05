@@ -32,7 +32,13 @@ const STATUS: Record<string, { text: string; cls: string }> = {
   error: { text: "异常", cls: "badge-error" },
 };
 
-export function DashboardPage({ store, onNavigate }: { store: AppStore; onNavigate?: (page: "bots" | "strategy") => void }) {
+export function DashboardPage({
+  store,
+  onNavigate,
+}: {
+  store: AppStore;
+  onNavigate?: (page: "bots" | "strategy" | "exchanges") => void;
+}) {
   const state = store.state;
   const [selectedBot, setSelectedBot] = useState<string>("");
   const [tab, setTab] = useState<"positions" | "trades" | "events">("positions");
@@ -66,17 +72,28 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
         }
         actions={
           onNavigate ? (
-            <Button small onClick={() => onNavigate("bots")}>
-              管理机器人 →
+            <Button
+              small
+              variant={bots.length === 0 && store.connections.length === 0 ? "primary" : "default"}
+              onClick={() => onNavigate(store.connections.length === 0 ? "exchanges" : "bots")}
+            >
+              {store.connections.length === 0 ? "去交易所连接 →" : "管理机器人 →"}
             </Button>
           ) : undefined
         }
       >
         {bots.length === 0 ? (
-          <Empty>
-            还没有机器人。到「交易机器人」新建一个：它有自己的标的、策略、模型和资金，可并行运行；
-            默认模拟成交，确认行为没问题再改成真实下单。
-          </Empty>
+          store.connections.length === 0 ? (
+            <Empty>
+              还没有行情连接。先到「交易所连接」加一条连接并挑好标的，再回「交易机器人」新建第一个机器人。
+              机器人会带着自己的策略、模型和资金独立运行，默认模拟成交。
+            </Empty>
+          ) : (
+            <Empty>
+              还没有机器人。到「交易机器人」新建一个：它有自己的标的、策略、模型和资金，可并行运行；
+              默认模拟成交，确认行为没问题再改成真实下单。
+            </Empty>
+          )
         ) : (
           <>
             <div className="cards">

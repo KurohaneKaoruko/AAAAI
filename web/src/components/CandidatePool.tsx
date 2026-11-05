@@ -89,7 +89,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
           <div className="dim small">
             {adapter.name} 没有标的，只有自带的 {slots.length} 条走向
             {slots.length > 0 ? `（${slots.join(" / ")}）` : ""}。
-            看的不是一个品种，是策略在不同行情下的盈利；直接去机器 / 回测 / 对照页开跑即可。
+            看的不是一个品种，是策略在不同行情下的盈利；直接去「交易机器人」/「回测」/「对照实验」页开跑即可。
           </div>
         </div>
       </details>
@@ -231,11 +231,10 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
             ))}
           </div>
         </>
+      ) : popular.length === 0 ? (
+        <Empty>该交易所没有提供常用标的清单，可用下方搜索或「手动添加代码」加入。</Empty>
       ) : (
-        <Empty>
-          该连接的常用标的已全部在池中
-          {popular.length === 0 ? "（该交易所未提供常用清单）" : ""}，可用下方搜索添加更多
-        </Empty>
+        <Empty>常用标的都已加入候选池，可用下方搜索添加更多。</Empty>
       )}
 
       <div className="search-row" style={{ marginTop: 12 }}>
