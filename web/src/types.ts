@@ -136,7 +136,7 @@ export type RiskSection = AppConfig["risk"];
 export type StrategySection = AppConfig["strategy"];
 
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
-export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev";
+export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev" | "custom";
 
 export interface PoolCounts {
   chat: { total: number; available: number };
@@ -488,6 +488,8 @@ export interface StrategyProfile {
   allocationInterval: number;
   hybridInfluence: number;
   hybridAnalysisTtlMs: number;
+  /** custom 引擎：用户编写的策略代码（沙箱执行的函数体） */
+  strategyCode: string;
   createdAt: string;
 }
 

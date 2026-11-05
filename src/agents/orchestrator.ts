@@ -5,6 +5,7 @@
 import { EventBus, Topic } from "../core/eventBus.js";
 import type { Bar, OrderIntent } from "../core/types.js";
 import { PriceBook, streamBars } from "../data/streaming.js";
+import { sandboxIdle } from "../strategies/customSandbox.js";
 import type { Broker } from "../execution/broker.js";
 import { PaperBroker } from "../execution/paperBroker.js";
 import { ExchangeBroker } from "../execution/exchangeBroker.js";
@@ -26,6 +27,7 @@ import { MomentumStrategy } from "../strategies/momentum.js";
 import { AdaptiveTrendStrategy } from "../strategies/adaptiveTrend.js";
 import { BreakoutStrategy } from "../strategies/breakout.js";
 import { MeanReversionStrategy } from "../strategies/meanReversion.js";
+import { CustomStrategy } from "../strategies/customStrategy.js";
 import { LLMStrategy } from "../strategies/llmStrategy.js";
 import type { Strategy } from "../strategies/strategy.js";
 import type { LLMClient } from "../llm/llmClient.js";
@@ -344,7 +346,12 @@ export function buildPipeline(
  */
 export async function feed(pipeline: Pipeline, bars: Bar[]): Promise<void> {
   if (bars.length === 0) return;
-  await streamBars(pipeline.bus, pipeline.book, bars);
+  // 逐根之间等自定义策略沙箱排空：同步引擎的信号当根落地，异步引擎（worker
+  // 往返）不排空的话信号会积压到回放结束，订单互相取代、一单都成不了。
+  // 沙箱从未用过时（纯同步引擎回测）这个 await 立即返回，零开销。
+  await streamBars(pipeline.bus, pipeline.book, bars, async () => {
+    await sandboxIdle();
+  });
 }
 
 /** 按策略引擎装配纯规则策略；模型失败时的回退也走这里，保证口径一致。 */
@@ -372,6 +379,10 @@ export function buildRuleStrategy(strategy: AppConfig["strategy"], allowShort: b
         strategy.maxTargetWeight,
         allowShort,
       );
+    case "custom":
+      // 自定义策略：用户写的代码在沙箱里执行。编译在保存策略时就已校验过，
+      // 这里再失败（理论上只有改代码后引用未刷新）直接抛，别静默换成别的引擎
+      return new CustomStrategy({ code: strategy.strategyCode, allowShort });
     case "momentum":
     default:
       return new MomentumStrategy(

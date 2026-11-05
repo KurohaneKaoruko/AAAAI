@@ -141,3 +141,28 @@ test("回测：取不到 K 线时明确报错（不留空结果让人误以为�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("回测：自定义策略（异步沙箱）必须能正常成交（回归：信号曾积压到回放结束互相取代）", async () => {
+  const { dir, strategies } = setup();
+  try {
+    // return 0.4 = 永远持仓 40%：如果沙箱异步往返导致信号积压，
+    // 每根的新订单会取代旧订单、永远等不到下一根 K 线成交（totalFills=0 的 bug）。
+    const profile = strategies.create({
+      name: "自定义·恒定仓位",
+      engine: "custom",
+      strategyCode: "return 0.4;",
+    });
+    const result = await runBacktest(testConfig(), testAdapter(), profile, {
+      symbols: ["单边上行"],
+      interval: "1m",
+      barCount: 120,
+      strategyId: profile.id,
+    });
+    assert.ok(result.metrics.totalFills > 0, `自定义策略回测应有成交，实际 ${result.metrics.totalFills} 笔`);
+    // 恒定 0.4 仓位 + 死区（带宽 5 个百分点）：破冰建仓后不应反复交易。
+    // 成交应集中在建仓与（可能的）再平衡，远小于信号数，说明时序正常。
+    assert.ok(result.metrics.totalFills < 30, `成交 ${result.metrics.totalFills} 笔过多：时序可能仍在积压`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

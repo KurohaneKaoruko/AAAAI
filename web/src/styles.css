@@ -1953,3 +1953,24 @@ a:focus-visible,
 @media (max-width: 820px) and (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
 }
+
+/* 自定义策略代码编辑器：等宽、深底（双主题各自取色），聚焦描边 */
+.code-editor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2, var(--panel));
+  color: var(--text);
+  resize: vertical;
+  tab-size: 2;
+}
+.code-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.try-spark polyline { vector-effect: non-scaling-stroke; }

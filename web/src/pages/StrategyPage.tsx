@@ -231,7 +231,9 @@ export function StrategyPage({
                         ? "唐奇安突破：慢线=入场通道，快线=离场通道，ATR 止损"
                         : form.engine === "meanrev"
                           ? "布林均值回归：慢线=均值窗口，快线=趋势过滤；适合震荡市"
-                          : "经典双均线：噪声归一 t 统计量"
+                          : form.engine === "custom"
+                            ? "自定义策略：自己写代码决定仓位，在沙箱里运行"
+                            : "经典双均线：噪声归一 t 统计量"
                 }
                 value={form.engine}
                 options={[
@@ -239,63 +241,70 @@ export function StrategyPage({
                   { value: "adaptive", label: "自适应趋势（稳健备选）" },
                   { value: "breakout", label: "唐奇安突破（趋势）" },
                   { value: "meanrev", label: "布林均值回归（震荡）" },
+                  { value: "custom", label: "自定义代码（写你自己的策略）" },
                 ]}
                 onChange={(v) => setForm({ ...form, engine: v as StrategyEngine })}
               />
 
-              <div className="grid-3" style={{ marginTop: 14 }}>
+              {form.engine === "custom" && <CustomCodePanel form={form} setForm={setForm} />}
+
+              <div className="grid-3" style={{ marginTop: form.engine === "custom" ? 14 : undefined }}>
                 <NumberField
                   label="目标仓位上限"
-                  hint={`占总权益最高 ${pct(form.maxTargetWeight, 0)}`}
+                  hint={form.engine === "custom" ? "信号超过此值会被钳到这（自定义策略也受风控约束）" : `占总权益最高 ${pct(form.maxTargetWeight, 0)}`}
                   value={form.maxTargetWeight}
                   step={0.05}
                   min={0.05}
                   max={1}
                   onChange={(v) => setForm({ ...form, maxTargetWeight: v })}
                 />
-                <NumberField
-                  label={
-                    form.engine === "breakout"
-                      ? "离场通道"
-                      : form.engine === "meanrev"
-                        ? "趋势过滤窗口"
-                        : "快线窗口"
-                  }
-                  hint={
-                    form.engine === "breakout"
-                      ? "跌破/突破 N 根反向通道离场"
-                      : form.engine === "meanrev"
-                        ? "短均线，过滤接飞刀"
-                        : "最近 N 根均值"
-                  }
-                  value={form.fastWindow}
-                  min={2}
-                  max={100}
-                  onChange={(v) => setForm({ ...form, fastWindow: v })}
-                />
-                <NumberField
-                  label={
-                    form.engine === "breakout"
-                      ? "入场通道"
-                      : form.engine === "meanrev"
-                        ? "均值窗口"
-                        : "慢线窗口"
-                  }
-                  hint={
-                    form.engine === "breakout"
-                      ? "突破 N 根最高/最低入场"
-                      : form.engine === "meanrev"
-                        ? "布林带均值/标准差窗口"
-                        : "须大于快线"
-                  }
-                  value={form.slowWindow}
-                  min={3}
-                  max={400}
-                  onChange={(v) => setForm({ ...form, slowWindow: v })}
-                />
+                {form.engine !== "custom" && (
+                  <>
+                    <NumberField
+                      label={
+                        form.engine === "breakout"
+                          ? "离场通道"
+                          : form.engine === "meanrev"
+                            ? "趋势过滤窗口"
+                            : "快线窗口"
+                      }
+                      hint={
+                        form.engine === "breakout"
+                          ? "跌破/突破 N 根反向通道离场"
+                          : form.engine === "meanrev"
+                            ? "短均线，过滤接飞刀"
+                            : "最近 N 根均值"
+                      }
+                      value={form.fastWindow}
+                      min={2}
+                      max={100}
+                      onChange={(v) => setForm({ ...form, fastWindow: v })}
+                    />
+                    <NumberField
+                      label={
+                        form.engine === "breakout"
+                          ? "入场通道"
+                          : form.engine === "meanrev"
+                            ? "均值窗口"
+                            : "慢线窗口"
+                      }
+                      hint={
+                        form.engine === "breakout"
+                          ? "突破 N 根最高/最低入场"
+                          : form.engine === "meanrev"
+                            ? "布林带均值/标准差窗口"
+                            : "须大于快线"
+                      }
+                      value={form.slowWindow}
+                      min={3}
+                      max={400}
+                      onChange={(v) => setForm({ ...form, slowWindow: v })}
+                    />
+                  </>
+                )}
               </div>
 
-              {form.fastWindow >= form.slowWindow && (
+              {form.engine !== "custom" && form.fastWindow >= form.slowWindow && (
                 <Notice tone="error">快线窗口必须小于慢线窗口，否则策略无法计算。</Notice>
               )}
 
@@ -498,6 +507,7 @@ interface StrategyForm {
   allocationInterval: number;
   hybridInfluence: number;
   hybridAnalysisTtlMs: number;
+  strategyCode: string;
 }
 
 /** 策略实体 -> 表单。 */
@@ -516,6 +526,7 @@ function toForm(s: StrategyProfile): StrategyForm {
     allocationInterval: s.allocationInterval,
     hybridInfluence: s.hybridInfluence,
     hybridAnalysisTtlMs: s.hybridAnalysisTtlMs,
+    strategyCode: s.strategyCode,
   };
 }
 
@@ -535,5 +546,146 @@ function fromForm(form: StrategyForm): Partial<StrategyProfile> {
     allocationInterval: form.allocationInterval,
     hybridInfluence: form.hybridInfluence,
     hybridAnalysisTtlMs: form.hybridAnalysisTtlMs,
+    strategyCode: form.strategyCode,
   };
+}
+
+/** 自定义策略示例：双均线金叉，最常见的第一份代码。 */
+const CUSTOM_EXAMPLE = `// 例：5/20 双均线金叉做多，死叉平仓
+const fast = helpers.sma(bars, 5);
+const slow = helpers.sma(bars, 20);
+if (fast.length < 1) return 0;
+const golden = helpers.crossover(fast, slow);
+const dead = helpers.crossunder(fast, slow);
+if (golden) return 0.5;
+if (dead) return 0;
+// 持仓期间保持
+return state.holding ? 0.5 : 0;`;
+
+/** 自定义策略代码编辑面板：写代码 → 校验 → 真实行情试跑。 */
+function CustomCodePanel({
+  form,
+  setForm,
+}: {
+  form: StrategyForm;
+  setForm: (f: StrategyForm) => void;
+}) {
+  const [check, setCheck] = useState<{ ok: boolean; error?: string; warmup?: number } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [tryResult, setTryResult] = useState<Awaited<ReturnType<typeof api.tryStrategyCode>> | null>(null);
+  const [trying, setTrying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const doCheck = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      const r = await api.checkStrategyCode(form.strategyCode);
+      setCheck(r);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setChecking(false);
+  };
+
+  const doTry = async () => {
+    setTrying(true);
+    setError(null);
+    try {
+      const r = await api.tryStrategyCode({ code: form.strategyCode, barCount: 200 });
+      setTryResult(r);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setTrying(false);
+  };
+
+  return (
+    <div className="custom-code-panel" style={{ marginTop: 14 }}>
+      <div className="hint-line" style={{ marginBottom: 8 }}>
+        函数体，参数由平台注入：bars（K 线数组，旧→新：timestamp/open/high/low/close/volume）、
+        state（跨 K 线持久对象，每标的独立）、asset（当前标的）、helpers（指标助手）。
+        返回 0~1 的目标仓位（0=空仓，null=不动）；log() 可打日志。
+        <strong> 沙箱运行：没有网络/文件/进程访问，每根 K 线 50ms 超时。</strong>
+      </div>
+      <textarea
+        className="code-editor"
+        spellCheck={false}
+        value={form.strategyCode}
+        onChange={(e) => {
+          setForm({ ...form, strategyCode: e.target.value });
+          setCheck(null);
+          setTryResult(null);
+        }}
+        rows={14}
+        placeholder={CUSTOM_EXAMPLE}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Button small onClick={doCheck} busy={checking}>
+          校验代码
+        </Button>
+        <Button small onClick={doTry} busy={trying}>
+          真实行情试跑
+        </Button>
+        {form.strategyCode.trim() === "" && (
+          <Button
+            small
+            onClick={() => {
+              setForm({ ...form, strategyCode: CUSTOM_EXAMPLE });
+              setCheck(null);
+              setTryResult(null);
+            }}
+          >
+            填入示例
+          </Button>
+        )}
+        {check && (
+          <span className={check.ok ? "chip chip-sm chip-ok" : "chip chip-sm chip-danger"}>
+            {check.ok ? `✓ 编译通过 · 预热约 ${check.warmup} 根 K 线` : `✗ ${check.error}`}
+          </span>
+        )}
+      </div>
+      {error && (
+        <div style={{ marginTop: 8 }}>
+          <Notice tone="error">{error}</Notice>
+        </div>
+      )}
+      {tryResult && (
+        <div style={{ marginTop: 10 }}>
+          {tryResult.results.map((r) => {
+            const ws = r.weights.filter((x) => typeof x.w === "number") as { t: string; w: number }[];
+            const signals = ws.length;
+            const active = ws.filter((x) => x.w > 0).length;
+            const lastW = ws.length > 0 ? ws[ws.length - 1]!.w : 0;
+            return (
+              <div key={r.symbol} style={{ marginBottom: 6 }}>
+                <div className="hint-line">
+                  {r.symbol}：最近 {r.count} 根里给出信号 {signals} 次、有仓位 {active} 次，
+                  当前目标 {pct(lastW, 1)}
+                  {r.error ? ` · ⚠ ${r.error}` : ""}
+                </div>
+                {ws.length > 0 && (
+                  <svg viewBox="0 0 600 60" style={{ width: "100%", height: 60 }} className="try-spark">
+                    {(() => {
+                      const n = ws.length;
+                      const pts = ws
+                        .map((x, i) => `${(i / Math.max(1, n - 1)) * 600},${55 - x.w * 50}`)
+                        .join(" ");
+                      return (
+                        <>
+                          <line x1="0" y1="55" x2="600" y2="55" stroke="var(--border, #ccc)" strokeWidth="0.5" />
+                          <polyline points={pts} fill="none" stroke="var(--accent, #c00)" strokeWidth="1.5" />
+                        </>
+                      );
+                    })()}
+                  </svg>
+                )}
+              </div>
+            );
+          })}
+          <div className="hint-line">预热 {tryResult.warmup} 根 K 线后才出第一个信号（与机器人实时行为一致）。</div>
+        </div>
+      )}
+    </div>
+  );
 }

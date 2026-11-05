@@ -214,6 +214,19 @@ export const api = {
     request<{ strategy: StrategyProfile }>(`/api/strategies/${id}/default`, { method: "POST" }),
   deleteStrategy: (id: string) =>
     request<{ removed: string }>(`/api/strategies/${id}`, { method: "DELETE" }),
+  /** 自定义策略快速校验：只编译（语法/危险写法），不拉行情。 */
+  checkStrategyCode: (code: string) =>
+    request<{ ok: boolean; warmup?: number; error?: string }>("/api/strategies/check", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  /** 自定义策略试跑：真实行情逐根喂入，返回权重轨迹（只读行情不下单）。 */
+  tryStrategyCode: (body: { code: string; connectionId?: string; symbols?: string[]; interval?: string; barCount?: number }) =>
+    request<{
+      warmup: number;
+      bars: number;
+      results: { symbol: string; count: number; error?: string; weights: { t: string; w?: number; reason?: string }[] }[];
+    }>("/api/strategies/try", { method: "POST", body: JSON.stringify(body) }),
   bots: () => request<{ bots: Bot[] }>("/api/bots"),
   createBot: (body: BotInput) => request<{ bot: Bot }>("/api/bots", { method: "POST", body: JSON.stringify(body) }),
   updateBot: (id: string, body: Partial<BotInput>) =>

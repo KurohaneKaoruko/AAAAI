@@ -123,13 +123,19 @@ export interface LLMSection {
 export type DecisionSource = "rules" | "chat" | "systemone" | "hybrid";
 
 /** 量化规则引擎：经典双均线 / 自适应趋势 / 突破 / 均值回归。 */
-export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev";
+export type StrategyEngine = "momentum" | "adaptive" | "breakout" | "meanrev" | "custom";
 
-const ENGINE_NAMES = new Set<StrategyEngine>(["momentum", "adaptive", "breakout", "meanrev"]);
+const ENGINE_NAMES = new Set<StrategyEngine>(["momentum", "adaptive", "breakout", "meanrev", "custom"]);
 
 export function safeStrategyEngine(value: string): StrategyEngine {
   return ENGINE_NAMES.has(value as StrategyEngine) ? (value as StrategyEngine) : "momentum";
 }
+
+/**
+ * 自定义策略代码的最大长度（字符）。防呆不防奸：防止误贴一整本书进去把
+ * data/strategies.json 撑爆；真要写超长策略应该拆成多份组合。
+ */
+export const MAX_STRATEGY_CODE_LENGTH = 20_000;
 
 export interface StrategySection {
   /** 决策来源（三选一），决定智能体由谁做仓位决策 */
@@ -161,6 +167,8 @@ export interface StrategySection {
   hybridInfluence: number;
   /** 混合决策：分析结论的有效期（秒），期内不重复调用大模型 */
   hybridAnalysisTtlMs: number;
+  /** custom 引擎：用户写的策略代码（函数体，沙箱执行，见 customStrategy.ts） */
+  strategyCode: string;
 }
 
 export interface OptimizeSection {
@@ -340,6 +348,8 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
       allocationInterval: Math.max(1, Math.round(num(raw, ["strategy", "allocation_interval"], 5))),
       hybridInfluence: clamp01(num(raw, ["strategy", "hybrid_influence"], 0.6)),
       hybridAnalysisTtlMs: Math.max(0, num(raw, ["strategy", "hybrid_analysis_ttl_ms"], 60_000)),
+      // custom 引擎代码：全局配置里一般没有（代码存在策略实体上），给空串兜底
+      strategyCode: str(raw, ["strategy", "strategy_code"], "").slice(0, MAX_STRATEGY_CODE_LENGTH),
     },
     risk: {
       initialCash: num(raw, ["risk", "initial_cash"], 100000),

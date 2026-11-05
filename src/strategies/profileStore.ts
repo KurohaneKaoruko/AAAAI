@@ -12,7 +12,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getLogger } from "../core/logger.js";
-import { safeDecisionSource, type DecisionSource, type StrategyEngine, safeStrategyEngine } from "../configSchema.js";
+import { compileCustomCode } from "./customStrategy.js";
+import { safeDecisionSource, MAX_STRATEGY_CODE_LENGTH, type DecisionSource, type StrategyEngine, safeStrategyEngine } from "../configSchema.js";
 
 const log = getLogger("strategies");
 
@@ -37,6 +38,8 @@ export interface StrategyProfile {
   allocationInterval: number;
   hybridInfluence: number;
   hybridAnalysisTtlMs: number;
+  /** custom 引擎：用户编写的策略代码（沙箱执行的函数体）；其它引擎为空串 */
+  strategyCode: string;
   createdAt: string;
 }
 
@@ -56,6 +59,8 @@ export interface StrategyProfileInput {
   allocationInterval?: number;
   hybridInfluence?: number;
   hybridAnalysisTtlMs?: number;
+  /** custom 引擎：策略代码（保存时会先编译校验 + 真实行情试跑） */
+  strategyCode?: string;
 }
 
 /** 默认策略 id：从旧配置迁移来的那条就用它，保证引用不断。 */
@@ -80,7 +85,17 @@ const DEFAULTS = {
   allocationInterval: 5,
   hybridInfluence: 0.6,
   hybridAnalysisTtlMs: 300_000,
+  strategyCode: "",
 };
+
+/**
+ * custom 引擎保存前的编译校验：语法错误 / 危险写法当场报。
+ * 非 custom 引擎直接跳过（它们的参数在引擎构造函数里各自校验）。
+ */
+function validateIfCustom(p: StrategyProfile): void {
+  if (p.engine !== "custom") return;
+  compileCustomCode(p.strategyCode);
+}
 
 export interface StrategyStoreOptions {
   /** 旧配置里的 strategy 段，用于首次启动时迁移成默认策略 */
@@ -296,6 +311,8 @@ export class StrategyStore {
       allocationInterval: Math.max(1, Number(raw.allocationInterval ?? DEFAULTS.allocationInterval)),
       hybridInfluence: Math.min(Math.max(Number(raw.hybridInfluence ?? DEFAULTS.hybridInfluence), 0), 1),
       hybridAnalysisTtlMs: Math.max(30_000, Number(raw.hybridAnalysisTtlMs ?? DEFAULTS.hybridAnalysisTtlMs)),
+      // custom 引擎的用户代码；engine != custom 时保持空串
+      strategyCode: String(raw.strategyCode ?? "").slice(0, MAX_STRATEGY_CODE_LENGTH),
       createdAt: String(raw.createdAt ?? now),
     };
   }
@@ -353,6 +370,8 @@ export class StrategyStore {
       name: this.uniqueName(rawName),
       createdAt: new Date().toISOString(),
     });
+    // custom 引擎保存前先编译：语法错误当场报，别等机器人启动才炸
+    validateIfCustom(created);
     this.profiles.push(created);
     this.persist();
     log.info("新建策略「%s」(%s)", created.name, created.id);
@@ -371,14 +390,18 @@ export class StrategyStore {
     const idx = this.profiles.findIndex((p) => p.id === id);
     if (idx < 0) throw new Error(`策略不存在: ${id}`);
     const current = this.profiles[idx]!;
-    // id / createdAt 不允许改
-    this.profiles[idx] = this.hydrate({
+    // 先在副本上合成新值并校验，全部通过才落地：
+    // 校验抛错时内存里必须还是旧策略（否则一次改错代码就把线上引用改坏）。
+    const next = this.hydrate({
       ...this.pick(current),
       ...patch,
       id: current.id,
       name: patch.name !== undefined ? this.uniqueName(patch.name) : current.name,
       createdAt: current.createdAt,
     });
+    // custom 引擎保存前先编译：改坏代码当场报，线上机器人还跑着旧实例不受影响
+    validateIfCustom(next);
+    this.profiles[idx] = next;
     this.persist();
     return { ...this.profiles[idx]! };
   }
@@ -420,7 +443,6 @@ export class StrategyStore {
 
 /**
  * 策略实体 -> AppConfig.strategy 需要的字段（只挑策略侧，不动其它段）。
- *
  * 放在这里而不是各调用方自己展开：策略页保存、机器人启动、对照实验选手装配
  * 都要用同一份映射，否则三处各写一遍，迟早有一处漏字段。
  */
@@ -438,5 +460,6 @@ export function strategyFields(p: StrategyProfile): Record<string, unknown> {
     allocationInterval: p.allocationInterval,
     hybridInfluence: p.hybridInfluence,
     hybridAnalysisTtlMs: p.hybridAnalysisTtlMs,
+    strategyCode: p.strategyCode,
   };
 }

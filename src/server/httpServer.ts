@@ -26,6 +26,7 @@ import type { NewsService } from "../news/newsService.js";
 import type { EvolutionEngine } from "../evolution/engine.js";
 import type { BotInput } from "../bots/types.js";
 import type { StrategyProfileInput } from "../strategies/profileStore.js";
+import { compileCustomCode } from "../strategies/customStrategy.js";
 import { robustness, walkForward } from "../validation/walkForward.js";
 import { runWinRate } from "../validation/winRate.js";
 import type { BalanceStrategy, LlmManager } from "../llm/llmManager.js";
@@ -378,6 +379,36 @@ export function createServer(controller: EngineController, options: ServerOption
       ok(res, { removed: req.params.id });
     } catch (e) {
       fail(res, e);
+    }
+  });
+
+  /** 自定义策略试跑：真实行情冒烟测试，只读行情不下单。 */
+  app.post("/api/strategies/try", async (req, res) => {
+    const body = (req.body ?? {}) as {
+      code?: string;
+      connectionId?: string;
+      symbols?: string[];
+      interval?: string;
+      barCount?: number;
+    };
+    if (typeof body.code !== "string" || !body.code.trim()) {
+      return fail(res, new Error("缺少策略代码"), 400);
+    }
+    try {
+      ok(res, await controller.tryStrategyCode({ ...body, code: body.code }));
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** 自定义策略快速校验：只编译（语法/危险写法），不拉行情。 */
+  app.post("/api/strategies/check", (req, res) => {
+    const code = String((req.body as { code?: string })?.code ?? "");
+    try {
+      const { warmup } = compileCustomCode(code);
+      ok(res, { ok: true, warmup });
+    } catch (e) {
+      ok(res, { ok: false, error: (e as Error).message });
     }
   });
 

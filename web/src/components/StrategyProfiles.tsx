@@ -21,6 +21,8 @@ export function describe(s: StrategyProfile): string {
       parts.push(`量化交易 · 唐奇安突破 入场${s.slowWindow}/离场${s.fastWindow}`);
     } else if (s.engine === "meanrev") {
       parts.push(`量化交易 · 均值回归 均值${s.slowWindow}/过滤${s.fastWindow}`);
+    } else if (s.engine === "custom") {
+      parts.push("量化交易 · 自定义代码");
     } else {
       parts.push(`量化交易 · ${s.engine === "adaptive" ? "自适应趋势" : "双均线"} ${s.fastWindow}/${s.slowWindow}`);
     }

@@ -877,6 +877,8 @@ export class BotManager {
         allocationInterval: strategy.allocationInterval,
         hybridInfluence: strategy.hybridInfluence,
         hybridAnalysisTtlMs: strategy.hybridAnalysisTtlMs,
+        // custom 引擎的用户代码（其它引擎为空串，buildRuleStrategy 不读它）
+        strategyCode: strategy.strategyCode,
       },
       risk: { ...this.config.risk, ...bot.risk },
       llm: { ...this.config.llm, decisionInterval: bot.decisionInterval },

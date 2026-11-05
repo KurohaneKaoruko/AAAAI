@@ -57,10 +57,23 @@ export function closedBars(bars: Bar[], interval: string, now = Date.now()): Bar
 }
 
 /** 推进模式：逐根广播 K 线。 */
-export async function streamBars(bus: EventBus, book: PriceBook, bars: Bar[]): Promise<void> {
+/**
+ * 把一段 K 线按顺序广播出去（回测 / 预热都用它）。
+ *
+ * `settle` 钩子在每根派发完之后调用（如等待异步策略沙箱排空）：
+ * 同步策略的信号当根就落地，异步策略（自定义代码走 worker 往返）不排空的话
+ * 会全部积压到回放结束才产生，订单互相取代、永远等不到下一根 K 线成交。
+ */
+export async function streamBars(
+  bus: EventBus,
+  book: PriceBook,
+  bars: Bar[],
+  settle?: () => Promise<void>,
+): Promise<void> {
   for (const bar of bars) {
     book.update(bar);
     await bus.publishAsync(Topic.BAR, bar);
+    if (settle) await settle();
   }
 }
 

@@ -13,6 +13,7 @@ import type { AppConfig } from "../configSchema.js";
 import { redactConfig } from "../configSchema.js";
 import { getLogger } from "../core/logger.js";
 import { strategyFields, StrategyStore, type StrategyProfile, type StrategyProfileInput } from "../strategies/profileStore.js";
+import { CustomStrategy } from "../strategies/customStrategy.js";
 import type { ExchangeAdapter, Ticker } from "../exchanges/types.js";
 import { isSimulatedMarket, tradingModeOf } from "../exchanges/types.js";
 
@@ -205,6 +206,72 @@ export class EngineController {
    */
   independentAdapter(connectionId: string): ExchangeAdapter {
     return this.connections.independentAdapter(connectionId);
+  }
+
+  /**
+   * 自定义策略试跑：拉真实 K 线，把策略从头到尾喂一遍，返回每根 K 线的目标权重轨迹。
+   *
+   * 用途：保存前冒烟测试。语法错 / 运行错 / 超时在这里就暴露，
+   * 用户还能直接看到「这条策略在最近 200 根 K 线上会给出什么仓位」。
+   * 只读行情、不产生任何订单。
+   */
+  async tryStrategyCode(options: {
+    connectionId?: string;
+    symbols?: string[];
+    interval?: string;
+    barCount?: number;
+    code: string;
+  }): Promise<{
+    warmup: number;
+    bars: number;
+    results: { symbol: string; count: number; weights: { t: string; w: number; reason?: string }[]; error?: string }[];
+    error?: string;
+  }> {
+    const target = this.resolveRunTarget(options.connectionId, options.symbols);
+    const interval = options.interval || target.interval;
+    const barCount = Math.max(30, Math.min(500, Math.floor(options.barCount ?? 200)));
+    // 独立实例：绝不掷到实时机器人正在用的行情实例上
+    const adapter = this.connections.independentAdapter(target.connection.id);
+    // 现货钳 [0,1]；合约允许负目标 —— 试跑和真实运行同一条规则
+    const allowShort = tradingModeOf(adapter) === "futures";
+    const strategy = new CustomStrategy({ code: options.code, allowShort });
+    const out: {
+      symbol: string;
+      count: number;
+      weights: { t: string; w: number; reason?: string }[];
+      error?: string;
+    }[] = [];
+    let firstError: string | undefined;
+    for (const symbol of target.symbols.slice(0, 4)) {
+      try {
+        const bars = await adapter.fetchKlines(symbol, interval, barCount);
+        const weights: { t: string; w: number; reason?: string }[] = [];
+        // 从第 warmup 根开始逐根喂：和机器人实时路径完全一致（不偷看未来）
+        for (let i = strategy.warmup; i <= bars.length; i++) {
+          try {
+            const sig = await strategy.generate({ symbol, bars: bars.slice(0, i) });
+            const last = bars[i - 1]!;
+            if (sig) weights.push({ t: last.timestamp.toISOString(), w: Number(sig.targetWeight.toFixed(4)), reason: sig.reason });
+            else weights.push({ t: last.timestamp.toISOString(), w: null as unknown as number });
+          } catch (err) {
+            // 单根失败记录错误但继续：让用户看到第一个错在哪根 K 线
+            const msg = (err as Error).message;
+            if (!firstError) firstError = msg;
+            weights.push({ t: bars[i - 1]!.timestamp.toISOString(), w: null as unknown as number });
+            break;
+          }
+        }
+        out.push({
+          symbol,
+          count: weights.length,
+          weights: weights.slice(-120).map((x) => ({ ...x, w: Number.isFinite(x.w) ? x.w : (undefined as unknown as number) })),
+          ...(firstError ? { error: firstError } : {}),
+        });
+      } catch (err) {
+        out.push({ symbol, count: 0, weights: [], error: (err as Error).message });
+      }
+    }
+    return { warmup: strategy.warmup, bars: barCount, results: out };
   }
 
   private freshState(): EngineState {
