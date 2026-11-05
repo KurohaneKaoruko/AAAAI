@@ -22,6 +22,7 @@ import type {
   ConnectionTest,
   Credential,
   ExchangeAdapter,
+  OrderBookSnapshot,
   SymbolInfo,
   Ticker,
 } from "./types.js";
@@ -219,5 +220,39 @@ export class GateFuturesAdapter implements ExchangeAdapter {
     bars.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     log.debug("Gate 合约 K 线 %s %s -> %d 根", contract, interval, bars.length);
     return bars;
+  }
+
+  /** 公共盘口（无需密钥）：/futures/usdt/order_book。合约用标记/最新盘口撮合模拟更贴近实盘。 */
+  async fetchOrderBook(symbol: string, depth = 50): Promise<OrderBookSnapshot> {
+    const contract = toContract(symbol);
+    const limit = Math.min(100, Math.max(1, Math.floor(depth)));
+    const url = `${this.marketBaseUrl}/futures/usdt/order_book?contract=${encodeURIComponent(contract)}&limit=${limit}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`Gate 合约盘口 HTTP ${res.status}`);
+    const raw = (await res.json()) as { current: number; asks: string[][]; bids: string[][] };
+    return {
+      symbol,
+      asks: raw.asks.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      bids: raw.bids.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      timestamp: (raw.current ?? 0) * 1000 || Date.now(),
+    };
+  }
+
+  /**
+   * 真实资金费率（公共接口）：/futures/usdt/contracts 里的 funding_rate
+   * 为当前周期年化前的瞬时费率（8 小时结算一次，多数交易所惯例）。
+   * 模拟合约账户按持仓名义价值 × 费率在结算时刻扣/收。
+   */
+  async fetchFundingRate(symbol: string): Promise<{ rate: number; nextSettleMs: number | null }> {
+    const contract = toContract(symbol);
+    const url = `${this.marketBaseUrl}/futures/usdt/contracts/${encodeURIComponent(contract)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`Gate 资金费率 HTTP ${res.status}`);
+    const raw = (await res.json()) as { funding_rate?: string; funding_next_apply?: number };
+    const rate = Number(raw.funding_rate ?? "0");
+    return {
+      rate: Number.isFinite(rate) ? rate : 0,
+      nextSettleMs: raw.funding_next_apply ? raw.funding_next_apply * 1000 : null,
+    };
   }
 }

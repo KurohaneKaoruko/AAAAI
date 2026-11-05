@@ -11,6 +11,8 @@ import { PaperBroker } from "../execution/paperBroker.js";
 import { ExchangeBroker } from "../execution/exchangeBroker.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import { tradingModeOf } from "../exchanges/types.js";
+import { feePairFor } from "../execution/feeSchedule.js";
+import { DEFAULT_FEE_RATE } from "../configSchema.js";
 import { MarketAnalystAgent } from "./marketAnalyst.js";
 import { RiskGuardAgent } from "./riskGuard.js";
 import { StrategistAgent } from "./strategist.js";
@@ -41,6 +43,8 @@ export interface PipelineOptions {
   adapter: ExchangeAdapter;
   /** true = 真实下单（需适配器支持且已配 Key） */
   liveTrading: boolean;
+  /** true = 回测/一次性历史运行：不注入盘口撮合（历史盘口不存在，见盘口模式注释）。 */
+  backtest?: boolean;
   /** 对话模型客户端池；null = 无可用对话模型 */
   llm?: LLMClient | null;
   /** System One 决策模型客户端池；null = 无可用决策模型 */
@@ -110,9 +114,9 @@ export function buildPipeline(
    * 撮合时钟永远轮不到旧单成交 —— 决策每根都在变时（如横截面配置），
    * 订单无限互换、一单都成不了。先撮合后决策，才符合真实时间线。
    */
-  const broker: Broker =
+  const paperBroker =
     options.liveTrading && options.adapter.placeOrder
-      ? new ExchangeBroker(bus, options.adapter)
+      ? null
       : new PaperBroker(bus, book, {
           feeRate: config.risk.feeRate,
           slippageBps: config.risk.slippageBps,
@@ -130,6 +134,53 @@ export function buildPipeline(
             volumeProfileBars: config.execution.slicingVolumeProfileBars,
           },
         });
+  const broker: Broker =
+    paperBroker ??
+    (options.liveTrading && options.adapter.placeOrder
+      ? new ExchangeBroker(bus, options.adapter)
+      : (null as unknown as Broker)); // paperBroker 必在，仅为类型收窄
+  if (paperBroker) {
+    // 真实费率表：适配器有公开费率的都按真实 taker/maker 收（用户显式配置
+    // 的 risk.feeRate 仍最优先——见 feeSchedule.ts 的优先级约定）。
+    // 仅当用户还在用默认 0.0003 时才套用费率表，避免覆盖用户的知情配置。
+    if (config.risk.feeRate === DEFAULT_FEE_RATE) {
+      paperBroker.setAdapterFees(feePairFor(options.adapter.meta.id, tradingMode));
+    }
+    // 盘口撮合（实时模拟盘）：适配器提供真实盘口时，下单逐档吃单。
+    // 回测路径（backtest/runner）不注入 —— 历史盘口不存在，强拉只会
+    // 把"过去"对齐到"现在"的盘口，那是另一种未来函数。
+    if (!options.backtest && options.adapter.fetchOrderBook) {
+      const fetcher = options.adapter.fetchOrderBook.bind(options.adapter);
+      paperBroker.setOrderBookProvider(async (symbol) => {
+        try {
+          return await fetcher(symbol, 100);
+        } catch {
+          return null; // 限频/网络问题：broker 退回 K 线口径
+        }
+      });
+    }
+  }
+
+  // 资金费率结算（合约实时模拟盘）：拉交易所真实费率，每 8h 窗口对持仓结算。
+  // 拉不到按 0（宁可少算不乱编）；回测同样不注入——历史费率接口各所不一，
+  // 现值费率对历史持仓没有意义。
+  if (tradingMode === "futures" && !options.backtest) {
+    const fetcher = (options.adapter as { fetchFundingRate?: (s: string) => Promise<{ rate: number }> })
+      .fetchFundingRate;
+    if (fetcher) {
+      const bound = fetcher.bind(options.adapter);
+      const cache = new Map<string, { rate: number; at: number }>();
+      portfolio.setFundingProvider((symbol) => {
+        const hit = cache.get(symbol);
+        if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rate;
+        // 异步刷新，本次先用旧值/0：结算路径不能被网络卡住
+        void bound(symbol)
+          .then((r) => cache.set(symbol, { rate: r.rate, at: Date.now() }))
+          .catch(() => undefined);
+        return hit?.rate ?? 0;
+      });
+    }
+  }
 
   // 执行层接入总线：订单意图 -> 券商 -> 成交广播。
   // 预热期（primeMode）一律不发单：历史只用来喂指标，不产生成交。

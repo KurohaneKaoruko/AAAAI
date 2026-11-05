@@ -19,6 +19,11 @@
  * 每片各自按自己的金额算冲击成本，所以总冲击成本低于一次性吃掉全部流动性，
  * 代价是承担拆单期间的价格漂移（由 implementationShortfallBps 统计，可核对）。
  * 默认 algo = "none"，行为与开启前完全一致。
+ *
+ * 盘口撮合模式（setOrderBookProvider 注入后生效，实时模拟盘专用）：
+ * 下单瞬间拉取交易所**真实公共盘口**，市价单逐档吃单（见 bookLiquidity.ts），
+ * 成交价由真实深度决定、按真实费率表收费、深度不足按 IOC 部分成交——
+ * 与真实交易所的市价单行为一致。回测没有历史盘口，仍走下一根开盘价模型。
  */
 
 import { EventBus, Topic } from "../core/eventBus.js";
@@ -26,6 +31,9 @@ import type { Bar, Fill, OrderIntent } from "../core/types.js";
 import type { PriceBook } from "../data/streaming.js";
 import { getLogger } from "../core/logger.js";
 import type { Broker } from "./broker.js";
+import type { OrderBookSnapshot } from "../exchanges/types.js";
+import { fillMarketAgainstBook } from "./bookLiquidity.js";
+import { feePairFor, type FeePair } from "./feeSchedule.js";
 import { CostModel, DEFAULT_IMPACT, dailyTurnover, realizedVolatility, type MarketMicroStats } from "../cost/impactModel.js";
 import {
   createSlicedOrder,
@@ -172,6 +180,35 @@ export class PaperBroker implements Broker {
   private micro: ((symbol: string) => MarketMicroStats | undefined) | null = null;
 
   /**
+   * 真实盘口来源（可选）：注入后实时模拟盘的下单走「逐档吃真实盘口」，
+   * 不注入则保持「下一根开盘价 + 冲击成本」的回测口径。
+   * 注入方负责限频与容错（拉不到盘口时返回 null，broker 自动退回旧口径）。
+   */
+  setOrderBookProvider(provider: ((symbol: string) => Promise<OrderBookSnapshot | null>) | null): void {
+    this.bookProvider = provider;
+  }
+
+  private bookProvider: ((symbol: string) => Promise<OrderBookSnapshot | null>) | null = null;
+
+  /**
+   * 适配器费率（taker/maker）。注入后取代单一 feeRate：市价单收 taker 费。
+   * 未注入时沿用 risk.feeRate（用户显式配置仍然最优先——他知道自己那档费率）。
+   */
+  setAdapterFees(fees: FeePair | null): void {
+    this.adapterFees = fees;
+    if (fees) {
+      log.info("模拟撮合费率切换为交易所真实费率表：taker %s bps / maker %s bps", (fees.taker * 1e4).toFixed(1), (fees.maker * 1e4).toFixed(1));
+    }
+  }
+
+  private adapterFees: FeePair | null = null;
+
+  /** 当前生效的吃单费率（市价单 = taker）。 */
+  private get takerFee(): number {
+    return this.adapterFees?.taker ?? this.opts.feeRate;
+  }
+
+  /**
    * 收到订单意图：**不入队即成交**，而是排队等下一根 K 线。
    *
    * 立刻按当前价成交是回测里最常见的伪盈利来源：信号用的是这根 K 线的收盘价，
@@ -184,6 +221,15 @@ export class PaperBroker implements Broker {
       log.warn("无行情或数量为 0，订单被驳回: %s", intent.symbol);
       this.bus.publish(Topic.ORDER_REJECTED, intent);
       return null;
+    }
+    // 盘口撮合模式：拉真实盘口立即逐档成交（实时模拟盘专用，见文件头说明）
+    if (this.bookProvider) {
+      const book = await this.bookProvider(intent.symbol).catch(() => null);
+      if (book && book.asks.length > 0 && book.bids.length > 0) {
+        return this.fillAgainstBook(intent, book);
+      }
+      // 盘口拉取失败（限频/网络）：退回 K 线队列口径，绝不静默丢弃订单
+      log.warn("%s 盘口不可用，本单退回下一根开盘价口径", intent.symbol);
     }
     if (!this.slicingOn) {
       /**
@@ -269,6 +315,56 @@ export class PaperBroker implements Broker {
       }
       this.fillWholeOrder(intent, open, bar.timestamp);
     }
+  }
+
+  /**
+   * 逐档吃真实盘口成交（实时模拟盘）。
+   *
+   * 与 fillWholeOrder 的差别：成交价不是「基准价 ± 合成滑点」，而是把
+   * 订单真实地吃进盘口——吃到哪一档、均价多少、深度够不够，全由交易所
+   * 此刻的真实挂单决定。现金校验仍然前置（付不起就按付得起的量吃），
+   * IOC 语义下剩余撤销并广播，让事件流如实反映部分成交。
+   */
+  private fillAgainstBook(intent: OrderIntent, book: OrderBookSnapshot): Fill | null {
+    const result = fillMarketAgainstBook(book, intent.side, intent.quantity);
+    if (result.filledQuantity <= 0) {
+      log.warn("%s 盘口为空/全量非法，订单被驳回", intent.symbol);
+      this.bus.publish(Topic.ORDER_REJECTED, intent);
+      return null;
+    }
+    // 现金账户语义：买单按付得起的量截断（与 fillWholeOrder 同一防线）
+    let filled = result.filledQuantity;
+    if (intent.side === "BUY") {
+      const affordable = this.affordableQuantity(intent, result.averagePrice);
+      if (affordable === null) return null;
+      filled = Math.min(filled, affordable);
+    }
+    const notional = filled * result.averagePrice;
+    const fee = notional * this.takerFee; // 市价单 = 吃单方
+    const fill: Fill = {
+      order: filled === intent.quantity ? intent : { ...intent, quantity: filled },
+      price: result.averagePrice,
+      fee,
+      timestamp: new Date(book.timestamp),
+    };
+    log.info(
+      "PAPER 盘口成交 %s %s %s/%s @ %s（吃 %d 档，滑点 %s bps，taker 费 %s%s）",
+      intent.side,
+      intent.symbol,
+      filled.toFixed(6),
+      intent.quantity.toFixed(6),
+      result.averagePrice.toFixed(6),
+      result.levelsConsumed,
+      result.slippageBps.toFixed(1),
+      fee.toFixed(4),
+      result.unfilledQuantity > 0 ? `，剩余 ${result.unfilledQuantity.toFixed(6)} 撤销（IOC）` : "",
+    );
+    this.bus.publish(Topic.FILL, fill);
+    if (result.unfilledQuantity > 0 && filled >= result.filledQuantity) {
+      // 市场深度不足导致的未成交部分：广播部分成交语义，让上层与流水对得上
+      this.bus.publish(Topic.ORDER_REJECTED, { ...intent, quantity: result.unfilledQuantity, reason: `${intent.reason}｜盘口深度不足，剩余撤销` });
+    }
+    return fill;
   }
 
   /**

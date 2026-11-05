@@ -7,6 +7,7 @@ import type {
   ConnectionTest,
   Credential,
   ExchangeAdapter,
+  OrderBookSnapshot,
   OrderRequest,
   OrderResult,
   SymbolInfo,
@@ -157,6 +158,24 @@ export class OkxAdapter implements ExchangeAdapter {
       close: r.close,
       volume: r.volume,
     }));
+  }
+
+  /** 公共盘口（无需密钥）：/api/v5/market/books，sz 档（默认 50，支持 400）。 */
+  async fetchOrderBook(symbol: string, depth = 50): Promise<OrderBookSnapshot> {
+    const sz = [1, 5, 50, 400].includes(Math.floor(depth)) ? Math.floor(depth) : 50;
+    const url = `${this.baseUrl}/api/v5/market/books?instId=${encodeURIComponent(symbol)}&sz=${sz}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`OKX 盘口 HTTP ${res.status}`);
+    const data = (await res.json()) as { data?: { asks: string[][]; bids: string[][]; ts: string }[] };
+    const top = data.data?.[0];
+    if (!top) throw new Error("OKX 盘口返回为空");
+    // OKX 返回的档位是价格从劣到优（asks 降序、bids 升序），统一翻转为从优到劣
+    return {
+      symbol,
+      asks: [...top.asks].reverse().map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      bids: [...top.bids].reverse().map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      timestamp: Number(top.ts) || Date.now(),
+    };
   }
 
   async placeOrder(req: OrderRequest): Promise<OrderResult> {

@@ -40,6 +40,7 @@ export async function runBacktest(
   const pipeline = buildPipeline(config, {
     adapter: options.adapter,
     liveTrading: options.liveTrading,
+    backtest: true, // 历史运行：不注入盘口撮合，成交价用下一根开盘价口径
   });
 
   const limit = options.bars ?? config.market.barCount;

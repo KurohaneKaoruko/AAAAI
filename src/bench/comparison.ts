@@ -136,6 +136,7 @@ export async function runComparison(
       {
         adapter: options.adapter,
         liveTrading: options.liveTrading,
+        backtest: true, // 对照是一次性历史运行：同回测口径
         llm: spec.decisionSource === "rules" || spec.decisionSource === "systemone" ? null : (spec.clients?.chat ?? null),
         soClient: spec.decisionSource === "rules" || spec.decisionSource === "chat" ? null : (spec.clients?.systemone ?? null),
       },

@@ -42,10 +42,51 @@ export class PortfolioManager {
     bus.subscribe<Fill>(Topic.FILL, (e) => this.onFill(e.payload));
   }
 
+  /**
+   * 资金费率结算（仅合约模式；注入 fundingOf 后生效）。
+   *
+   * 永续合约真实账户每 8 小时按「持仓名义 × 费率」收/付资金费：
+   * 正费率时多头付、空头收；负费率反过来。模拟盘不结资金费会把
+   * 「长期持仓的成本」整个隐掉——策略在单边行情里赖着不动也能显得零成本。
+   * provider 由上游注入（拉交易所真实费率，见适配器 fetchFundingRate），
+   * 拉不到的标的按 0 处理（宁可少算也不乱编）。
+   */
+  setFundingProvider(fundingOf: (symbol: string) => number | null): void {
+    this.fundingOf = fundingOf;
+  }
+
+  private fundingOf: ((symbol: string) => number | null) | null = null;
+  /** 上次结算时刻（epoch ms）：按 8 小时对齐结算（00:00/08:00/16:00 UTC）。 */
+  private lastFundingSettleMs = 0;
+
+  /** 结算窗口内的资金费：现金直接增减，权益自然反映。返回本次结算总额（对账用）。 */
+  settleFunding(nowMs: number): number {
+    if (this.mode !== "futures" || !this.fundingOf) return 0;
+    // 对齐 8h 网格：只有跨过下一个结算点才结（回放中多次调用安全）
+    const step = 8 * 3600_000;
+    const settledThrough = Math.floor(nowMs / step) * step;
+    if (settledThrough <= this.lastFundingSettleMs) return 0;
+    this.lastFundingSettleMs = settledThrough;
+    let total = 0;
+    for (const pos of this.positions.values()) {
+      if (pos.quantity === 0) continue;
+      const rate = this.fundingOf(pos.symbol);
+      if (rate === null || rate === 0) continue;
+      const price = this.prices.get(pos.symbol) ?? pos.avgCost;
+      // 正费率：多头（qty>0）付出，空头（qty<0）收取 —— 与交易所口径一致
+      const fee = -pos.quantity * price * rate;
+      this.cash += fee;
+      total += fee;
+    }
+    return total;
+  }
+
   private onBar(bar: Bar): void {
     this.prices.set(bar.symbol, bar.close);
     this.curve.push({ timestamp: bar.timestamp.toISOString(), equity: round(this.equity()) });
     if (this.curve.length > 5000) this.curve.shift();
+    // 每根 K 线顺带结算跨过的资金费窗口（未注入 provider 时是 no-op）
+    this.settleFunding(bar.timestamp.getTime());
   }
 
   private onFill(fill: Fill): void {

@@ -22,6 +22,7 @@ import type {
   ConnectionTest,
   Credential,
   ExchangeAdapter,
+  OrderBookSnapshot,
   OrderRequest,
   OrderResult,
   SymbolInfo,
@@ -121,6 +122,26 @@ export class GateUnifiedAdapter implements ExchangeAdapter {
 
   fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]> {
     return this.impl.fetchKlines(symbol, interval, limit);
+  }
+
+  /**
+   * 真实盘口（公共接口）：委托当前模式。现货模式拉现货盘口、合约模式拉
+   * 永续盘口 —— 模拟撮合的逐档吃单（execution/bookLiquidity.ts）依赖它。
+   */
+  async fetchOrderBook(symbol: string, depth?: number): Promise<OrderBookSnapshot> {
+    const impl = this.impl as ExchangeAdapter & { fetchOrderBook?: (s: string, d?: number) => Promise<OrderBookSnapshot> };
+    if (!impl.fetchOrderBook) throw new Error("当前模式不支持盘口查询");
+    return impl.fetchOrderBook(symbol, depth);
+  }
+
+  /**
+   * 真实资金费率（公共接口）：仅合约模式有意义 —— 永续持仓的资金费结算
+   * （PortfolioManager.settleFunding）从这里取数。现货模式不给（不给 ≠ 0：
+   * 上游对"没有这个能力"按 0 容忍，但这里干脆不暴露）。
+   */
+  async fetchFundingRate(symbol: string): Promise<{ rate: number; nextSettleMs: number | null }> {
+    if (this.mode !== "futures") throw new Error("资金费率仅合约模式可用");
+    return this.futures.fetchFundingRate(symbol);
   }
 
   placeOrder(req: OrderRequest): Promise<OrderResult> {

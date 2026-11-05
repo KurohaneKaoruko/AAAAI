@@ -46,6 +46,23 @@ export interface Ticker {
 
 export type OrderType = "MARKET" | "LIMIT";
 
+/** 订单簿的一档。 */
+export interface BookLevel {
+  price: number;
+  quantity: number;
+}
+
+/** 某一时刻的真实订单簿快照（来自交易所公共盘口接口）。 */
+export interface OrderBookSnapshot {
+  symbol: string;
+  /** 按价格从优到劣排序：卖一在前 */
+  asks: BookLevel[];
+  /** 按价格从优到劣排序：买一在前 */
+  bids: BookLevel[];
+  /** 快照时刻（epoch ms） */
+  timestamp: number;
+}
+
 export interface OrderRequest {
   symbol: string;
   side: Side;
@@ -155,6 +172,15 @@ export interface ExchangeAdapter {
   searchSymbols(query: string, limit?: number): Promise<SymbolInfo[]>;
   /** 批量行情快照。 */
   fetchTickers(symbols: string[]): Promise<Ticker[]>;
+  /**
+   * 真实订单簿快照（公共盘口接口，无需密钥）。
+   *
+   * 可选能力：实现了它的适配器让模拟撮合升级为**逐档吃真实盘口**
+   * （见 execution/bookLiquidity.ts）——成交价由盘口深度决定，不再靠
+   * 合成滑点模型猜。未实现的适配器自动退回「下一根开盘价 + 冲击成本」
+   * 的旧口径，行为不变。
+   */
+  fetchOrderBook?(symbol: string, depth?: number): Promise<OrderBookSnapshot>;
   /** K 线，按时间升序。 */
   fetchKlines(symbol: string, interval: string, limit: number): Promise<Bar[]>;
   placeOrder?(req: OrderRequest): Promise<OrderResult>;

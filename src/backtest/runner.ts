@@ -130,7 +130,7 @@ export async function runBacktest(
   };
 
   // 回测永远是本地撮合：它回答"策略行不行"，不碰任何真实账户
-  const pipeline = buildPipeline(cfg, { adapter, liveTrading: false });
+  const pipeline = buildPipeline(cfg, { adapter, liveTrading: false, backtest: true });
 
   const groups = await Promise.all(
     input.symbols.map((s) => adapter.fetchKlines(s, input.interval, input.barCount)),

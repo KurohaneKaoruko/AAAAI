@@ -11,6 +11,7 @@ import type {
   OrderResult,
   SymbolInfo,
   Ticker,
+  OrderBookSnapshot,
 } from "./types.js";
 import { getLogger } from "../core/logger.js";
 
@@ -164,6 +165,21 @@ export class BinanceAdapter implements ExchangeAdapter {
       close: Number(k[4]),
       volume: Number(k[5]),
     }));
+  }
+
+  /** 公共盘口（无需密钥）：/api/v3/depth 返回按价格从优到劣的买卖档。 */
+  async fetchOrderBook(symbol: string, depth = 50): Promise<OrderBookSnapshot> {
+    const d = Math.min(5000, Math.max(5, Math.floor(depth)));
+    const url = `${this.marketBaseUrl}/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=${d}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`Binance depth HTTP ${res.status}`);
+    const raw = (await res.json()) as { bids: [string, string][]; asks: [string, string][] };
+    return {
+      symbol,
+      asks: raw.asks.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      bids: raw.bids.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      timestamp: Date.now(),
+    };
   }
 
   async placeOrder(req: OrderRequest): Promise<OrderResult> {

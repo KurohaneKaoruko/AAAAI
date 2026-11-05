@@ -11,6 +11,9 @@ const STRATEGIES = new Set<BalanceStrategy>(["round-robin", "weighted", "random"
 
 const DECISION_SOURCES = new Set<DecisionSource>(["rules", "chat", "systemone", "hybrid"]);
 
+/** 默认手续费率（0.0003 = 0.03%）：模拟撮合的兜底值；真实费率表见 execution/feeSchedule.ts。 */
+export const DEFAULT_FEE_RATE = 0.0003;
+
 export function safeDecisionSource(value: string): DecisionSource {
   return DECISION_SOURCES.has(value as DecisionSource) ? (value as DecisionSource) : "rules";
 }
@@ -355,7 +358,7 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
     risk: {
       initialCash: num(raw, ["risk", "initial_cash"], 100000),
       minTradeValue: Math.max(0, num(raw, ["risk", "min_trade_value"], 0)),
-      feeRate: num(raw, ["risk", "fee_rate"], 0.0003),
+      feeRate: num(raw, ["risk", "fee_rate"], DEFAULT_FEE_RATE),
       slippageBps: num(raw, ["risk", "slippage_bps"], 2),
       maxOrderValue: num(raw, ["risk", "max_order_value"], 20000),
       maxPositionWeight: num(raw, ["risk", "max_position_weight"], 0.6),

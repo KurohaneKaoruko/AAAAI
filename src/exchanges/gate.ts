@@ -17,6 +17,7 @@ import type {
   ConnectionTest,
   Credential,
   ExchangeAdapter,
+  OrderBookSnapshot,
   OrderRequest,
   OrderResult,
   SymbolInfo,
@@ -211,6 +212,21 @@ export class GateAdapter implements ExchangeAdapter {
     // 接口返回新->旧，统一按时间升序
     bars.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     return bars;
+  }
+
+  /** 公共盘口（无需密钥）：/spot/order_book，limit 上限 100，返回卖/买两串（价格从优到劣）。 */
+  async fetchOrderBook(symbol: string, depth = 50): Promise<OrderBookSnapshot> {
+    const limit = Math.min(100, Math.max(1, Math.floor(depth)));
+    const url = `${this.marketBaseUrl}/spot/order_book?currency_pair=${encodeURIComponent(toGatePair(symbol))}&limit=${limit}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`Gate 盘口 HTTP ${res.status}`);
+    const raw = (await res.json()) as { current: number; asks: string[][]; bids: string[][] };
+    return {
+      symbol,
+      asks: raw.asks.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      bids: raw.bids.map(([p, q]) => ({ price: Number(p), quantity: Number(q) })),
+      timestamp: (raw.current ?? 0) * 1000 || Date.now(),
+    };
   }
 
   async placeOrder(req: OrderRequest): Promise<OrderResult> {
