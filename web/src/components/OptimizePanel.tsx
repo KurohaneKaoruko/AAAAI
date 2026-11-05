@@ -14,12 +14,27 @@ export function OptimizePanel({ store }: { store: AppStore }) {
   const cfg = store.state?.config;
   const opt = cfg?.optimize;
   const cost = cfg?.cost;
+  /**
+   * 滑杆拖动时只改本地草稿，松手/按键结束才写服务端。
+   * 以前每个 onChange 都发一次 PATCH：拖一格弹一次「设置已保存」，
+   * 还会把半途的中间值写进配置。
+   */
+  const [weightDraft, setWeightDraft] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    setWeightDraft(null);
+  }, [opt?.factorWeights]);
+
   if (!opt || !cost) return null;
 
   const save = (patch: Partial<typeof opt>) =>
     void store.patchConfig({ optimize: { ...opt, ...patch } } as never);
 
-  const weights = { ...factorWeights(opt.factorWeights) };
+  const weights = weightDraft ?? factorWeights(opt.factorWeights);
+  const commitWeights = () => {
+    if (!weightDraft) return;
+    if (JSON.stringify(weightDraft) === JSON.stringify(factorWeights(opt.factorWeights))) return;
+    save({ factorWeights: weightDraft });
+  };
   // 只有真正用到协方差矩阵的模式才显示这个选项；否则它会是个「勾了没用」的死开关
   const usesCovariance = opt.method === "risk_parity" || opt.targetVol > 0;
 
@@ -55,9 +70,10 @@ export function OptimizePanel({ store }: { store: AppStore }) {
               max={2}
               step={0.1}
               value={weights[f.name] ?? 0}
-              onChange={(e) =>
-                save({ factorWeights: { ...weights, [f.name]: Number(e.target.value) } })
-              }
+              onChange={(e) => setWeightDraft({ ...weights, [f.name]: Number(e.target.value) })}
+              onPointerUp={commitWeights}
+              onKeyUp={commitWeights}
+              onBlur={commitWeights}
             />
             <span className="factor-w mono">{(weights[f.name] ?? 0).toFixed(1)}</span>
           </div>
