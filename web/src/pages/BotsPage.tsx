@@ -616,7 +616,7 @@ function BotForm({
         />
         {connAdapter?.tradingMode === "futures" && (
           <Notice tone="info">
-            该连接是<b>合约模式</b>：允许策略做空（在「策略」里开启「允许做空」），组合按保证金账户记账。
+            该连接是<b>合约模式</b>：策略直接做空，无需开关，组合按保证金账户记账。
             {connAdapter.supportsTrading
               ? " 这是模拟合约行情，成交在本地完成。"
               : " 该连接只提供真实合约行情，下单/撮合在本地完成，不会发真实订单。"}

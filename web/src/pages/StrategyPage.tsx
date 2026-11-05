@@ -309,8 +309,8 @@ export function StrategyPage({
               )}
 
               <Toggle
-                label="允许做空（仅合约连接生效）"
-                hint="现货连接会忽略；合约连接遇到向下强趋势时输出负仓位"
+                label="允许做空（已默认开启）"
+                hint="合约连接现在一律允许做空；现货连接本来就不能做空。此开关仅作历史兼容保留"
                 checked={form.allowShort}
                 onChange={(v) => setForm({ ...form, allowShort: v })}
               />

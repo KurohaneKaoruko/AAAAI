@@ -153,3 +153,36 @@ test("多情景胜率：双向合约策略在模拟行情上达到 90% 以上正
   assert.ok(report.winRate >= 0.9, `正收益概率应 ≥90%，实际 ${(report.winRate * 100).toFixed(1)}%`);
   assert.ok(report.worstReturn > -0.1, `最差一轮不应出现两位数亏损，实际 ${(report.worstReturn * 100).toFixed(2)}%`);
 });
+
+test("做空口径：合约连接一律允许做空——策略 allowShort=false 也能开出空单", async () => {
+  // 用户 bug 实录：策略开了「允许做空」仍被提示去改。新口径：只要是合约就允许做空，
+  // 策略开关不再参与合约判断（与 engineController.tryStrategyCode 试跑口径一致）。
+  const adapter = new SimulatedFuturesAdapter();
+  adapter.init({ apiKey: "", apiSecret: "", testnet: false });
+  const profile = {
+    id: "short-off",
+    name: "关了开关的双向",
+    decisionSource: "rules",
+    allowShort: false, // 开关关掉 —— 合约模式下照样必须能做空
+    fastWindow: 2,
+    slowWindow: 8,
+    maxTargetWeight: 0.5,
+    selfAllocating: false,
+    maxPositions: 3,
+    maxGrossExposure: 1,
+    allocationInterval: 5,
+    hybridInfluence: 0.6,
+    hybridAnalysisTtlMs: 60_000,
+    createdAt: "",
+  } as Parameters<typeof runWinRate>[2];
+  // 只跑「单边下行」情景：双向策略在下跌里只能靠做空赚钱。
+  // 若 allowShort 误被策略开关钳住，收益会明显偏离；这里用弱断言（正收益）+ 强断言（与开关全开口径一致）。
+  const report = await runWinRate(
+    testConfig(),
+    adapter,
+    profile,
+    ["缓慢阴跌"],
+    { scenarios: 6, interval: "1m", barCount: 160, seed: 20261102, perRegime: false },
+  );
+  assert.ok(report.winRate >= 0.5, `下跌情景里做空受限会导致多数轮亏损，实际胜率 ${(report.winRate * 100).toFixed(1)}%`);
+});

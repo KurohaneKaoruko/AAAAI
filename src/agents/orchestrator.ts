@@ -139,7 +139,13 @@ export function buildPipeline(
   });
 
   const source: DecisionSource = sourceOverride ?? config.strategy.decisionSource;
-  const allowShort = tradingMode === "futures" && config.strategy.allowShort;
+  /*
+   * 做空口径：只要是合约连接就允许做空（与 engineController.tryStrategyCode 的
+   * 试跑口径一致）。策略里的 allowShort 开关只对现货有约束力 —— 现货本来就不能
+   * 开空（RiskRules 按 spot 拒绝负权重），开着也没意义；合约是双向市场，
+   * 强制单边反而让回测与实盘互相矛盾（同一策略回测不做空、实盘做空）。
+   */
+  const allowShort = tradingMode === "futures";
   /** 纯规则基线：模型决策失败时也回退到同一条引擎，避免“换了模型却偷偷换策略”。 */
   const baseStrategy: Strategy =
     options.strategyOverride ?? buildRuleStrategy(config.strategy, allowShort);

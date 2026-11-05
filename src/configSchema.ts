@@ -148,8 +148,9 @@ export interface StrategySection {
   slowWindow: number;
   maxTargetWeight: number;
   /**
-   * 合约模式是否允许做空。
-   * 现货模式一律忽略：负目标权重会被风控拒绝，不会偷偷做空。
+   * 保留字段：是否允许做空。现行为已收紧为「只要是合约连接就允许做空」，
+   * 此开关不再参与合约判断（现货本来就会被风控拒绝负权重）。
+   * 字段保留是为了旧配置可读、前端开关位不空。
    */
   allowShort: boolean;
   /** 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策） */
@@ -339,7 +340,7 @@ export function buildConfig(raw: Record<string, unknown>, env: NodeJS.ProcessEnv
       fastWindow: num(raw, ["strategy", "fast_window"], 2),
       slowWindow: num(raw, ["strategy", "slow_window"], 8),
       maxTargetWeight: num(raw, ["strategy", "max_target_weight"], 0.5),
-      // 合约模式默认允许做空；现货模式风控会拒绝负权重，因此不会误开空单
+      // 保留字段：合约一律允许做空（orchestrator 已不读它做合约判断）；现货由风控拒绝负权重
       allowShort: bool(raw, ["strategy", "allow_short"], true),
       // 由 AI/规则在候选池里自行选择资产并配权重（关闭时沿用逐标的仓位决策）
       selfAllocating: bool(raw, ["strategy", "self_allocating"], false),
