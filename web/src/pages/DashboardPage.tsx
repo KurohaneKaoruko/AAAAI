@@ -22,7 +22,7 @@ import { EventLog } from "../components/EventLog";
 import { Sparkline } from "../components/Sparkline";
 import { Button, Empty, Panel } from "../components/ui";
 import type { Bot } from "../types";
-import { dateTime, money, pct, signed, signedPct, symbolColumnLabel } from "../lib/format";
+import { dateTime, money, pct, signed, signedPct } from "../lib/format";
 import { useFlash } from "../lib/useFlash";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -45,11 +45,6 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
     () => bots.find((b) => b.id === selectedBot) ?? withData[0] ?? bots[0],
     [bots, withData, selectedBot],
   );
-  // 模拟交易所自带的是几条"走向"而不是标的：表头按连接换词，别指着一堆走向叫标的
-  const symLabel = symbolColumnLabel(
-    store.connections.find((c) => c.id === selected?.connectionId)?.adapter?.builtinSymbols,
-  );
-
   if (!state) return <div className="loading">正在连接 AAAAI 服务…</div>;
 
   const runningCount = bots.filter((b) => b.state.status === "running").length;
@@ -176,7 +171,7 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
               {selected.state.error ? (
                 <div className="notice notice-error">运行出错：{selected.state.error}</div>
               ) : tab === "positions" ? (
-                <BotPositions bot={selected} symLabel={symLabel} />
+                <BotPositions bot={selected} />
               ) : tab === "trades" ? (
                 <BotTrades bot={selected} />
               ) : (
@@ -211,7 +206,7 @@ export function DashboardPage({ store, onNavigate }: { store: AppStore; onNaviga
 }
 
 /** 机器人持仓：用它自己的资产配置视图（与交易机器人页一致）。 */
-function BotPositions({ bot, symLabel }: { bot: Bot; symLabel: string }) {
+function BotPositions({ bot }: { bot: Bot }) {
   const a = bot.state.allocation;
   if (!a || a.holdings.length === 0) {
     return <div className="dim small">当前全部现金 —— 尚未建仓</div>;
@@ -221,7 +216,7 @@ function BotPositions({ bot, symLabel }: { bot: Bot; symLabel: string }) {
       <table className="table">
         <thead>
           <tr>
-            <th>{symLabel}</th>
+            <th>标的</th>
             <th className="num">数量</th>
             <th className="num">均价</th>
             <th className="num">现价</th>

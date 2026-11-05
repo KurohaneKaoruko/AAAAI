@@ -14,8 +14,8 @@ export interface AdapterMeta {
   supportsTestnet: boolean;
   /** 现货/合约；缺省按现货处理 */
   tradingMode?: "spot" | "futures";
-  /** 行情来源：真实 / 本地生成 */
-  marketData?: "real" | "simulated";
+  /** 行情来源：模拟交易所下线后恒为真实行情 */
+  marketData?: "real";
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
@@ -270,8 +270,8 @@ export interface BotAction {
 
 /** 一次历史模拟（回测）的结果。成交一次性全出——它就是要把整段历史跑完。 */
 export interface BacktestResult {
-  /** real = 真实行情；simulated = 本地随机生成的演示行情（不构成任何证据） */
-  marketData: "real" | "simulated";
+  /** 行情来源：模拟交易所下线后恒为 real */
+  marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
   connectionLabel?: string;
@@ -291,11 +291,6 @@ export interface BacktestResult {
   };
   /** 初始资金（权益曲线基准） */
   initialCash: number;
-  /**
-   * 随机行情的情景种子（真实行情没有）。不填则每次回测都会掷新路径；
-   * 想原样重现某一次结果，把这个数填回去。
-   */
-  scenarioSeed?: number;
   durationMs: number;
   strategyId: string;
   strategyName: string;
@@ -369,8 +364,8 @@ export interface Bot {
   modelLabels: string[];
   /** 连接名称（图表/卡片展示数据来自哪个交易所） */
   connectionLabel: string;
-  /** 行情来源：real = 真实行情；simulated = 模拟交易所的随机行情 */
-  marketData: "real" | "simulated";
+  /** 行情来源：模拟交易所下线后恒为 real */
+  marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
   /** 拆单执行统计（paper 券商且开了拆单时才有） */
@@ -555,15 +550,13 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
-  /** real = 真实行情；simulated = 本地随机行情（名次只在这条随机路径上成立） */
-  marketData: "real" | "simulated";
+  /** 行情来源：模拟交易所下线后恒为 real */
+  marketData: "real";
   /** 现货 / 合约：合约模式下负仓位代表做空 */
   tradingMode: "spot" | "futures";
   connectionLabel?: string;
   symbols: string[];
   bars: number;
-  /** 随机行情的情景种子（真实行情没有）：所有参赛者共用的那一条路径 */
-  scenarioSeed?: number;
   initialCash: number;
   finishedAt: string;
   durationMs: number;
@@ -658,8 +651,8 @@ export interface EngineState {
     connectionAdapterId: string | null;
     /** 现货 / 合约 */
     tradingMode: "spot" | "futures";
-    /** 真实 / 本地生成行情 */
-    marketData: "real" | "simulated";
+    /** 模拟交易所下线后恒为真实行情 */
+    marketData: "real";
     interval: string;
     symbols: string[];
     error: string | null;

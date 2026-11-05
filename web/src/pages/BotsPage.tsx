@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
-import type { Bot, BotAllocation, BotInput, Connection, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
+import type { Bot, BotAllocation, BotInput, DecisionSource, LlmProfile, PopularSymbol, StrategyProfile } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SOURCE_ZH } from "../components/DecisionSourceSwitch";
@@ -174,7 +174,6 @@ export function BotsPage({
               <BotCard
                 key={b.id}
                 bot={b}
-                builtin={usesOnlyBuiltinSymbols(store.connections.find((c) => c.id === b.connectionId), b.symbols)}
                 strategies={strategies}
                 busy={busyId === b.id}
                 onStart={() => void start(b.id)}
@@ -208,21 +207,8 @@ export function BotsPage({
   );
 }
 
-/**
- * 这台机器人用的就是交易所自带的那几条走向（模拟交易所）？
- *
- * 只有"确实就是那几条"时才这么叫：老机器人可能只用了其中两条，
- * 那时写成"自带"就成了假话 —— 卡片上写的必须能在详情页对得上。
- */
-function usesOnlyBuiltinSymbols(conn: Connection | undefined, symbols: string[]): boolean {
-  if (!conn?.adapter?.builtinSymbols) return false;
-  const codes = (conn.adapter.defaultSymbols ?? []).map((s) => s.symbol);
-  return codes.length > 0 && codes.length === symbols.length && codes.every((c) => symbols.includes(c));
-}
-
 function BotCard({
   bot,
-  builtin,
   strategies,
   busy,
   onStart,
@@ -233,8 +219,6 @@ function BotCard({
   onOpenDetail,
 }: {
   bot: Bot;
-  /** 连接没有标的、只有自带走向（模拟交易所）：不列标的 —— 那不是用户挑的东西 */
-  builtin: boolean;
   strategies: StrategyProfile[];
   busy: boolean;
   onStart: () => void;
@@ -267,12 +251,6 @@ function BotCard({
               合约模式
             </span>
           )}
-          {/* 行情来源：跑在本地生成行情上的机器人，成交与盈亏不是真实市场的结果 */}
-          {bot.marketData === "simulated" && (
-            <span className="chip chip-sm chip-off" title="K 线由本地生成的走向叠加随机噪声">
-              本地生成行情 · 演示
-            </span>
-          )}
           {/* 成交方式必须一眼可辨：干跑（默认）与真实下单长得不能一样 */}
           {bot.paperTrading && bot.state.status === "running" && (
             <span className="chip chip-sm chip-ok">模拟成交 · 运行中</span>
@@ -302,15 +280,9 @@ function BotCard({
       </div>
 
       <div className="bot-meta">
-        {builtin ? (
-          <span>
-            <em>走向</em> <b className="mono">{bot.symbols.join(" / ")}</b>
-          </span>
-        ) : (
-          <span>
-            <em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b>
-          </span>
-        )}
+        <span>
+          <em>标的</em> <b className="mono">{bot.symbols.join(" / ")}</b>
+        </span>
         <span>
           <em>模型</em>{" "}
           <b>{bot.modelLabels.length > 0 ? bot.modelLabels.join(bot.decisionSource === "hybrid" ? " → " : " / ") : "未选择"}</b>
@@ -533,19 +505,12 @@ function BotForm({
   const [popular, setPopular] = useState<PopularSymbol[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  /**
-   * 没有标的、只有自带走向的交易所（模拟交易所）：界面上不出现"挑标的"这一步。
-   * 服务端建机器人时也会自动补上这几条走向，所以这里不选也照样能建。
-   */
   const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
-  const connBuiltin = connAdapter?.builtinSymbols ?? false;
-  const connBuiltinSlots = (connAdapter?.defaultSymbols ?? []).map((s) => s.symbol);
 
   useEffect(() => {
-    // 自带走向的连接不用拉"常用清单"：那几条走向不是给人挑的
-    if (!connectionId || connBuiltin) return;
+    if (!connectionId) return;
     void api.popular(connectionId, 24).then((d) => setPopular(d.symbols)).catch(() => setPopular([]));
-  }, [connectionId, connBuiltin]);
+  }, [connectionId]);
 
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   // 实时 ≠ 实盘：是否真下单取决于「风控」页的执行方式
@@ -617,10 +582,7 @@ function BotForm({
         {connAdapter?.tradingMode === "futures" && (
           <Notice tone="info">
             该连接是<b>合约模式</b>：策略直接做空，无需开关，组合按保证金账户记账。
-            {connAdapter.supportsTrading
-              ? " 这是模拟合约行情，成交在本地完成。"
-              : " 该连接只提供真实合约行情，下单/撮合在本地完成，不会发真实订单。"}
-            不模拟资金费、维持保证金与强平。
+            行情来自交易所真实合约；模拟成交时撮合在本地完成，不模拟资金费、维持保证金与强平。
           </Notice>
         )}
         <SelectField
@@ -657,15 +619,7 @@ function BotForm({
       </div>
 
       <div className="symbol-picker">
-        <div className="symbol-picker-head">
-          {connBuiltin ? "走向（交易所自带）" : "运行标的（可多选）"}
-        </div>
-        {connBuiltin ? (
-          <div className="dim small">
-            模拟交易所没有标的：它自带 {connBuiltinSlots.length} 条走向（{connBuiltinSlots.join(" / ")}），
-            开跑时全都在内 —— 它跟任何真实市场无关，没有「挑哪几个品种」这回事。
-          </div>
-        ) : (
+        <div className="symbol-picker-head">运行标的（可多选）</div>
         <div className="chip-row">
           {[...new Set([...connSymbols, ...popular.map((p) => p.symbol)])].map((s) => (
             <button
@@ -680,10 +634,9 @@ function BotForm({
             </button>
           ))}
           {connSymbols.length === 0 && popular.length === 0 && (
-            <span className="dim small">该连接的候选池为空：到「交易所连接」页，在连接卡片下方「标的」里添加</span>
+            <span className="dim small">该连接的标的为空：到「交易所连接」页，在连接卡片下方「标的」里添加</span>
           )}
         </div>
-        )}
       </div>
 
       {modelKinds.length > 0 && (
@@ -744,7 +697,7 @@ function BotForm({
         <NumberField label="回撤熔断" hint={pct(maxDD, 0)} value={maxDD} step={0.01} min={0.01} max={1} onChange={setMaxDD} />
       </div>
 
-      {!connBuiltin && symbols.length === 0 && <Notice tone="warn">请至少选择一个标的</Notice>}
+      {symbols.length === 0 && <Notice tone="warn">请至少选择一个标的</Notice>}
       {err && <Notice tone="error">{err}</Notice>}
 
       <div className="btn-row">
@@ -752,7 +705,7 @@ function BotForm({
           variant="primary"
           onClick={submit}
           busy={busy}
-          disabled={!name.trim() || (!connBuiltin && symbols.length === 0)}
+          disabled={!name.trim() || symbols.length === 0}
         >
           {editing ? "保存" : "创建机器人"}
         </Button>

@@ -10,7 +10,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { useAppStore, type AppStore } from "../state/useAppStore";
 import { Button, Empty, Notice, NumberField, Panel, SelectField } from "../components/ui";
 import { EquityChart } from "../components/EquityChart";
 import { KlineChart, type TradeMarker } from "../components/KlineChart";
@@ -32,14 +31,13 @@ export function BacktestPage() {
   const [interval, setInterval] = useState("1d");
   const [barCount, setBarCount] = useState(200);
   const [cash, setCash] = useState(100000);
-  /** 情景种子：留空 = 每次掷新路径；填数字 = 沿用那一条（复现） */
-  const [seedText, setSeedText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
   /** 盘面回放：当前显示的标的；多标的时由选择器切换 */
   const [chartSymbol, setChartSymbol] = useState("");
   const [showTrades, setShowTrades] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +49,8 @@ export function BacktestPage() {
       if (!strategyId && s.strategies.length > 0) setStrategyId(s.strategies[0]!.id);
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      setLoading(false);
     }
   }, [connectionId, strategyId]);
 
@@ -61,40 +61,21 @@ export function BacktestPage() {
   const connSymbols = watchlist.filter((w) => w.connectionId === connectionId).map((w) => w.symbol);
   const strategy = strategies.find((s) => s.id === strategyId);
   const local = strategy ? strategy.decisionSource === "rules" : true;
-  // 模拟行情 = 随机行情。结果必须自己先说清楚，不能让用户拿去当证据。
   const selectedConnection = connections.find((c) => c.id === connectionId);
-  const simulatedConnection = selectedConnection?.adapter.marketData === "simulated";
   const futuresConnection = selectedConnection?.adapter.tradingMode === "futures";
-  /**
-   * 没有标的、只有自带走向的交易所（模拟交易所）：没有"选标的"这一步，
-   * 用哪几条走向由服务端按连接解析（同 runTarget）。界面上只列出来给人知道用了哪几条。
-   */
-  const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
-  const builtin = connAdapter?.builtinSymbols ?? false;
-  const builtinSymbols = (connAdapter?.defaultSymbols ?? []).map((s) => s.symbol);
-
-  // 非法种子宁可不认也不假装在复现：这里明确说"会按随机跑"，
-  // 而不是静默丢掉输入 —— 否则用户以为在同一条路上核对，其实换了条路。
-  const seedInput = seedText.trim();
-  const seedOk = seedInput === "" || (Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0);
 
   const run = async () => {
-    if (!connectionId || !strategyId) return;
-    if (!builtin && symbols.length === 0) return;
+    if (!connectionId || !strategyId || symbols.length === 0) return;
     setBusy(true);
     setErr(null);
     try {
-      const seed = seedText.trim() === "" ? undefined : Number(seedText.trim());
       const r = await api.runBacktest({
         connectionId,
-        // 自带标的的连接不用传：服务端按连接解析（传了也没用，那边本来就不看候选池）
-        ...(builtin ? {} : { symbols }),
+        symbols,
         strategyId,
         interval,
         barCount,
         initialCash: cash,
-        // 种子非法就当没填：宁可在新路径上跑，也不要假装在复现
-        ...(seed !== undefined && Number.isInteger(seed) && seed >= 0 ? { scenarioSeed: seed } : {}),
       });
       setResult(r.result);
     } catch (e) {
@@ -176,45 +157,26 @@ export function BacktestPage() {
           </div>
 
           <div className="symbol-picker">
-            <div className="symbol-picker-head">
-              {builtin ? "走向（交易所自带）" : "回测标的（可多选）"}
+            <div className="symbol-picker-head">回测标的（可多选）</div>
+            <div className="chip-row">
+              {[...new Set(connSymbols)].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`symbol-chip ${symbols.includes(s) ? "symbol-on" : ""}`}
+                  onClick={() =>
+                    setSymbols((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+                  }
+                >
+                  {s}
+                </button>
+              ))}
             </div>
-            {builtin ? (
-              <>
-                <div className="dim small">
-                  模拟交易所没有标的，也不用选 —— 开跑时它把这 {builtinSymbols.length} 条走向都算进来：
-                </div>
-                <div className="chip-row">
-                  {builtinSymbols.map((s) => (
-                    <span key={s} className="chip chip-sm mono">
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="chip-row">
-                  {[...new Set(connSymbols)].map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`symbol-chip ${symbols.includes(s) ? "symbol-on" : ""}`}
-                      onClick={() =>
-                        setSymbols((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
-                      }
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                {connSymbols.length === 0 && (
-                  <span className="dim small">该连接的候选池为空：到「交易所连接」页，在连接卡片下方「标的」里添加</span>
-                )}
-                {connSymbols.length > 0 && symbols.length === 0 && (
-                  <span className="dim small">还没选标的 —— 点上面的代码即可选中</span>
-                )}
-              </>
+            {connSymbols.length === 0 && (
+              <span className="dim small">该连接的标的为空：到「交易所连接」页，在连接卡片下方「标的」里添加</span>
+            )}
+            {connSymbols.length > 0 && symbols.length === 0 && (
+              <span className="dim small">还没选标的 —— 点上面的代码即可选中</span>
             )}
           </div>
 
@@ -226,66 +188,25 @@ export function BacktestPage() {
               回测里的负持仓就是空头，不是记账错误。
             </Notice>
           )}
-          {simulatedConnection && (
-            <Notice tone="warn">
-              当前连接是「模拟交易所」：它没有标的，只有几条本地生成的走向
-              {builtinSymbols.length > 0 ? `（${builtinSymbols.join(" / ")}）` : ""}。
-              走向的形状是写死的 —— 单边上行就一路上行、急速跳水就横盘后急跌；叠加的噪声每次重掷，
-              所以两次的数字不会完全一样。
-              形状按 K 线根数铺开（600 根一周期），而噪声按时间放大 —— 周期越长每根上的噪声相对越大：
-              同一条策略在 1m 与 1d 上的数字本来就不该一样，短周期看走向更清楚。
-              它测的是「策略在不同走向下分别赚不赚」，跟任何真实市场无关，
-              <b>不构成策略表现的任何证据</b>。想看真实历史，请换用已连通的真实行情连接。
-            </Notice>
-          )}
           <div className="btn-row btn-row-auto">
             <Button
               variant="primary"
               onClick={run}
               busy={busy}
-              disabled={!connectionId || (!builtin && symbols.length === 0) || !strategyId || !local}
+              disabled={!connectionId || symbols.length === 0 || !strategyId || !local}
               title={
                 !local
                   ? "该策略的决策来源是大模型：回放里问模型等于用后见之明，请用「模拟对照」"
-                  : !builtin && symbols.length === 0
+                  : symbols.length === 0
                     ? "先选至少一个标的"
                     : undefined
               }
             >
               {busy ? "回测中…" : "开始回测"}
             </Button>
-            {!builtin && symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
+            {symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
             {!local && <span className="dim small">该策略的决策来源不支持回测</span>}
           </div>
-          {simulatedConnection && (
-            <div className="field-row small" style={{ marginTop: 8 }}>
-              <label htmlFor="bt-seed">情景种子</label>
-              <input
-                id="bt-seed"
-                className="input"
-                style={{ width: 140 }}
-                inputMode="numeric"
-                placeholder="留空 = 每次随机"
-                value={seedText}
-                onChange={(e) => setSeedText(e.target.value)}
-                title="模拟行情每次都会重掷随机噪声。想把某一次结果原样重跑，把当时显示的种子填到这里。"
-              />
-              <span className="dim">
-                {result?.scenarioSeed !== undefined ? (
-                  <>
-                    上次用的种子 <b>{result.scenarioSeed}</b>
-                  </>
-                ) : (
-                  "每次结果都不同才看得出策略稳不稳"
-                )}
-              </span>
-              {!seedOk && (
-                <Notice tone="warn">
-                  「{seedInput}」不是合法种子（要 0 或正整数）：这次会按<b>每次随机</b>跑，不是在复现。
-                </Notice>
-              )}
-            </div>
-          )}
           {err && <div className="bot-error">{err}</div>}
         </div>
       </Panel>
@@ -301,22 +222,10 @@ export function BacktestPage() {
               本地撮合不模拟资金费、维持保证金与强平；结果只用于验证方向与仓位逻辑。
             </Notice>
           )}
-          {result.marketData === "simulated" ? (
-            <Notice tone="error">
-              这份结果跑在<b>本地生成的行情</b>上（{result.connectionLabel ?? "模拟交易所"}）：
-              走向是编的、噪声是随机的，不代表策略在真实市场的表现，别拿它做决策。
-              换成真实行情连接再跑一次。
-              <div className="small" style={{ marginTop: 4 }}>
-                本次情景种子 <b>{result.scenarioSeed ?? "—"}</b>：再点一次「开始回测」会重掷噪声，
-                数字自然不同；想让这一次原样重现，才把这个种子用回去。
-              </div>
-            </Notice>
-          ) : (
-            <Notice tone="success">
-              行情来自 {result.connectionLabel ?? "真实数据源"}；成交按<b>决策的下一根 K 线开盘价</b>模拟，
-              已计手续费与滑点 —— 策略看不到还没发生的那一段。
-            </Notice>
-          )}
+          <Notice tone="success">
+            行情来自 {result.connectionLabel ?? "真实数据源"}；成交按<b>决策的下一根 K 线开盘价</b>模拟，
+            已计手续费与滑点 —— 策略看不到还没发生的那一段。
+          </Notice>
           <div className="grid-4">
             <Stat label="期末权益" value={money(result.metrics.finalEquity, 2)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} spark={result.equityCurve.map((p) => p.equity)} />
             <Stat label="收益率" value={signedPct(result.metrics.totalReturn)} tone={result.metrics.totalReturn >= 0 ? "up" : "down"} />
@@ -374,7 +283,7 @@ export function BacktestPage() {
             <table className="table" style={{ marginTop: 12 }}>
               <thead>
                 <tr>
-                  <th>{builtin ? "走向" : "标的"}</th>
+                  <th>标的</th>
                   <th className="num">已实现盈亏</th>
                   <th className="num">成交笔数</th>
                 </tr>
@@ -415,11 +324,21 @@ export function BacktestPage() {
 
       {!result && !busy && (
         <Panel title="怎么用">
-          <Empty>
-            选好连接与策略{builtin ? "（这个交易所没有标的，不用选）" : "与标的"}后点「开始回测」。
-            结果只在本页显示，不写机器人的任何统计 ——
-            机器人只根据实时行情跑，这里专门回答「这套参数在那段历史里行不行」。
-          </Empty>
+          {loading ? (
+            <div className="loading-inline">正在读取连接、策略与标的…</div>
+          ) : connections.length === 0 ? (
+            <Empty>
+              还没有可用的行情连接。先到「交易所连接」页加一条连接并挑好标的，再回来回测。
+            </Empty>
+          ) : strategies.length === 0 ? (
+            <Empty>还没有策略。先到「策略」页建一条量化策略，再回来回测。</Empty>
+          ) : (
+            <Empty>
+              选好连接、策略与标的{connSymbols.length === 0 ? "（当前连接的标的为空，先去「交易所连接」添加）" : ""}后点「开始回测」。
+              结果只在本页显示，不写机器人的任何统计 ——
+              机器人只根据实时行情跑，这里专门回答「这套参数在那段历史里行不行」。
+            </Empty>
+          )}
         </Panel>
       )}
     </div>

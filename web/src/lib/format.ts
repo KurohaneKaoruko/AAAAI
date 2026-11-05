@@ -99,16 +99,6 @@ export const ASSET_LABEL: Record<string, string> = {
   mixed: "全品类",
 };
 
-/**
- * 表格里"你持有的那个东西"这一列该叫什么。
- *
- * 真实交易所里是标的（BTCUSDT / AAPL）；模拟交易所没有标的，它的交易物是
- * 几条本地生成的**行情走向**（单边上行 / 急速跳水…）。一律写"标的"就是在
- * 指着一堆走向叫标的 —— 那个词在这里是错的。
- */
-export const symbolColumnLabel = (builtinSymbols: boolean | undefined): string =>
-  builtinSymbols ? "走向" : "标的";
-
 export const TOPIC_LABEL: Record<string, string> = {
   "market.bar": "K线",
   "agent.market_view": "分析",

@@ -16,7 +16,7 @@ import type { AppStore } from "../state/useAppStore";
 import type { ComparisonResult, EngineState, Participant, RunnerResult } from "../types";
 import { Button, Empty, Notice, NumberField, Panel, SelectField } from "../components/ui";
 import { Badge } from "../components/ui";
-import { money, pct, signed, signedPct, time } from "../lib/format";
+import { money, pct, signedPct, time } from "../lib/format";
 
 const PALETTE = ["#4f8ef7", "#2fbf82", "#e3a53c", "#c699f0", "#f0554b", "#57b6c9", "#a06ef7", "#94a3b8"];
 
@@ -44,22 +44,22 @@ const engineLabel = (engine: string): string => ENGINE_LABEL[engine] ?? engine;
 
 const MAX_RUNNERS = 6;
 
-export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate?: (target: "llm") => void }) {
+export function ComparePage({
+  store,
+  onNavigate,
+}: {
+  store: AppStore;
+  onNavigate?: (target: "llm" | "exchanges" | "bots") => void;
+}) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ComparisonResult | null>(store.state?.comparison ?? null);
-  /** 多轮压力测试：每轮一条新的随机路径，单轮名次不再被当成结论 */
-  const [series, setSeries] = useState<ComparisonResult[]>([]);
-  const [rounds, setRounds] = useState(3);
-  const [progress, setProgress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bars, setBars] = useState(store.state?.config?.market?.barCount ?? 200);
   /** 对照连接：默认跟全局一致，但允许在这里换（机器人连不同交易所时尤其重要） */
   const [connectionId, setConnectionId] = useState(store.state?.runTarget?.connectionId ?? "");
   const [target, setTarget] = useState<EngineState["runTarget"] | null>(store.state?.runTarget ?? null);
-  /** 情景种子：留空 = 掷一条新路径；填数字 = 沿用那一条（复现） */
-  const [seedText, setSeedText] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   const loadParticipants = useCallback(async (cid: string) => {
@@ -100,22 +100,13 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
   /** 对照标的以服务端解析的 target 为准（它按连接过滤过） */
   const targetError = target?.error ?? null;
   const symbols = target?.symbols ?? [];
-  /** 跑在随机行情上：此时"每次结果都不同"要说清楚，否则像 bug */
-  const simulatedTarget = target?.marketData === "simulated";
   const futuresTarget = target?.tradingMode === "futures";
-
-  // 非法种子宁可不认也不假装在复现（服务端也是这个口径）：界面必须说出来，
-  // 否则用户填了个错的种子、以为在复现某次名次，其实跑的是另一条路。
-  const seedInput = seedText.trim();
-  const seedOk = seedInput === "" || (Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0);
 
   const decisionInterval = Math.max(1, store.state?.config?.llm?.decisionInterval ?? 10);
   const modelRunners = participants.filter(
     (p) => picked.has(p.key) && !p.unavailable && p.decisionSource !== "rules",
   ).length;
-  const estimatedCalls = Math.floor(bars / decisionInterval) * modelRunners * (simulatedTarget ? Math.max(1, rounds) : 1);
-  /** 真实行情只有一条历史，跑多轮也是同一个数；所以只在随机行情上允许多轮 */
-  const effectiveRounds = simulatedTarget ? Math.max(1, Math.min(20, Math.round(rounds))) : 1;
+  const estimatedCalls = Math.floor(bars / decisionInterval) * modelRunners;
 
   const blocked = useMemo(() => {
     if (!loaded) return "正在读取参赛者…";
@@ -145,46 +136,28 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
     if (blocked) return;
     setBusy(true);
     setError(null);
-    setSeries([]);
-    const seed =
-      seedInput !== "" && Number.isInteger(Number(seedInput)) && Number(seedInput) >= 0
-        ? Number(seedInput)
-        : undefined;
-    const runs: ComparisonResult[] = [];
     try {
-      for (let i = 0; i < effectiveRounds; i += 1) {
-        setProgress(effectiveRounds > 1 ? `第 ${i + 1} / ${effectiveRounds} 轮` : "");
-        const r = await api.runComparison({
-          keys: [...picked],
-          connectionId,
-          bars,
-          // 种子非法就当没填：宁可在新路径上跑，也不要假装在复现。
-          // 多轮时以用户给的种子为起点逐轮 +1，保证整组实验可复现。
-          ...(seed !== undefined ? { scenarioSeed: (seed + i) >>> 0 } : {}),
-        });
-        runs.push(r.result);
-        setResult(r.result);
-        setSeries([...runs]);
-      }
-      const last = runs[runs.length - 1];
-      const top = last?.results.find((x) => x.id === last.winners[0]);
-      const suffix = runs.length > 1 ? `${runs.length} 轮完成，最后一轮` : "对照完成";
-      store.toast("success", `${suffix}：${top?.label ?? "无"} 领先（${pct(top?.totalReturn ?? 0)}）`);
+      const r = await api.runComparison({
+        keys: [...picked],
+        connectionId,
+        bars,
+      });
+      setResult(r.result);
+      const top = r.result.results.find((x) => x.id === r.result.winners[0]);
+      store.toast("success", `对照完成：${top?.label ?? "无"} 领先（${pct(top?.totalReturn ?? 0)}）`);
     } catch (err) {
       const msg = (err as Error).message;
       setError(msg);
       store.toast("error", msg);
     } finally {
       setBusy(false);
-      setProgress("");
     }
-  }, [blocked, picked, bars, connectionId, effectiveRounds, seedInput, store]);
+  }, [blocked, picked, bars, connectionId, store]);
 
   const ranked = useMemo(
     () => (result ? [...result.results].filter((r) => r.ok).sort((a, b) => b.totalReturn - a.totalReturn) : []),
     [result],
   );
-  const aggregates = useMemo(() => (series.length > 1 ? aggregateRounds(series) : []), [series]);
 
   const groups: { type: Participant["type"]; title: string; hint: string }[] = [
     { type: "bot", title: "机器人", hint: "直接拿配置好的机器人上场：它引用哪条策略、哪些模型，就按那套跑" },
@@ -200,7 +173,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
         subtitle="同一份行情、同一套风控、同一笔初始资金 —— 机器人、量化策略、模型同场竞技，比「谁更会赚钱」"
         actions={
           <Button variant="primary" onClick={() => void run()} busy={busy} disabled={blocked !== null}>
-            {busy ? progress || "对照中…" : result ? "重新对照" : "开始对照"}
+            {busy ? "对照中…" : result ? "重新对照" : "开始对照"}
           </Button>
         }
       >
@@ -210,18 +183,27 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             <>
               <span className="compare-status-lead">还不能开始：</span>
               {blocked}
-              {targetError && targetError.includes("候选池") && onNavigate && (
-                <Button small onClick={() => onNavigate("llm")}>
-                  查看连接 →
+              {targetError && onNavigate && (
+                <Button small onClick={() => onNavigate("exchanges")}>
+                  去交易所连接 →
                 </Button>
+              )}
+              {!targetError && participants.length === 0 && loaded && onNavigate && (
+                <>
+                  <Button small onClick={() => onNavigate("bots")}>
+                    先去建机器人 →
+                  </Button>
+                  <Button small onClick={() => onNavigate("llm")}>
+                    去模型管理 →
+                  </Button>
+                </>
               )}
             </>
           ) : (
             <>
               <span className="compare-status-lead">可以开始：</span>
-              {picked.size} 个参赛者 · {symbols.length} 个{target?.symbolsBuiltIn ? "走向" : "标的"}（{target?.connectionLabel}）
+              {picked.size} 个参赛者 · {symbols.length} 个标的（{target?.connectionLabel}）
               {target?.tradingMode === "futures" ? " · 合约模式" : ""} · {bars} 根/标的
-              {effectiveRounds > 1 ? ` · ${effectiveRounds} 轮随机行情` : ""}
               {modelRunners > 0 && (
                 <>
                   {" "}
@@ -243,7 +225,6 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             onChange={(v) => {
               setConnectionId(v);
               setResult(null);
-              setSeries([]);
               setError(null);
             }}
           />
@@ -256,53 +237,10 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             step={20}
             onChange={setBars}
           />
-          {simulatedTarget ? (
-            <NumberField
-              label="随机路径轮数"
-              hint="单轮=一条路径；多轮看稳定性"
-              value={rounds}
-              min={1}
-              max={20}
-              onChange={setRounds}
-            />
-          ) : (
-            <div className="field">
-              <span className="field-label">随机路径轮数</span>
-              <div className="dim small">
-                真实行情只有一条历史，重复跑结果相同；要看随机性请选模拟行情连接。
-              </div>
-            </div>
-          )}
-          <div className="field">
-            <span className="field-label">情景种子（随机行情才用得上）</span>
-            <input
-              className="input"
-              style={{ width: 160 }}
-              inputMode="numeric"
-              placeholder="留空 = 每次随机"
-              value={seedText}
-              onChange={(e) => setSeedText(e.target.value)}
-              title="模拟行情每次对照都会重掷一层随机噪声，所有选手共用同一份。多轮时以这个种子为起点逐轮 +1；留空则每轮随机。"
-            />
-            {!seedOk && (
-              <Notice tone="warn">
-                「{seedInput}」不是合法种子（要 0 或正整数）：这次会掷一条新路径，不是在复现。
-              </Notice>
-            )}
-            {seedOk && effectiveRounds > 1 && seedInput !== "" && (
-              <div className="dim small" style={{ marginTop: 4 }}>
-                将从 {Number(seedInput)} 开始，连续跑 {effectiveRounds} 条可复现路径。
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="field" style={{ marginTop: 8 }}>
-          <span className="field-label">
-            {target?.symbolsBuiltIn
-              ? "对照走向（交易所自带，不用选）"
-              : "对照标的（来自候选池，服务端按连接解析）"}
-          </span>
+          <span className="field-label">对照标的（来自候选池，服务端按连接解析）</span>
           <div className="chip-row" style={{ marginTop: 6 }}>
             {symbols.length > 0 ? (
               symbols.map((s) => (
@@ -400,34 +338,18 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
               本地撮合不模拟资金费、维持保证金与强平；真实合约下单未开放。
             </div>
           )}
-          {simulatedTarget && (
-            <div className="small" style={{ marginTop: 4 }}>
-              行情来自模拟行情：走向形状是写死的，叠加的噪声<b>每轮都重掷，所有选手在同一轮共用一条路径</b>。
-              单轮名次只代表那一条路径；用上面的「随机路径轮数」跑多轮，看正收益占比、最差一轮和平均排名，
-              才能判断是策略稳还是这一把运气好。
-            </div>
-          )}
-          {!simulatedTarget && effectiveRounds === 1 && (
-            <div className="small" style={{ marginTop: 4 }}>
-              真实行情只有一条历史，重复跑会给同一个结果 —— 这不是 bug；要测随机性请选模拟行情连接。
-            </div>
-          )}
+          <div className="small" style={{ marginTop: 4 }}>
+            真实行情只有一条历史，重复跑会给同一个结果 —— 这不是 bug；比的是同一段行情里谁的决策更好。
+          </div>
         </Notice>
       </Panel>
 
       {result && (
         <>
           <Panel
-            title={series.length > 1 ? `最后一轮战绩（共 ${series.length} 轮）` : "战绩排行"}
-            subtitle={`${result.bars} 根 K 线 · ${result.symbols.join(" / ")} · ${result.tradingMode === "futures" ? "合约模式 · " : ""}耗时 ${(result.durationMs / 1000).toFixed(1)}s · ${time(result.finishedAt)}${result.scenarioSeed !== undefined ? ` · 情景种子 ${result.scenarioSeed}` : ""}`}
+            title="战绩排行"
+            subtitle={`${result.bars} 根 K 线 · ${result.symbols.join(" / ")} · ${result.tradingMode === "futures" ? "合约模式 · " : ""}耗时 ${(result.durationMs / 1000).toFixed(1)}s · ${time(result.finishedAt)}`}
           >
-            {result.marketData === "simulated" && (
-              <Notice tone="error">
-                这次对照跑在<b>本地生成的行情</b>上（{result.connectionLabel ?? "模拟行情"}）：
-                名次只说明"在这一轮随机路径上谁更强"，不代表真实市场里的强弱。
-                判断策略稳不稳，请看下方的多轮稳定性（或把轮数调到 5 以上）；看真实表现请换用真实行情连接。
-              </Notice>
-            )}
             <div className="hint-line">
               看「总收益」排名；<b>最大回撤</b>越小越稳；<b>胜率</b>是盈利交易占比；
               <b>盈亏比</b>是平均盈利 / 平均亏损（∞ 表示没有亏损交易）。收益高但回撤也大的选手，实际不一定更好用。
@@ -482,58 +404,7 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
             </div>
           </Panel>
 
-          {aggregates.length > 0 && (
-            <Panel
-              title={`多轮稳定性（${series.length} 条随机路径）`}
-              subtitle="每轮换一条新行情，所有选手仍共用同一轮；单轮冠军可能是运气，多轮分布才说明问题"
-            >
-              <div className="table-scroll">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>选手</th>
-                      <th className="num">正收益轮次</th>
-                      <th className="num">平均收益</th>
-                      <th className="num">中位收益</th>
-                      <th className="num">最差一轮</th>
-                      <th className="num">平均回撤</th>
-                      <th className="num">平均排名</th>
-                      <th className="num">第一名</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {aggregates.map((a, i) => (
-                      <tr key={a.id} className={i === 0 ? "row-winner" : ""}>
-                        <td className="strong">
-                          <span className="runner-dot" style={{ background: PALETTE[i % PALETTE.length] }} />
-                          {a.label}
-                        </td>
-                        <td className={`num mono ${a.positive === a.runs ? "up" : a.positive >= a.runs * 0.9 ? "warn" : "down"}`}>
-                          {a.positive} / {a.runs}
-                        </td>
-                        <td className={`num mono ${a.avgReturn >= 0 ? "up" : "down"}`}>{signedPct(a.avgReturn)}</td>
-                        <td className={`num mono ${a.medianReturn >= 0 ? "up" : "down"}`}>{signedPct(a.medianReturn)}</td>
-                        <td className={`num mono ${a.worstReturn >= 0 ? "up" : "down"}`}>{signedPct(a.worstReturn)}</td>
-                        <td className="num mono dim">{pct(a.avgDrawdown)}</td>
-                        <td className="num mono">{a.avgRank.toFixed(2)}</td>
-                        <td className="num mono">{a.firsts}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Notice tone="info">
-                「正收益轮次」是期末权益高于初始资金的轮数 —— 这是用户口径里的「正收益概率」。
-                90% 以上只说明在这套模拟行情的噪声里较稳，<b>不代表真实市场</b>；还要同时看最差一轮与回撤。
-                每轮的种子与名次可以在下方「最后一轮」的详情里核对；用同一个起始种子可以把整组实验原样复现。
-              </Notice>
-              <div className="dim small" style={{ marginTop: 6 }}>
-                本组情景种子：{series.map((s) => s.scenarioSeed ?? "—").join(" / ")}
-              </div>
-            </Panel>
-          )}
-
-          <Panel title="权益曲线对比" subtitle={series.length > 1 ? `最后一轮（第 ${series.length} 轮）的权益曲线` : "同一坐标系，越靠上越好"}>
+          <Panel title="权益曲线对比" subtitle="同一坐标系，越靠上越好">
             <CompareChart results={ranked} initialCash={result.initialCash} />
           </Panel>
 
@@ -554,62 +425,6 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
       )}
     </div>
   );
-}
-
-interface RoundAggregate {
-  id: string;
-  label: string;
-  runs: number;
-  positive: number;
-  firsts: number;
-  avgReturn: number;
-  medianReturn: number;
-  worstReturn: number;
-  avgDrawdown: number;
-  avgRank: number;
-}
-
-function medianOf(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
-}
-
-/**
- * 把多轮对照压成一张稳定性表。
- *
- * 名次按每轮各自的总收益重排（不是把所有轮混在一起比绝对值）：
- * 行情换了，收益水平会整体平移，但"同一轮里谁更强"仍可比。
- */
-function aggregateRounds(series: ComparisonResult[]): RoundAggregate[] {
-  if (series.length === 0) return [];
-  const ids = series[0]!.results.filter((r) => r.ok).map((r) => r.id);
-  const out: RoundAggregate[] = [];
-  for (const id of ids) {
-    const rows = series
-      .map((round) => {
-        const r = round.results.find((x) => x.id === id && x.ok);
-        if (!r) return null;
-        const ranked = [...round.results.filter((x) => x.ok)].sort((a, b) => b.totalReturn - a.totalReturn);
-        return { r, rank: ranked.findIndex((x) => x.id === id) + 1 };
-      })
-      .filter((x): x is { r: RunnerResult; rank: number } => x !== null);
-    if (rows.length === 0) continue;
-    const returns = rows.map((x) => x.r.totalReturn);
-    out.push({
-      id,
-      label: rows[0]!.r.label,
-      runs: rows.length,
-      positive: returns.filter((v) => v > 0).length,
-      firsts: rows.filter((x) => x.rank === 1).length,
-      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
-      medianReturn: medianOf(returns),
-      worstReturn: Math.min(...returns),
-      avgDrawdown: rows.reduce((a, x) => a + x.r.maxDrawdownPct, 0) / rows.length,
-      avgRank: rows.reduce((a, x) => a + x.rank, 0) / rows.length,
-    });
-  }
-  return out.sort((a, b) => b.avgReturn - a.avgReturn);
 }
 
 function CompareChart({ results, initialCash }: { results: RunnerResult[]; initialCash: number }) {  const W = 900;

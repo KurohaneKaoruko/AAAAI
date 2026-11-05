@@ -65,16 +65,13 @@ export const api = {
   /** 历史模拟（回测）：跑一段真实历史，一次性返回战绩。不属于任何机器人。 */
   runBacktest: (body: {
     connectionId: string;
-    /** 自带标的的交易所（模拟交易所）可以不传：服务端按连接解析 */
-    symbols?: string[];
+    symbols: string[];
     strategyId: string;
     interval?: string;
     barCount?: number;
     initialCash?: number;
     maxDrawdownPct?: number;
     minTradeValue?: number;
-    /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 每次掷新路径） */
-    scenarioSeed?: number;
   }) => request<{ result: BacktestResult }>("/api/backtest", { method: "POST", body: JSON.stringify(body) }),
   refreshTickers: () => request<{ tickers: Ticker[] }>("/api/tickers/refresh", { method: "POST" }),
 
@@ -150,40 +147,6 @@ export const api = {
       avgGap: number;
       oosPositiveRatio: number;
     }>(`/api/validation/walk-forward${symbols?.length ? `?symbols=${symbols.join(",")}` : ""}`),
-  scenarioWinRate: (input: {
-    connectionId: string;
-    strategyId?: string;
-    symbols?: string[];
-    interval?: string;
-    barCount?: number;
-    scenarios?: number;
-    seed?: number;
-  }) =>
-    request<{
-      scenarios: number;
-      interval: string;
-      barCount: number;
-      symbols: string[];
-      winRate: number;
-      positiveRuns: number;
-      flatRuns: number;
-      negativeRuns: number;
-      medianReturn: number;
-      worstReturn: number;
-      bestReturn: number;
-      avgReturn: number;
-      outcomes: { seed: number; returnPct: number; positive: boolean; maxDrawdownPct: number; fills: number }[];
-      byRegime: {
-        regime: string;
-        runs: number;
-        positiveRuns: number;
-        flatRuns: number;
-        medianReturn: number;
-        worstReturn: number;
-      }[];
-      seed: number;
-    }>("/api/validation/win-rate", { method: "POST", body: JSON.stringify(input) }),
-
   // 新闻情报
   news: () => request<{ items: NewsItem[]; status: NewsStatus }>("/api/news"),
   refreshNews: (symbols?: string[]) =>
@@ -262,8 +225,6 @@ export const api = {
     symbols?: string[];
     bars?: number;
     interval?: string;
-    /** 复现用：随机情景种子（仅模拟交易所有效，不填 = 掷一条新路径） */
-    scenarioSeed?: number;
   }) => request<{ result: ComparisonResult }>("/api/bench/compare", { method: "POST", body: JSON.stringify(body) }),
   lastComparison: () => request<{ result: ComparisonResult | null }>("/api/bench/compare"),
 

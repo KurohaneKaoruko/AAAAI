@@ -15,8 +15,7 @@ import { Sparkline } from "../components/Sparkline";
 import { describe } from "../components/StrategyProfiles";
 import { EquityChart } from "../components/EquityChart";
 import { BotKlinePanel } from "../components/BotKlinePanel";
-import { money, pct, qty, signed, signedPct, time, duration, wPct, dateTime, symbolColumnLabel, TOPIC_LABEL } from "../lib/format";
-import type { AppStore } from "../state/useAppStore";
+import { money, pct, qty, signed, signedPct, time, duration, wPct, dateTime, TOPIC_LABEL } from "../lib/format";
 import type { Bot, BotAction, StrategyProfile } from "../types";
 
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -28,14 +27,12 @@ const STATUS: Record<string, { text: string; cls: string }> = {
 
 export function BotDetailPage({
   botId,
-  store,
   onBack,
   onStart,
   onStop,
   onEdit,
 }: {
   botId: string;
-  store: AppStore;
   onBack: () => void;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
@@ -101,9 +98,7 @@ export function BotDetailPage({
   const m = st.metrics;
   const a = st.allocation;
   const running = st.status === "running";
-  // 这个机器人连的交易所自带交易物（模拟交易所的几条走向）？表头与文案据此换词
-  const builtin = store.connections.find((c) => c.id === bot.connectionId)?.adapter?.builtinSymbols ?? false;
-  const symLabel = symbolColumnLabel(builtin);
+  const symLabel = "标的";
   const status = STATUS[st.status] ?? STATUS.idle!;
 
   return (
@@ -127,11 +122,6 @@ export function BotDetailPage({
               </span>
             ) : (
               <span className="chip chip-sm chip-off">真实下单（未运行）</span>
-            )}
-            {bot.marketData === "simulated" && (
-              <span className="chip chip-sm chip-off" title="K 线由本地生成的走向叠加随机噪声，不是真实行情">
-                本地生成行情 · 演示
-              </span>
             )}
             <span className="chip chip-sm">{bot.interval}</span>
           </span>
@@ -320,7 +310,7 @@ export function BotDetailPage({
       </Panel>
 
       {st.pnlBySymbol.length > 0 && (
-        <Panel title={builtin ? "分走向盈亏" : "分标的盈亏"}>
+        <Panel title="分标的盈亏">
           <table className="table">
             <thead>
               <tr>

@@ -103,8 +103,6 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
 
   const intervalOptions = INTERVALS.map((iv) => ({ value: iv, label: iv }));
   const symbolOptions = bot.symbols.map((s) => ({ value: s, label: s }));
-  // 行情源要写在图上方：本地生成行情与真实主网行情长得一样，不标就会被当成实盘。
-  const dataSourceLabel = bot.marketData === "simulated" ? "本地模拟行情" : "真实行情（主网）";
 
   return (
     <Panel
@@ -112,7 +110,7 @@ export function BotKlinePanel({ bot }: { bot: Bot }) {
       subtitle={
         error
           ? undefined
-          : `${dataSourceLabel} · ${bot.connectionLabel} · ${symbol || "—"} · ${interval}${updatedAt ? ` · 更新 ${time(updatedAt)}` : ""} · 涨跌标记来自本机器人成交流水`
+          : `真实行情（主网） · ${bot.connectionLabel} · ${symbol || "—"} · ${interval}${updatedAt ? ` · 更新 ${time(updatedAt)}` : ""} · 涨跌标记来自本机器人成交流水`
       }
       actions={
         <div className="btn-row btn-row-auto" style={{ alignItems: "center", gap: 8 }}>

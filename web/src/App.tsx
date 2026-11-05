@@ -183,7 +183,6 @@ export function App() {
         return route.botId ? (
           <BotDetailPage
             botId={route.botId}
-            store={store}
             onBack={() => navigate("bots")}
             onStart={(id) => void api.startBot(id).then(() => undefined)}
             onStop={(id) => void api.stopBot(id)}
