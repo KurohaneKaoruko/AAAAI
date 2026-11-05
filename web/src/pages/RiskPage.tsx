@@ -32,6 +32,9 @@ export function RiskPage({ store }: { store: AppStore }) {
 
   const exec = config?.execution;
   const live = exec?.mode === "live";
+  // 两个面板共用一份表单：任何一项改动都要走同一个「保存」，否则用户会以为
+  // 调完仓位上限就已经生效（以前第二个面板根本没有保存按钮）。
+  const dirty = Boolean(config?.risk) && JSON.stringify(form) !== JSON.stringify(config?.risk);
 
   return (
     <div className="page page-risk">
@@ -67,14 +70,12 @@ export function RiskPage({ store }: { store: AppStore }) {
           busy={savingLive}
           onConfirm={() => {
             setSavingLive(true);
-            void store
-              .patchConfig({ execution: { ...exec!, mode: "live" } })
-              .then(() => store.toast("error", "已切换为真实下单 —— 请确认风控参数"))
-              .catch(() => undefined)
-              .finally(() => {
-                setSavingLive(false);
-                setConfirmLive(false);
-              });
+            // patchConfig 失败时自己会弹错误 toast；这里只负责把弹窗收掉，
+            // 不能像以前那样无条件再报一次「已切换」——失败也会显示成功最误导。
+            void store.patchConfig({ execution: { ...exec!, mode: "live" } }).finally(() => {
+              setSavingLive(false);
+              setConfirmLive(false);
+            });
           }}
           onCancel={() => setConfirmLive(false)}
         />
@@ -82,8 +83,9 @@ export function RiskPage({ store }: { store: AppStore }) {
 
       <Panel
         title="资金与成本"
+        subtitle={dirty ? "有未保存的修改" : "已保存"}
         actions={
-          <Button variant="primary" onClick={save} busy={saving}>
+          <Button variant="primary" onClick={save} busy={saving} disabled={!dirty}>
             保存
           </Button>
         }
@@ -118,7 +120,15 @@ export function RiskPage({ store }: { store: AppStore }) {
         </div>
       </Panel>
 
-      <Panel title="仓位与熔断">
+      <Panel
+        title="仓位与熔断"
+        subtitle={dirty ? "有未保存的修改" : "已保存"}
+        actions={
+          <Button variant="primary" onClick={save} busy={saving} disabled={!dirty}>
+            保存
+          </Button>
+        }
+      >
         <div className="grid-2">
           <NumberField
             label="单标的仓位上限"
@@ -168,7 +178,8 @@ export function RiskPage({ store }: { store: AppStore }) {
           </ul>
         </div>
         <Notice tone="info">
-          改动立即保存，下次运行生效。运行中的引擎保持使用启动时的参数快照。
+          两个面板共用一个「保存」：改完点任一保存按钮写入，下次运行生效。
+          运行中的机器人保持使用启动时的参数快照。
         </Notice>
       </Panel>
     </div>
