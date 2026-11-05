@@ -17,14 +17,18 @@ export function SystemPage({ store }: { store: AppStore }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [logFilter, setLogFilter] = useState<"all" | "warn" | "error">("all");
   const [bots, setBots] = useState<Bot[]>([]);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [persisting, setPersisting] = useState(false);
 
   const loadLogs = useCallback(async () => {
     try {
       // request 自带 BASE（开发模式打 8787）与鉴权头；裸 fetch 会被 401 拦下
       const data = await api.logs(300);
       setLogs(data.logs);
-    } catch {
-      /* 服务未就绪时忽略 */
+      setLogError(null);
+    } catch (err) {
+      // 以前静默失败：服务挂了页面就显示「暂无日志」，像是真的一条都没有。
+      setLogError((err as Error).message);
     }
   }, []);
 
@@ -60,6 +64,7 @@ export function SystemPage({ store }: { store: AppStore }) {
 
   const persist = async () => {
     setError(null);
+    setPersisting(true);
     try {
       const r = await api.persistConfig();
       setSaved(r.saved);
@@ -67,6 +72,8 @@ export function SystemPage({ store }: { store: AppStore }) {
     } catch (err) {
       setError((err as Error).message);
       store.toast("error", "写入失败");
+    } finally {
+      setPersisting(false);
     }
   };
 
@@ -117,7 +124,7 @@ export function SystemPage({ store }: { store: AppStore }) {
 
         <Panel title="维护操作">
           <div className="btn-column">
-            <Button variant="primary" onClick={persist}>
+            <Button variant="primary" onClick={persist} busy={persisting}>
               将当前设置写入配置文件
             </Button>
             <Button onClick={() => setShowJson((v) => !v)}>
@@ -163,8 +170,18 @@ export function SystemPage({ store }: { store: AppStore }) {
           </div>
         }
       >
+        {logError && (
+          <Notice tone="error">
+            日志加载失败：{logError}
+            <button type="button" className="link-btn" onClick={() => void loadLogs()}>
+              重试
+            </button>
+          </Notice>
+        )}
         <div className="log-tail">
-          {visibleLogs.length === 0 && <div className="empty">暂无日志</div>}
+          {!logError && visibleLogs.length === 0 && (
+            <div className="empty">{logFilter === "all" ? "暂无日志" : "当前筛选下没有日志"}</div>
+          )}
           {visibleLogs.map((l, i) => (
             <div className={`log-line log-${l.level}`} key={`${l.time}-${i}`}>
               <span className="mono log-time">{l.time.slice(11, 19)}</span>
