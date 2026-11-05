@@ -3,13 +3,13 @@
  *
  * 之前这里是十几个面板顺排下来（策略、候选池、新闻、验证、进化、工具、执行模式……），
  * 一屏塞不下、也分不清哪些属于"策略"、哪些其实是全局开关。
- * 现在按用户要回答的问题分成四组标签：
+ * 现在按用户要回答的问题分成三组标签：
  *
- *   策略   —— 这条策略怎么决策、配多少仓位（列表 + 编辑器，两栏）
- *   候选池 —— 交易哪些标的
- *   情报   —— 新闻与大模型工具
- *   验证   —— 前推验证与自我进化
+ *   策略 —— 这条策略怎么决策、配多少仓位（列表 + 编辑器，两栏）
+ *   情报 —— 新闻与大模型工具
+ *   验证 —— 前推验证与自我进化
  *
+ * 标的（候选池）已并入「交易所连接」页：每个连接卡片下方就地管理，不再单开一页。
  * 执行模式（模拟/实盘）属于交易安全开关，已移到「风控」页。
  */
 
@@ -17,7 +17,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
 import { Button, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
 import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
-import { CandidatePool } from "../components/CandidatePool";
 import { NewsPanel } from "../components/NewsPanel";
 import { EvolutionPanel } from "../components/EvolutionPanel";
 import { OptimizePanel } from "../components/OptimizePanel";
@@ -63,7 +62,7 @@ function visibleAgents(selfAllocating: boolean): AgentNode[] {
   return AGENTS.filter((a) => !a.mode || (selfAllocating ? a.mode === "allocating" : a.mode === "perSymbol"));
 }
 
-export type StrategyTab = "strategy" | "pool" | "intel" | "validate";
+export type StrategyTab = "strategy" | "intel" | "validate";
 
 export function StrategyPage({
   store,
@@ -157,7 +156,6 @@ export function StrategyPage({
     setSaving(false);
   };
 
-  const poolCount = store.watchlist.length;
 
   if (!form || !editing) {
     return (
@@ -173,10 +171,6 @@ export function StrategyPage({
         <button type="button" className={`page-tab ${tab === "strategy" ? "page-tab-on" : ""}`} onClick={() => changeTab("strategy")}>
           策略
           <span className="page-tab-count">{strategies.length}</span>
-        </button>
-        <button type="button" className={`page-tab ${tab === "pool" ? "page-tab-on" : ""}`} onClick={() => changeTab("pool")}>
-          候选池
-          <span className="page-tab-count">{poolCount}</span>
         </button>
         <button type="button" className={`page-tab ${tab === "intel" ? "page-tab-on" : ""}`} onClick={() => changeTab("intel")}>
           情报
@@ -404,29 +398,6 @@ export function StrategyPage({
                 </div>
               </div>
             </details>
-          </div>
-        </div>
-      )}
-
-      {tab === "pool" && (
-        <div className="grid-2">
-          <CandidatePool store={store} />
-          <div>
-            <Panel title="这些标的会怎么被使用" subtitle="候选池决定策略的可选范围">
-              <div className="explain-box">
-                <strong>候选池 ≠ 持仓</strong>
-                <p>
-                  候选池只是「允许交易的标的集合」。是否真的买入、买多少，由策略与风控决定：
-                  开启 AI 自主配置时由模型在池子里挑；关闭时按池内每个标的逐个定仓位。
-                </p>
-                <p className="dim">
-                  当前 {poolCount} 个标的 · 策略「{editing.name}」最多持有 {form.selfAllocating ? form.maxPositions : "不限（受风控仓位上限约束）"} 个
-                </p>
-                <p className="dim">
-                  例外：模拟交易所没有标的（只有几条走向），不进候选池 —— 那几条走向是本地生成的，挑标的没有意义。
-                </p>
-              </div>
-            </Panel>
           </div>
         </div>
       )}

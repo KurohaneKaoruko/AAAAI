@@ -961,13 +961,34 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
 
 .connection-list { display: flex; flex-direction: column; gap: 10px; }
 .connection-item {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  display: flex; flex-direction: column; gap: 10px;
   background: var(--bg-elev); border: 1px solid var(--border-soft);
   border-radius: 9px; padding: 12px 14px;
 }
+.connection-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .connection-main { min-width: 0; }
 .connection-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .connection-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* 连接卡片内嵌的标的管理（原「候选池」设置页并入于此） */
+.conn-symbols {
+  border-top: 1px dashed var(--border-soft); padding-top: 10px;
+}
+.conn-symbols[open] { padding-top: 0; }
+.conn-symbols > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px; user-select: none;
+  list-style: none; padding: 6px 0 2px;
+}
+.conn-symbols > summary::-webkit-details-marker { display: none; }
+.conn-symbols > summary::before {
+  content: "▸"; transition: transform 0.15s; font-size: 11px;
+}
+.conn-symbols[open] > summary::before { transform: rotate(90deg); }
+.conn-symbols > summary:hover { color: var(--text); }
+.conn-symbols-body { padding: 4px 0 6px; }
+.conn-symbols-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.conn-symbols-title { font-size: 12.5px; color: var(--text); font-weight: 600; }
 .test-result { margin-top: 5px; font-size: 12px; font-family: var(--mono); }
 .test-box {
   margin-top: 10px; padding: 10px 12px; border-radius: 7px;

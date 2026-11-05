@@ -32,7 +32,7 @@ const PAGE_TITLES: Record<PageId, string> = {
   settings: "设置",
 };
 
-const STRATEGY_TABS: readonly StrategyTab[] = ["strategy", "pool", "intel", "validate"];
+const STRATEGY_TABS: readonly StrategyTab[] = ["strategy", "intel", "validate"];
 
 interface RouteState {
   page: PageId;
@@ -220,10 +220,6 @@ export function App() {
           <ComparePage
             store={store}
             onNavigate={(target) => {
-              if (target === "pool") {
-                navigate("strategy", { strategyTab: "pool" });
-                return;
-              }
               navigate(target);
             }}
           />

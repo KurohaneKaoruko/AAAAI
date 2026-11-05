@@ -680,7 +680,7 @@ function BotForm({
             </button>
           ))}
           {connSymbols.length === 0 && popular.length === 0 && (
-            <span className="dim small">该连接的候选池为空，请先到「策略 → 候选池」添加</span>
+            <span className="dim small">该连接的候选池为空：到「交易所连接」页，在连接卡片下方「标的」里添加</span>
           )}
         </div>
         )}

@@ -44,7 +44,7 @@ const engineLabel = (engine: string): string => ENGINE_LABEL[engine] ?? engine;
 
 const MAX_RUNNERS = 6;
 
-export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate?: (target: "llm" | "pool") => void }) {
+export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate?: (target: "llm") => void }) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ComparisonResult | null>(store.state?.comparison ?? null);
@@ -211,8 +211,8 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
               <span className="compare-status-lead">还不能开始：</span>
               {blocked}
               {targetError && targetError.includes("候选池") && onNavigate && (
-                <Button small onClick={() => onNavigate("pool")}>
-                  去候选池 →
+                <Button small onClick={() => onNavigate("llm")}>
+                  查看连接 →
                 </Button>
               )}
             </>
@@ -320,14 +320,14 @@ export function ComparePage({ store, onNavigate }: { store: AppStore; onNavigate
           <div className="explain-box" style={{ marginTop: 12 }}>
             <strong>三步就能跑起来</strong>
             <p>
-              ① 在 <b>交易机器人</b> 建一个机器人，或者到 <b>策略</b> 页加一条策略；
+              ① 在 <b>交易所连接</b> 里给连接挑好标的（每个连接卡片下方「标的」）；
               ② 有模型的话到 <b>模型管理</b> 添加实例并填 Key；
               ③ 回到本页勾选参赛者，点「开始对照」。
             </p>
             <div className="btn-row">
               {onNavigate && (
-                <Button small onClick={() => onNavigate("pool")}>
-                  去候选池选标的 →
+                <Button small onClick={() => onNavigate("llm")}>
+                  去模型管理 →
                 </Button>
               )}
             </div>

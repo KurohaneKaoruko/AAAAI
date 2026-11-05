@@ -7,6 +7,7 @@ import type { AdapterMeta, Connection } from "../types";
 import { AssetBadge } from "../components/Shell";
 import { Button, Empty, Notice, Panel, SelectField, TextField, Toggle } from "../components/ui";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ConnectionSymbols } from "../components/CandidatePool";
 import { ASSET_LABEL, dateTime } from "../lib/format";
 
 export function ExchangesPage({ store }: { store: AppStore }) {
@@ -94,7 +95,8 @@ export function ExchangesPage({ store }: { store: AppStore }) {
           <div className="connection-list">
             {connections.map((c) => (
               <div className="connection-item" key={c.id}>
-                <div className="connection-main">
+                <div className="connection-row">
+                  <div className="connection-main">
                   <div className="connection-title">
                     <span className="strong">{c.label}</span>
                     <span className="dim small">{c.adapter.name}</span>
@@ -133,6 +135,11 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                     删除
                   </Button>
                 </div>
+              </div>
+
+              {/* 标的就地管理：这个连接交易哪些资产，直接在连接卡片里配，
+                  不再跳去单独的候选池设置页。默认收起，点开即用。 */}
+              <ConnectionSymbols store={store} connectionId={c.id} />
               </div>
             ))}
           </div>
