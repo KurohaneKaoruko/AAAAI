@@ -1,6 +1,6 @@
 /** LLM 大模型页：多实例管理 + 负载均衡 + 调用统计。 */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { AppStore } from "../state/useAppStore";
 import type { BalanceStrategy, LlmOverview, LlmProfile } from "../types";
@@ -66,24 +66,40 @@ export function LlmPage({ store }: { store: AppStore }) {
   const [results, setResults] = useState<Record<string, string>>({});
   /** 待确认删除的实例（自绘二次确认） */
   const [confirmDel, setConfirmDel] = useState<LlmProfile | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const { toast } = store;
+  /** 轮询从通到断只提醒一次：5s 一次错误 toast 会把屏幕刷满。 */
+  const wasOnline = useRef(true);
 
-  const usable = useMemo(() => profiles.filter((p) => p.enabled && p.hasKey), [profiles]);
   const kindList = useMemo(
     () => profiles.filter((p) => p.kind === (tab === "systemone" ? "systemone" : "chat")),
     [profiles, tab],
   );
 
-  const reload = useCallback(async () => {
-    try {
-      const data = await api.llmProfiles();
-      setProfiles(data.profiles);
-      setOverview(data.overview);
-      setStrategy(data.strategy as BalanceStrategy);
-      setStrategyOptions(data.strategies);
-    } catch (err) {
-      store.toast("error", (err as Error).message);
-    }
-  }, [store]);
+  const reload = useCallback(
+    async (silent = false) => {
+      try {
+        const data = await api.llmProfiles();
+        setProfiles(data.profiles);
+        setOverview(data.overview);
+        setStrategy(data.strategy as BalanceStrategy);
+        setStrategyOptions(data.strategies);
+        if (!wasOnline.current) {
+          wasOnline.current = true;
+          toast("success", "模型实例状态已恢复");
+        }
+      } catch (err) {
+        if (wasOnline.current) {
+          wasOnline.current = false;
+          toast("error", `模型实例读取失败：${(err as Error).message}`);
+        } else if (!silent) {
+          // 手动刷新/操作后的失败仍要反馈（轮询失败已经提醒过一次了）
+          toast("error", (err as Error).message);
+        }
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
     void reload();
@@ -91,7 +107,7 @@ export function LlmPage({ store }: { store: AppStore }) {
 
   // 统计轮询（5s）
   useEffect(() => {
-    const t = setInterval(() => void reload(), 5000);
+    const t = setInterval(() => void reload(true), 5000);
     return () => clearInterval(t);
   }, [reload]);
 
@@ -187,7 +203,7 @@ export function LlmPage({ store }: { store: AppStore }) {
       {tab === "balance" && (
         <>
       <Panel
-        title="大模型总开关"
+        title="模型池与负载均衡"
         subtitle={
           config
             ? `当前 ${profiles.filter((p) => p.enabled && p.hasKey).length} / ${profiles.length} 个实例可用`
@@ -285,15 +301,21 @@ export function LlmPage({ store }: { store: AppStore }) {
         subtitle={`对话 ${profiles.filter((p) => p.kind === "chat").length} 个 · 决策 ${profiles.filter((p) => p.kind === "systemone").length} 个`}
         actions={
           <Button
-            variant="primary"
+            variant={form ? "default" : "primary"}
             onClick={() => {
+              // 表单已经打开时再点一次是「取消」：否则会把用户刚填的内容静默清空。
+              if (form) {
+                setForm(null);
+                setEditingId(null);
+                return;
+              }
               const kind = tab === "systemone" ? "systemone" : "chat";
               const preset = PRESETS[kind];
               setForm({ ...EMPTY_FORM, kind, baseUrl: preset.baseUrl, model: preset.model });
               setEditingId(null);
             }}
           >
-            + 添加{tab === "systemone" ? "决策模型" : "对话模型"}
+            {form ? "取消" : `+ 添加${tab === "systemone" ? "决策模型" : "对话模型"}`}
           </Button>
         }
       >
@@ -408,10 +430,28 @@ export function LlmPage({ store }: { store: AppStore }) {
                   setEditingId(x.id);
                   setTab(x.kind);
                 }}
-                onToggle={(x) =>
-                  void api.updateLlm(x.id, { enabled: !x.enabled } as Record<string, unknown>).then(reload)
-                }
-                onReset={(x) => void api.resetLlmStats(x.id).then(reload)}
+                onToggle={(x) => {
+                  void (async () => {
+                    try {
+                      await api.updateLlm(x.id, { enabled: !x.enabled } as Record<string, unknown>);
+                      toast("success", `${x.label} 已${x.enabled ? "停用" : "启用"}`);
+                      await reload(true);
+                    } catch (err) {
+                      toast("error", `操作失败：${(err as Error).message}`);
+                    }
+                  })();
+                }}
+                onReset={(x) => {
+                  void (async () => {
+                    try {
+                      await api.resetLlmStats(x.id);
+                      toast("success", `${x.label} 的调用统计已复位`);
+                      await reload(true);
+                    } catch (err) {
+                      toast("error", `复位失败：${(err as Error).message}`);
+                    }
+                  })();
+                }}
                 onDelete={(x) => setConfirmDel(x)}
               />
             ))}
@@ -441,9 +481,22 @@ export function LlmPage({ store }: { store: AppStore }) {
         title={`删除实例「${confirmDel?.label ?? ""}」？`}
         message="引用这个实例的机器人将失去决策模型（混合决策只缺一个也跑不起来），删除不可恢复。"
         confirmText="删除实例"
+        busy={deleting}
         onConfirm={() => {
-          if (confirmDel) void api.deleteLlm(confirmDel.id).then(reload);
-          setConfirmDel(null);
+          if (!confirmDel) return;
+          setDeleting(true);
+          void (async () => {
+            try {
+              await api.deleteLlm(confirmDel.id);
+              toast("success", `已删除实例「${confirmDel.label}」`);
+              setConfirmDel(null);
+              await reload(true);
+            } catch (err) {
+              toast("error", `删除失败：${(err as Error).message}`);
+            } finally {
+              setDeleting(false);
+            }
+          })();
         }}
         onCancel={() => setConfirmDel(null)}
       />
