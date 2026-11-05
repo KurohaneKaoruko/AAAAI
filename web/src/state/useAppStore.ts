@@ -57,7 +57,8 @@ export interface AppStore {
   reloadAdapters: () => Promise<void>;
   /** 首屏四件套一起重拉：登录成功后必须调一次，见下方注释 */
   reloadAll: () => Promise<void>;
-  patchConfig: (patch: Partial<AppConfig>) => Promise<void>;
+  /** 保存配置；返回是否成功。失败时已经弹过 toast，调用方据此决定后续动作。 */
+  patchConfig: (patch: Partial<AppConfig>) => Promise<boolean>;
   reloadState: () => Promise<void>;
 }
 
@@ -128,8 +129,10 @@ export function useAppStore(): AppStore {
         const { config } = await api.saveConfig(patch);
         setState((prev) => (prev ? { ...prev, config } : prev));
         toast("success", "设置已保存");
+        return true;
       } catch (err) {
         toast("error", (err as Error).message);
+        return false;
       }
     },
     [toast],
