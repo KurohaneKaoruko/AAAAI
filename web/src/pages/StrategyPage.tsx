@@ -15,7 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppStore } from "../state/useAppStore";
-import { Button, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
+import { Button, Empty, Notice, NumberField, Panel, SelectField, Toggle } from "../components/ui";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DecisionSourceSwitch } from "../components/DecisionSourceSwitch";
 import { NewsPanel } from "../components/NewsPanel";
 import { EvolutionPanel } from "../components/EvolutionPanel";
@@ -94,11 +95,19 @@ export function StrategyPage({
   const [form, setForm] = useState<StrategyForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [pools, setPools] = useState<PoolCounts | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  /** 切到另一条策略；有未保存修改时先确认，避免默默丢掉用户刚调的东西。 */
+  /** 待切换的策略：有未保存修改时先弹确认，避免默默丢掉用户刚调的东西。 */
+  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
+
+  /** 切到另一条策略；有未保存修改时先确认。 */
   const selectStrategy = (id: string) => {
     if (id === selectedId) return;
-    if (dirtyFields.length > 0 && !confirm("当前策略有未保存的修改，切换后会被丢弃。继续？")) return;
+    if (dirtyFields.length > 0) {
+      setPendingSelect(id);
+      return;
+    }
     setSelectedId(id);
   };
 
@@ -108,8 +117,12 @@ export function StrategyPage({
       setStrategies(d.strategies);
       setDefaultId(d.defaultId);
       setSelectedId((cur) => (d.strategies.some((s) => s.id === cur) ? cur : d.defaultId));
-    } catch {
-      /* 拉不到时下方提示 */
+      setLoadError(null);
+    } catch (err) {
+      // 以前这里静默失败，页面会永远停在「加载中…」—— 用户连重试按钮都找不到。
+      setLoadError((err as Error).message);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -150,17 +163,37 @@ export function StrategyPage({
       await api.updateStrategy(editing.id, fromForm(form));
       await loadStrategies();
       if (editing.id === defaultId) await store.reloadState();
-    } catch {
-      /* 错误由列表组件统一提示 */
+      store.toast("success", `策略「${form.name}」已保存`);
+    } catch (err) {
+      // 以前注释说「错误由列表组件统一提示」，但保存按钮不在列表里，失败真的一点反馈都没有。
+      store.toast("error", `保存策略失败：${(err as Error).message}`);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
 
   if (!form || !editing) {
     return (
       <div className="page page-strategy">
-        <div className="loading">加载中…</div>
+        <Panel title="策略">
+          {!loaded ? (
+            <div className="loading-inline">正在读取策略…</div>
+          ) : loadError ? (
+            <>
+              <Notice tone="error">策略读取失败：{loadError}</Notice>
+              <div style={{ marginTop: 10 }}>
+                <Button small onClick={() => void loadStrategies()}>
+                  重试
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Empty>
+              还没有任何策略。策略是机器人的弹药库，请先创建一条；如果服务端刚启动，稍后重试即可。
+            </Empty>
+          )}
+        </Panel>
       </div>
     );
   }
@@ -302,12 +335,11 @@ export function StrategyPage({
                 <Notice tone="error">快线窗口必须小于慢线窗口，否则策略无法计算。</Notice>
               )}
 
-              <Toggle
-                label="允许做空（已默认开启）"
-                hint="合约连接现在一律允许做空；现货连接本来就不能做空。此开关仅作历史兼容保留"
-                checked={form.allowShort}
-                onChange={(v) => setForm({ ...form, allowShort: v })}
-              />
+              {/* 做空由连接类型决定：合约连接一律允许、现货本来就不能做空。
+                  留着这个开关只会让人以为关掉就能禁止做空 —— 它已经不影响任何行为。 */}
+              <div className="hint-line">
+                做空由连接类型决定：合约连接自动允许做空，现货连接不支持；这里无需设置。
+              </div>
 
               <Toggle
                 label="AI 自主选资产（关闭：按候选池逐个标的定仓位）"
@@ -459,6 +491,19 @@ export function StrategyPage({
           提示：策略本身的参数在「策略」标签里改，这里是辅助信息。
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingSelect !== null}
+        title="切换策略？"
+        message="当前策略有未保存的修改，切换后这些修改会被丢弃。"
+        confirmText="丢弃修改并切换"
+        danger={false}
+        onConfirm={() => {
+          if (pendingSelect) setSelectedId(pendingSelect);
+          setPendingSelect(null);
+        }}
+        onCancel={() => setPendingSelect(null)}
+      />
     </div>
   );
 }

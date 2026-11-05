@@ -11,6 +11,7 @@ import { useState } from "react";
 import { api } from "../api";
 import type { StrategyProfile } from "../types";
 import { Button, Empty, Notice, SelectField } from "./ui";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { SOURCE_ZH } from "./DecisionSourceSwitch";
 
 /** 一行字概括这条策略（下方参数说明也用它）。 */
@@ -50,15 +51,41 @@ export function StrategyList({
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  /** 就地重命名：不再用 window.prompt —— 弹窗样式与全站脱节，且可能被浏览器禁用。 */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  /** 待确认删除的策略（自绘二次确认，替代 window.confirm） */
+  const [confirmDel, setConfirmDel] = useState<StrategyProfile | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  const guard = async (fn: () => Promise<unknown>) => {
+  const guard = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setError(null);
     try {
       await fn();
       await onChanged();
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     }
+  };
+
+  const commitRename = async (s: StrategyProfile) => {
+    const next = renameValue.trim();
+    if (!next || next === s.name) {
+      setRenamingId(null);
+      return;
+    }
+    const ok = await guard(() => api.updateStrategy(s.id, { name: next }));
+    if (ok) setRenamingId(null);
+  };
+
+  const remove = async () => {
+    if (!confirmDel) return;
+    setDeleting(true);
+    const ok = await guard(() => api.deleteStrategy(confirmDel.id));
+    setDeleting(false);
+    if (ok) setConfirmDel(null);
   };
 
   const add = async () => {
@@ -111,7 +138,26 @@ export function StrategyList({
               }}
             >
               <div className="strategy-card-head">
-                <span className="strategy-card-name">{s.name}</span>
+                {renamingId === s.id ? (
+                  <input
+                    autoFocus
+                    className="strategy-rename"
+                    value={renameValue}
+                    aria-label="策略名称"
+                    title="回车保存，Esc 取消"
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void commitRename(s);
+                      }
+                      if (e.key === "Escape") setRenamingId(null);
+                    }}
+                  />
+                ) : (
+                  <span className="strategy-card-name">{s.name}</span>
+                )}
                 {isDefault && <span className="chip chip-sm chip-accent">默认</span>}
               </div>
               <div className="strategy-card-meta">{describe(s)}</div>
@@ -140,22 +186,18 @@ export function StrategyList({
                   variant="ghost"
                   disabled={running}
                   onClick={() => {
-                    const next = prompt("重命名策略", s.name);
-                    if (next?.trim()) void guard(() => api.updateStrategy(s.id, { name: next.trim() }));
+                    setRenameValue(s.name);
+                    setRenamingId(s.id);
                   }}
                 >
                   重命名
                 </Button>
                 <Button
                   small
-                  variant="ghost"
+                  variant="danger"
                   disabled={running || isDefault || items.length <= 1}
                   title={isDefault ? "默认策略不能删除" : items.length <= 1 ? "至少保留一条" : ""}
-                  onClick={() => {
-                    if (confirm(`删除策略「${s.name}」？引用它的机器人会自动改用默认策略。`)) {
-                      void guard(() => api.deleteStrategy(s.id));
-                    }
-                  }}
+                  onClick={() => setConfirmDel(s)}
                 >
                   删除
                 </Button>
@@ -198,6 +240,16 @@ export function StrategyList({
           {error}
         </Notice>
       )}
+
+      <ConfirmDialog
+        open={confirmDel !== null}
+        title={`删除策略「${confirmDel?.name ?? ""}」？`}
+        message="引用这条策略的机器人会自动改用默认策略。策略本身不可恢复，但可以再建一条相同的。"
+        confirmText="删除策略"
+        busy={deleting}
+        onConfirm={() => void remove()}
+        onCancel={() => setConfirmDel(null)}
+      />
     </>
   );
 }

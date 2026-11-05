@@ -1729,6 +1729,8 @@ input::placeholder { color: var(--text-dim); opacity: 0.65; }
   margin-bottom: 4px;
 }
 .strategy-card-name { font-weight: 600; font-size: 13.5px; }
+/* 就地重命名：宽度占满标题区，避免名字被卡片边缘截断 */
+.strategy-rename { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; }
 .strategy-card-meta { font-size: 11.5px; color: var(--text-dim); line-height: 1.6; }
 .strategy-card-actions {
   display: flex;
