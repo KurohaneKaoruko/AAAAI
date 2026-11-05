@@ -220,7 +220,7 @@ export function ComparePage({
             value={connectionId}
             options={store.connections.map((c) => ({
               value: c.id,
-              label: `${c.label} · ${c.adapter.name}${c.adapter.tradingMode === "futures" ? " · 合约" : ""}`,
+              label: `${c.label} · ${c.adapter.name}${c.tradingMode === "futures" ? " · 合约" : ""}`,
             }))}
             onChange={(v) => {
               setConnectionId(v);

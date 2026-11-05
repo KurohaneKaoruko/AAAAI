@@ -287,7 +287,15 @@ export const api = {
   // 交易所
   exchanges: () => request<{ adapters: AdapterMeta[] }>("/api/exchanges"),
   connections: () => request<{ connections: Connection[] }>("/api/connections"),
-  createConnection: (body: { adapterId: string; label: string; testnet?: boolean; apiKey?: string; apiSecret?: string }) =>
+  createConnection: (body: {
+    adapterId: string;
+    label: string;
+    testnet?: boolean;
+    /** 连接级交易模式；仅对 Gate 这类现货/合约双模适配器有意义 */
+    tradingMode?: "spot" | "futures";
+    apiKey?: string;
+    apiSecret?: string;
+  }) =>
     request<{ connection: Connection }>("/api/connections", { method: "POST", body: JSON.stringify(body) }),
   updateConnection: (id: string, body: Partial<Conn>) =>
     request<{ connection: Connection }>(`/api/connections/${id}`, { method: "PUT", body: JSON.stringify(body) }),

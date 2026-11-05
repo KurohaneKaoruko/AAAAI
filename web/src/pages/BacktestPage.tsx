@@ -62,7 +62,7 @@ export function BacktestPage() {
   const strategy = strategies.find((s) => s.id === strategyId);
   const local = strategy ? strategy.decisionSource === "rules" : true;
   const selectedConnection = connections.find((c) => c.id === connectionId);
-  const futuresConnection = selectedConnection?.adapter.tradingMode === "futures";
+  const futuresConnection = selectedConnection?.tradingMode === "futures";
 
   const run = async () => {
     if (!connectionId || !strategyId || symbols.length === 0) return;

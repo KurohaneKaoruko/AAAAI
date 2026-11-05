@@ -574,7 +574,8 @@ function BotForm({
   const [popular, setPopular] = useState<PopularSymbol[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const connAdapter = connections.find((c) => c.id === connectionId)?.adapter;
+  const conn = connections.find((c) => c.id === connectionId);
+  const connFutures = conn?.tradingMode === "futures";
 
   useEffect(() => {
     if (!connectionId) return;
@@ -648,14 +649,14 @@ function BotForm({
           value={connectionId}
           options={connections.map((c) => ({
             value: c.id,
-            label: `${c.label}${c.adapter.tradingMode === "futures" ? " · 合约" : ""}`,
+            label: `${c.label}${c.tradingMode === "futures" ? " · 合约" : ""}`,
           }))}
           onChange={(v) => {
             setConnectionId(v);
             setSymbols([]);
           }}
         />
-        {connAdapter?.tradingMode === "futures" && (
+        {connFutures && (
           <Notice tone="info">
             该连接是<b>合约模式</b>：策略直接做空，无需开关，组合按保证金账户记账。
             行情来自交易所真实合约；模拟成交时撮合在本地完成，不模拟资金费、维持保证金与强平。

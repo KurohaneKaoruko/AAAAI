@@ -36,6 +36,14 @@ export interface Connection {
   createdAt: string;
   hasKey: boolean;
   hasSecret: boolean;
+  /**
+   * 连接级交易模式（现货 / 合约）。
+   *
+   * 与 AdapterMeta.tradingMode 不是一回事：目录里的 Gate 元信息不带固定模式，
+   * 真正生效的模式由**这条连接**决定，服务端会把它写进适配器实例的 meta。
+   * 缺省按现货处理，老连接行为不变。
+   */
+  tradingMode?: "spot" | "futures";
   adapter: AdapterMeta;
 }
 

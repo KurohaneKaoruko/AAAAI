@@ -112,6 +112,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
               <p className="adapter-desc">{a.description}</p>
               <div className="adapter-caps">
                 {a.tradingMode === "futures" && <span className="cap-on">合约</span>}
+                {a.id === "gate" && <span className="cap-on">现货 / 合约可选</span>}
                 <span className={a.supportsTrading ? "cap-on" : "cap-off"}>
                   {a.supportsTrading
                     ? "支持下单"
@@ -150,7 +151,7 @@ export function ExchangesPage({ store }: { store: AppStore }) {
                   <div className="connection-title">
                     <span className="strong">{c.label}</span>
                     <span className="dim small">{c.adapter.name}</span>
-                    {c.adapter.tradingMode === "futures" && <span className="chip chip-sm chip-accent">合约</span>}
+                    {c.tradingMode === "futures" && <span className="chip chip-sm chip-accent">合约</span>}
                     {c.testnet && <span className="chip chip-sm">测试网</span>}
                     {defaultConnectionId === c.id && <span className="chip chip-sm chip-accent">默认</span>}
                     {/* 连接健康一眼可见：最近一次测试通过 = OK，失败 = 异常，没测过不打分 */}
@@ -238,6 +239,8 @@ function ConnectionForm({
   const [adapterId, setAdapterId] = useState(editing?.adapterId ?? initialAdapterId ?? "");
   const [label, setLabel] = useState(editing?.label ?? "");
   const [testnet, setTestnet] = useState(editing?.testnet ?? true);
+  /** 连接级交易模式：Gate 用一条连接同时覆盖现货与永续，模式必须由这里选 */
+  const [tradingMode, setTradingMode] = useState<"spot" | "futures">(editing?.tradingMode ?? "spot");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -248,6 +251,11 @@ function ConnectionForm({
   }, [store.adapters, adapterId]);
 
   const adapter: AdapterMeta | undefined = store.adapters.find((a) => a.id === adapterId);
+  /**
+   * 目录元信息没有「支持哪些交易模式」的字段（后端未暴露），当前只有 Gate
+   * 是现货/合约双模。等后端把能力声明出来，这里改成读元信息即可。
+   */
+  const dualMode = adapter?.id === "gate";
   useEffect(() => {
     if (adapter && !editing && !label) setLabel(`${adapter.name} 连接`);
   }, [adapter, editing, label]);
@@ -260,15 +268,24 @@ function ConnectionForm({
         adapterId,
         label: label || `${adapter?.name ?? "新"} 连接`,
         testnet,
+        ...(dualMode ? { tradingMode } : {}),
         ...(apiKey ? { apiKey } : {}),
         ...(apiSecret ? { apiSecret } : {}),
       };
       if (editing) {
         await api.updateConnection(editing.id, body);
-        store.toast("success", "连接已更新");
+        store.toast(
+          "success",
+          editing.tradingMode !== tradingMode
+            ? `连接已更新，交易模式切换为${tradingMode === "futures" ? "合约" : "现货"}`
+            : "连接已更新",
+        );
       } else {
         await api.createConnection(body);
-        store.toast("success", "连接已创建");
+        store.toast(
+          "success",
+          `连接已创建${dualMode ? `（${tradingMode === "futures" ? "合约" : "现货"}模式）` : ""}`,
+        );
       }
       await store.reloadConnections();
       onDone();
@@ -285,7 +302,11 @@ function ConnectionForm({
         <SelectField
           label="交易所"
           value={adapterId}
-          onChange={setAdapterId}
+          onChange={(v) => {
+            setAdapterId(v);
+            // 切到只支持单一模式的交易所时，别把上一条 Gate 的合约模式带过去
+            if (v !== "gate") setTradingMode("spot");
+          }}
           options={store.adapters.map((a) => ({ value: a.id, label: `${a.name}（${ASSET_LABEL[a.assetClass]}）` }))}
         />
         <TextField label="连接名称" value={label} onChange={setLabel} placeholder="如：币安主账户" />
@@ -300,10 +321,36 @@ function ConnectionForm({
               ))}
             </ul>
           )}
-          {adapter.tradingMode === "futures" && (
+          {dualMode && (
+            <SelectField
+              label="交易模式"
+              hint="决定这条连接跑现货对还是 USDT 永续；切换后引用它的机器人会按新模式重建"
+              value={tradingMode}
+              options={[
+                { value: "spot", label: "现货（现货对，不支持做空）" },
+                { value: "futures", label: "合约（USDT 永续，保证金记账、允许做空）" },
+              ]}
+              onChange={(v) => setTradingMode(v as "spot" | "futures")}
+            />
+          )}
+          {(dualMode ? tradingMode === "futures" : adapter.tradingMode === "futures") && (
             <Notice tone="warn">
-              合约模式：可用真实合约行情做本地模拟撮合，也支持策略做空（在「策略」里启用）。
-              当前<b>不发送真实合约订单</b>，也不模拟资金费、维持保证金与强平；不要拿模拟结果当作真实收益证据。
+              合约模式：真实合约行情 + 本地保证金记账，策略可直接做空。
+              当前<b>不发送真实合约订单</b>，也不模拟资金费、维持保证金与强平；
+              不要拿本地撮合结果当作真实收益证据。
+            </Notice>
+          )}
+          {dualMode && (
+            <Notice tone="info">
+              {tradingMode === "futures"
+                ? "一条连接覆盖现货与永续：当前选合约；切回现货即可交易现货对，标的按同一代码解析。"
+                : "一条连接覆盖现货与永续：当前选现货；需要做空或保证金记账时，把「交易模式」切到合约。"}
+            </Notice>
+          )}
+          {editing && dualMode && (editing.tradingMode ?? "spot") !== tradingMode && (
+            <Notice tone="warn">
+              你正在切换交易模式。保存后，引用这条连接的机器人会按新模式重建（做空许可与记账方式都会改变），
+              建议先停止相关机器人再切换。
             </Notice>
           )}
           {adapter.keyFields.map((f) => (
