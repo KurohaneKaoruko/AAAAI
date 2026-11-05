@@ -54,6 +54,8 @@ test("引擎装配：突破与均值回归都能被编排层选中", () => {
     const base = testConfig();
     const cfg = { ...base, strategy: { ...base.strategy, engine } };
     const pipeline = buildPipeline(cfg, { adapter: testAdapter(), liveTrading: false });
-    assert.equal(pipeline.strategy.name, name);
+    // 2026-11 起所有引擎外层包成本闸门（costGate）：name 是 costgate(<engine>)，
+    // 断言「选中了哪个引擎」改为包含引擎名
+    assert.ok(pipeline.strategy.name.includes(name), `应选中 ${name}，实际 ${pipeline.strategy.name}`);
   }
 });

@@ -29,6 +29,15 @@ const SCHEDULE: Record<string, FeePair> = {
   "gate-futures": { taker: 0.0005, maker: 0.0002 },
   // Stooq 只是行情源（美股模拟成交），按美股常见零佣金券商给 0
   stooq: { taker: 0, maker: 0 },
+  // 测试台（AAAAI_TESTBED=1 注册）：零费率。它的行情是合成形状
+  //（单边上行/急速跳水等），幅度远超真实市场，用它测的是**机制**
+  //（信号→风控→撮合→记账链路），不该掺入费率门槛——否则成本闸门
+  // 会把合成行情里斜率平缓的段拦掉，测试语义就变成了「闸门的行为」
+  // 而不是「被测机制的行为」。simulated 同理：testbed 工厂返回的
+  // 实例 meta.id 仍是 simulated（生成器的原 ID），两边都要认。
+  testbed: { taker: 0, maker: 0 },
+  simulated: { taker: 0, maker: 0 },
+  "simulated-futures": { taker: 0, maker: 0 },
 };
 
 const UNKNOWN: FeePair = { taker: 0.001, maker: 0.001 };

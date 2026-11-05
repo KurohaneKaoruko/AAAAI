@@ -45,7 +45,8 @@ test("自适应趋势：编排层按 engine 选择策略", () => {
     strategy: { ...base.strategy, engine: "adaptive" as const },
   } satisfies AppConfig;
   const pipeline = buildPipeline(cfg, { adapter: testAdapter(), liveTrading: false });
-  assert.equal(pipeline.strategy.name, "adaptive-trend");
+  // 引擎外层包了成本闸门（costGate）：断言「选中 adaptive」改为包含
+  assert.ok(pipeline.strategy.name.includes("adaptive-trend"), `应选中 adaptive-trend，实际 ${pipeline.strategy.name}`);
 });
 
 test("自适应趋势：模拟合约上跑通完整回测（多情景胜率机制已随模拟交易所下线）", async () => {

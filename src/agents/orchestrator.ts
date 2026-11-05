@@ -12,6 +12,7 @@ import { ExchangeBroker } from "../execution/exchangeBroker.js";
 import type { ExchangeAdapter } from "../exchanges/types.js";
 import { tradingModeOf } from "../exchanges/types.js";
 import { feePairFor } from "../execution/feeSchedule.js";
+import { CostAwareGate } from "../strategies/costGate.js";
 import { DEFAULT_FEE_RATE } from "../configSchema.js";
 import { MarketAnalystAgent } from "./marketAnalyst.js";
 import { RiskGuardAgent } from "./riskGuard.js";
@@ -231,6 +232,17 @@ export function buildPipeline(
       ? new LLMStrategy(baseStrategy, soClient, config.llm.decisionInterval, newsProvider)
       : baseStrategy;
   }
+  /*
+   * 成本感知闸门（最外层）：所有引擎与 LLM 回退路径统一过闸。
+   * 单边成本 = taker 费 + 固定滑点（盘口撮合时实际吃单成本只会更高，
+   * 这里用保守下界）。亏损解剖（见 costGate.ts 文件头）表明不筛掉
+   * 「预期移动盖不住往返成本」的信号，1m 等高换手场景必然被成本碾轧。
+   */
+  strategy = new CostAwareGate(strategy, {
+    oneWayCost: feePairFor(options.adapter.meta.id, tradingMode).taker + config.risk.slippageBps / 1e4,
+    fast: config.strategy.fastWindow,
+    slow: config.strategy.slowWindow,
+  });
 
   // 点评用第一个可用的模型（没有就纯规则，不影响主流程）
   const commentaryLlm = source === "chat" ? chatClient : source === "systemone" ? soClient : chatClient ?? soClient;
