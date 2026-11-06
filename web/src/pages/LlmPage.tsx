@@ -329,7 +329,7 @@ export function LlmPage({ store }: { store: AppStore }) {
                 onChange={(v) => setForm({ ...form, label: v })}
                 placeholder="如：主力 gpt-4o-mini"
               />
-              <TextField label="模型" value={form.model} onChange={(v) => setForm({ ...form, model: v })} />
+              <TextField label="模型" required value={form.model} onChange={(v) => setForm({ ...form, model: v })} />
             </div>
             {form.kind === "systemone" && (
               <SelectField
@@ -372,6 +372,7 @@ export function LlmPage({ store }: { store: AppStore }) {
             )}
             <TextField
               label="接口地址（OpenAI 兼容）"
+              required
               value={form.baseUrl}
               onChange={(v) => setForm({ ...form, baseUrl: v })}
             />

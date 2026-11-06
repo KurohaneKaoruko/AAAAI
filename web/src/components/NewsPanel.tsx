@@ -120,6 +120,7 @@ export function NewsPanel({ store }: { store: AppStore }) {
               <TextField label="名称" value={draft.label} onChange={(v) => setDraft({ ...draft, label: v })} />
               <TextField
                 label="地址模板"
+                required
                 value={draft.url}
                 placeholder="https://example.com/rss?kw={symbol}"
                 onChange={(v) => setDraft({ ...draft, url: v })}

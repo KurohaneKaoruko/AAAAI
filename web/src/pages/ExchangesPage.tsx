@@ -301,6 +301,7 @@ function ConnectionForm({
       <div className="grid-2">
         <SelectField
           label="交易所"
+          required
           value={adapterId}
           onChange={(v) => {
             setAdapterId(v);

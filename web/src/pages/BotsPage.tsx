@@ -633,7 +633,7 @@ function BotForm({
         </Notice>
       )}
       <div className="grid-2">
-        <TextField label="名称" value={name} onChange={setName} placeholder="如：BTC 趋势跟踪" />
+        <TextField label="名称" required value={name} onChange={setName} placeholder="如：BTC 趋势跟踪" />
         {strategies.length > 0 ? (
           <StrategyPicker items={strategies} value={strategyId} onChange={setStrategyId} />
         ) : (
@@ -646,6 +646,7 @@ function BotForm({
         )}
         <SelectField
           label="交易所连接"
+          required
           value={connectionId}
           options={connections.map((c) => ({
             value: c.id,

@@ -1,6 +1,6 @@
 /** 共享 UI 原子组件：面板、表单、按钮、徽章、表格、空态、提示条。 */
 
-import type { ReactNode, Ref } from "react";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import { Select, type SelectOption } from "./Select";
 
 export function Panel({
@@ -35,15 +35,17 @@ export function Panel({
 export function Field({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   children: ReactNode;
 }) {
   return (
     <label className="field">
-      <FieldLabel label={label} hint={hint} />
+      <FieldLabel label={label} hint={hint} required={required} />
       {children}
     </label>
   );
@@ -56,10 +58,17 @@ export function Field({
  * 会被长描述挤成两行，同一行的输入框高低不齐。现在标题 nowrap（候选里省略号），
  * 描述单行省略并用 title 提示全文，保证同一行字段的输入框基线对齐。
  */
-function FieldLabel({ label, hint }: { label: string; hint?: string }) {
+function FieldLabel({ label, hint, required }: { label: string; hint?: string; required?: boolean }) {
   return (
     <span className="field-label">
-      <span className="field-label-text">{label}</span>
+      <span className="field-label-text">
+        {label}
+        {required && (
+          <em className="field-required" aria-label="必填">
+            *
+          </em>
+        )}
+      </span>
       {hint && (
         <em className="field-hint" title={hint}>
           {hint}
@@ -78,15 +87,17 @@ function FieldLabel({ label, hint }: { label: string; hint?: string }) {
 export function FieldBox({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   children: ReactNode;
 }) {
   return (
     <div className="field">
-      <FieldLabel label={label} hint={hint} />
+      <FieldLabel label={label} hint={hint} required={required} />
       {children}
     </div>
   );
@@ -95,6 +106,7 @@ export function FieldBox({
 export function NumberField({
   label,
   hint,
+  required,
   value,
   onChange,
   step = 1,
@@ -104,6 +116,7 @@ export function NumberField({
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   value: number;
   onChange: (v: number) => void;
   step?: number;
@@ -111,19 +124,50 @@ export function NumberField({
   max?: number;
   suffix?: string;
 }) {
+  /**
+   * 输入框保留一份「正在输入」的字符串。
+   *
+   * 以前 value 直接绑 number：想从 100000 改成 50000，全选删空的一瞬间
+   * Number("") = 0 就把表单写成 0，接着输入的 5 变成在 0 后面追加；
+   * 输入 "0." 也会被立刻改回 "0"，小数点根本打不出来。
+   * 现在空串只留在本地，合法数字才向上提交；失焦时非法/越界再回填。
+   */
+  const [text, setText] = useState(() => String(value));
+  useEffect(() => {
+    setText((prev) => {
+      const n = Number(prev);
+      return prev.trim() !== "" && Number.isFinite(n) && n === value ? prev : String(value);
+    });
+  }, [value]);
+
+  const commit = () => {
+    const n = Number(text);
+    if (text.trim() === "" || !Number.isFinite(n)) {
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, n));
+    if (clamped !== n) onChange(clamped);
+    setText(String(clamped));
+  };
+
   return (
-    <Field label={label} hint={hint}>
+    <Field label={label} hint={hint} required={required}>
       <div className="input-affix">
         <input
           type="number"
-          value={value}
+          value={text}
           step={step}
           min={min}
           max={max}
           onChange={(e) => {
-            const v = Number(e.target.value);
+            const next = e.target.value;
+            setText(next);
+            if (next.trim() === "") return;
+            const v = Number(next);
             if (Number.isFinite(v)) onChange(v);
           }}
+          onBlur={commit}
         />
         {suffix && <span className="affix">{suffix}</span>}
       </div>
@@ -134,6 +178,7 @@ export function NumberField({
 export function TextField({
   label,
   hint,
+  required,
   value,
   onChange,
   placeholder,
@@ -141,13 +186,14 @@ export function TextField({
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   type?: string;
 }) {
   return (
-    <Field label={label} hint={hint}>
+    <Field label={label} hint={hint} required={required}>
       <input
         type={type}
         value={value}
@@ -161,18 +207,20 @@ export function TextField({
 export function SelectField<T extends string>({
   label,
   hint,
+  required,
   value,
   options,
   onChange,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   value: T;
   options: SelectOption<T>[];
   onChange: (v: T) => void;
 }) {
   return (
-    <FieldBox label={label} hint={hint}>
+    <FieldBox label={label} hint={hint} required={required}>
       <Select value={value} options={options} onChange={onChange} />
     </FieldBox>
   );

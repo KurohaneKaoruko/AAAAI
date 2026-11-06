@@ -121,6 +121,7 @@ export function BacktestPage() {
           <div className="grid-2">
             <SelectField
               label="交易所连接"
+              required
               value={connectionId}
               options={connections.map((c) => ({ value: c.id, label: c.label }))}
               onChange={(v) => {
@@ -130,6 +131,7 @@ export function BacktestPage() {
             />
             <SelectField
               label="策略"
+              required
               value={strategyId}
               options={strategies.map((s) => ({ value: s.id, label: `${s.name} · ${describeSource(s)}` }))}
               onChange={setStrategyId}
