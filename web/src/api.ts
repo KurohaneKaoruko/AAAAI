@@ -77,8 +77,9 @@ export const api = {
 
   // 配置
   config: () => request<{ config: AppConfig }>("/api/config"),
+  /** warnings = 非法字段清单（保存成功但部分字段未按输入生效时服务端返回） */
   saveConfig: (patch: Partial<AppConfig>) =>
-    request<{ config: AppConfig }>("/api/config", { method: "POST", body: JSON.stringify(patch) }),
+    request<{ config: AppConfig; warnings?: string[] }>("/api/config", { method: "POST", body: JSON.stringify(patch) }),
   persistConfig: () => request<{ saved: string }>("/api/config/persist", { method: "POST" }),
   // LLM 多实例
   llmProfiles: () =>

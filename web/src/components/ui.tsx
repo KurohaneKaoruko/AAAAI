@@ -113,6 +113,7 @@ export function NumberField({
   min,
   max,
   suffix,
+  commitOn = "change",
 }: {
   label: string;
   hint?: string;
@@ -123,6 +124,12 @@ export function NumberField({
   min?: number;
   max?: number;
   suffix?: string;
+  /**
+   * 提交时机：change = 每次合法输入立即提交（本地表单用）；
+   * blur = 失焦/回车才提交（onChange 直连保存接口时必须用它——
+   * 否则每敲一个键就 PATCH 一次，中间值全写进配置，toast 也会刷屏）。
+   */
+  commitOn?: "change" | "blur";
 }) {
   /**
    * 输入框保留一份「正在输入」的字符串。
@@ -147,7 +154,9 @@ export function NumberField({
       return;
     }
     const clamped = Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, n));
-    if (clamped !== n) onChange(clamped);
+    // change 模式下合法输入已实时提交，这里只补截断场景；
+    // blur 模式下这是唯一提交点，值有变就提交。
+    if (commitOn === "blur" ? clamped !== value : clamped !== n) onChange(clamped);
     setText(String(clamped));
   };
 
@@ -163,11 +172,17 @@ export function NumberField({
           onChange={(e) => {
             const next = e.target.value;
             setText(next);
+            if (commitOn === "blur") return; // 输入只改本地草稿，commit 时才提交
             if (next.trim() === "") return;
             const v = Number(next);
             if (Number.isFinite(v)) onChange(v);
           }}
           onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur(); // 回车 = 结束输入，走同一条 commit 路径
+            }
+          }}
         />
         {suffix && <span className="affix">{suffix}</span>}
       </div>

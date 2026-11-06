@@ -88,6 +88,7 @@ export function OptimizePanel({ store }: { store: AppStore }) {
           step={0.01}
           min={0}
           max={1}
+          commitOn="blur"
           onChange={(v) => save({ targetVol: v })}
         />
         <NumberField
@@ -95,6 +96,7 @@ export function OptimizePanel({ store }: { store: AppStore }) {
           value={opt.minPositions}
           min={0}
           max={10}
+          commitOn="blur"
           onChange={(v) => save({ minPositions: v })}
         />
         <NumberField
@@ -104,6 +106,7 @@ export function OptimizePanel({ store }: { store: AppStore }) {
           step={0.05}
           min={0}
           max={1}
+          commitOn="blur"
           onChange={(v) => void store.patchConfig({ cost: { ...cost, impactK: v } } as never)}
         />
       </div>
@@ -185,6 +188,7 @@ function ExecutionSlicing({ store }: { store: AppStore }) {
             value={exec.slicingSlices}
             min={2}
             max={24}
+            commitOn="blur"
             onChange={(v) => save({ slicingSlices: v })}
           />
         )}
@@ -194,6 +198,7 @@ function ExecutionSlicing({ store }: { store: AppStore }) {
             value={exec.slicingSpacingBars}
             min={1}
             max={24}
+            commitOn="blur"
             onChange={(v) => save({ slicingSpacingBars: v })}
           />
         )}

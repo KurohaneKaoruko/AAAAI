@@ -181,6 +181,29 @@ test("EngineController: 配置热更新（部分字段合并）", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test("EngineController: 配置校验回执——非法字段点名，合法补丁不误报", () => {
+  const dir = tmpDataDir();
+  try {
+    const cm = new ConnectionManager(dir);
+    const controller = new EngineController(testConfig(), cm, new WatchlistManager(dir), new LlmManager(dir));
+    // 合法补丁：无 warnings（未提及的字段不算问题）
+    const ok1 = controller.applyConfig({ risk: { feeRate: 0.001 } });
+    assert.deepEqual(ok1.warnings, [], "合法补丁不应有回执");
+    // 非法值点名：类型错 + 越界
+    const bad = controller.applyConfig({ risk: { feeRate: "abc" as unknown as number, maxPositionWeight: 5 } });
+    assert.equal(bad.warnings.length, 2, `应报告 2 项，实际 ${JSON.stringify(bad.warnings)}`);
+    assert.ok(bad.warnings[0]!.includes("risk.fee_rate"));
+    assert.ok(bad.warnings[1]!.includes("risk.max_position_weight"));
+    // 跨字段约束：快窗口 ≥ 慢窗口
+    const win = controller.applyConfig({ strategy: { fastWindow: 20, slowWindow: 5 } });
+    assert.ok(win.warnings.some((w) => w.includes("必须小于")), `应报窗口倒置，实际 ${JSON.stringify(win.warnings)}`);
+    // null/undefined 显式出现也算非法（想清字段不是合法操作）
+    const nil = controller.applyConfig({ risk: { initialCash: null as unknown as number } });
+    assert.ok(nil.warnings.some((w) => w.includes("risk.initial_cash")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 test("模拟交易所自带标的：候选池空着也能开跑", async () => {
   const dir = tmpDataDir();
   try {

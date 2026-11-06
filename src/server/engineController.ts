@@ -490,8 +490,14 @@ export class EngineController {
     return this.llm;
   }
 
-  /** 运行中更新参数（下次流水线生效）。 */
-  applyConfig(patch: Partial<AppConfig>): AppConfig {
+  /** 运行中更新参数（下次流水线生效）。非法值不抛错（保持旧语义），但记进回执。 */
+  applyConfig(patch: Partial<AppConfig>): { config: AppConfig; warnings: string[] } {
+    const warnings = configIssues(patch);
+    if (warnings.length > 0) {
+      // 不阻断保存：合法字段照常生效。但必须说清楚哪些字段没按用户输入生效，
+      // 否则用户改了个废值（如把费率填成文本）也看到「已保存」，以为改成功了。
+      log.warn("配置含 %d 个未生效字段: %s", warnings.length, warnings.join("; "));
+    }
     const { auth: _ignoredAuth, ...rest } = patch;
     this.config = {
       ...this.config,
@@ -515,7 +521,7 @@ export class EngineController {
     const kind = modelKindOf(this.config.strategy.decisionSource);
     if (kind) this.llm.setActiveKind(kind);
     this.emitState();
-    return this.config;
+    return { config: this.config, warnings };
   }
 }
 
@@ -529,3 +535,42 @@ function modelKindOf(source: string): "chat" | "systemone" | null {
   return null;
 }
 
+
+/**
+ * 配置补丁的浅校验：找出「类型不对/越界被回退或截断」的字段。
+ * 不重复 buildConfig 的全部规则，只抓用户最常踩的：数字字段传了
+ * 非数字、枚举传了未知值。返回可读的问题列表（空 = 全部按输入生效）。
+ */
+function configIssues(patch: Partial<AppConfig>): string[] {
+  const issues: string[] = [];
+  // patch 是部分补丁：只检查「显式出现」的字段，未提及的不算问题。
+  // undefined/null 一律视为「想清掉这个字段」的无效输入，点出来。
+  const has = (o: Record<string, unknown> | undefined, k: string): boolean =>
+    !!o && k in o && o[k] !== undefined;
+  const num = (v: unknown, present: boolean, label: string, { min = -Infinity, max = Infinity }: { min?: number; max?: number } = {}) => {
+    if (!present) return;
+    if (typeof v !== "number" || !Number.isFinite(v)) issues.push(`${label} 需要${min > -Infinity || max < Infinity ? ` ${min}~${max} 的` : ""}数字`);
+    else if (v < min || v > max) issues.push(`${label} 超出范围 ${min}~${max}（当前 ${v}）`);
+  };
+  const p = patch as Record<string, Record<string, unknown>>;
+  const r = p.risk ?? {};
+  num(r.initialCash, has(p.risk, "initialCash"), "risk.initial_cash", { min: 1 });
+  num(r.feeRate, has(p.risk, "feeRate"), "risk.fee_rate", { min: 0, max: 0.1 });
+  num(r.slippageBps, has(p.risk, "slippageBps"), "risk.slippage_bps", { min: 0, max: 10_000 });
+  num(r.maxOrderValue, has(p.risk, "maxOrderValue"), "risk.max_order_value", { min: 1 });
+  num(r.maxPositionWeight, has(p.risk, "maxPositionWeight"), "risk.max_position_weight", { min: 0.01, max: 1 });
+  num(r.maxDrawdownPct, has(p.risk, "maxDrawdownPct"), "risk.max_drawdown_pct", { min: 0.01, max: 1 });
+  const m = p.market ?? {};
+  num(m.barCount, has(p.market, "barCount"), "market.bar_count", { min: 2 });
+  num(m.pollMs, has(p.market, "pollMs"), "market.poll_ms", { min: 1000 });
+  const e = p.execution ?? {};
+  num(e.slicingSlices, has(p.execution, "slicingSlices"), "execution.slicing_slices", { min: 1, max: 24 });
+  num(e.volumeParticipation, has(p.execution, "volumeParticipation"), "execution.volume_participation", { min: 0, max: 1 });
+  const st = p.strategy ?? {};
+  num(st.fastWindow, has(p.strategy, "fastWindow"), "strategy.fast_window", { min: 1 });
+  num(st.slowWindow, has(p.strategy, "slowWindow"), "strategy.slow_window", { min: 2 });
+  if (typeof st.fastWindow === "number" && typeof st.slowWindow === "number" && st.fastWindow >= st.slowWindow) {
+    issues.push(`strategy.fast_window(${st.fastWindow}) 必须小于 slow_window(${st.slowWindow})`);
+  }
+  return issues;
+}

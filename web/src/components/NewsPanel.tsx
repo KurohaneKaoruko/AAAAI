@@ -89,6 +89,7 @@ export function NewsPanel({ store }: { store: AppStore }) {
               value={cfg.maxAgeHours}
               min={1}
               max={168}
+              commitOn="blur"
               onChange={(v) => void save({ maxAgeHours: v })}
             />
             <NumberField
@@ -96,6 +97,7 @@ export function NewsPanel({ store }: { store: AppStore }) {
               value={cfg.maxPerSymbol}
               min={1}
               max={20}
+              commitOn="blur"
               onChange={(v) => void save({ maxPerSymbol: v })}
             />
             <NumberField
@@ -104,6 +106,7 @@ export function NewsPanel({ store }: { store: AppStore }) {
               value={Math.round(cfg.refreshMs / 60000)}
               min={1}
               max={120}
+              commitOn="blur"
               onChange={(v) => void save({ refreshMs: v * 60_000 })}
             />
           </div>

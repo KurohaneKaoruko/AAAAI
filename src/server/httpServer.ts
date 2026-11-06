@@ -157,11 +157,11 @@ export function createServer(controller: EngineController, options: ServerOption
 
   app.post("/api/config", (req, res) => {
     try {
-      const next = controller.applyConfig(req.body ?? {});
+      const { config: next, warnings } = controller.applyConfig(req.body ?? {});
       // 机器人持有自己的配置副本：不同步的话，实盘判定会读到旧的执行方式
       // （表现为"明明切到真实下单了，机器人还是拒绝启动"）。
       bots.useConfig(next);
-      ok(res, { config: controller.snapshot().config });
+      ok(res, { config: controller.snapshot().config, ...(warnings.length > 0 ? { warnings } : {}) });
     } catch (err) {
       fail(res, err);
     }

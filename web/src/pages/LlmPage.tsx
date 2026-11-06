@@ -244,6 +244,7 @@ export function LlmPage({ store }: { store: AppStore }) {
             value={config?.llm.decisionInterval ?? 10}
             min={1}
             max={200}
+            commitOn="blur"
             onChange={(v) => config && void store.patchConfig({ llm: { ...config.llm, decisionInterval: v } })}
           />
           <SelectField

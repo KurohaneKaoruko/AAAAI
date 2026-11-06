@@ -39,7 +39,7 @@ export function useBotsPolling(pollMs = 3000): Bot[] {
 
 export interface Toast {
   id: number;
-  tone: "success" | "error" | "info";
+  tone: "success" | "error" | "info" | "warn";
   text: string;
 }
 
@@ -131,9 +131,15 @@ export function useAppStore(): AppStore {
   const patchConfig = useCallback(
     async (patch: Partial<AppConfig>) => {
       try {
-        const { config } = await api.saveConfig(patch);
+        const { config, warnings } = await api.saveConfig(patch);
         setState((prev) => (prev ? { ...prev, config } : prev));
-        toast("success", "设置已保存");
+        if (warnings && warnings.length > 0) {
+          // 保存成功但部分字段非法未生效：必须说清楚是哪些，否则用户
+          // 以为改成功了（如把费率填成文本，实际被回退成默认值）。
+          toast("warn", `已保存，但 ${warnings.length} 项未生效：${warnings.slice(0, 3).join("；")}${warnings.length > 3 ? " 等" : ""}`);
+        } else {
+          toast("success", "设置已保存");
+        }
         return true;
       } catch (err) {
         toast("error", (err as Error).message);
