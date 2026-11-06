@@ -25,9 +25,6 @@ import { noiseScale } from "./momentum.js";
 
 const log = getLogger("strategy:costgate");
 
-/** 默认预期持有根数：趋势策略进场后期望拿住的窗口。 */
-const DEFAULT_HOLD_HORIZON = 8;
-
 export interface CostGateOptions {
   /** 单边成本（小数）：taker 费 + 平均滑点。例：0.0003 + 0.0002 = 0.0005 */
   oneWayCost: number;
@@ -37,7 +34,12 @@ export interface CostGateOptions {
    * 剩下的才是自己的——保守，但比「方向对一点就动手」诚实得多。
    */
   costCoverage?: number;
-  /** 预期持有根数（把趋势斜率折算到持有期视野） */
+  /**
+   * 预期持有根数（把趋势斜率折算到持有期视野）。
+   * 缺省 = slow（策略自己的慢线窗口）：2/8 仍是 8 根，16/48 自动用 48 根。
+   * 曾经写死 8 根，窗口调长后趋势斜率被除得越来越小 —— 16/48 要 3.36%
+   * 的均线差才能过闸，5m 上等于永不交易（v2 预设就是这么被静默废掉的）。
+   */
   holdHorizonBars?: number;
   /** 平仓后再进场的冷却根数（默认 6） */
   cooldownBars?: number;
@@ -98,9 +100,10 @@ export class CostAwareGate implements Strategy {
 
     const bars = ctx.bars;
     if (bars.length >= 3) {
-      const horizon = this.opts.holdHorizonBars ?? DEFAULT_HOLD_HORIZON;
       const fast = this.opts.fast ?? 2;
       const slow = this.opts.slow ?? 8;
+      // 持有视野跟策略窗口走：慢线越长，进场后本来就该拿得越久。
+      const horizon = this.opts.holdHorizonBars ?? slow;
       /*
        * 趋势移动估计（对齐 momentum 引擎的噪声归一口径，MLE 线性外推）：
        * |fastMa − slowMa| 是最近 (slow−fast)/2 根内积累的趋势量（快线滞后

@@ -337,3 +337,34 @@ test("收益工具：对数收益与简单收益", () => {
   assert.ok(Math.abs(logR[0]! - Math.log(1.1)) < 1e-12);
   assert.deepEqual(returnsOf([{ close: 0 }, { close: 10 }]), [], "价格为 0 时不产生收益");
 });
+test("因子配置器：全池绝对动量为负时空仓（横截面不再永远满仓）", () => {
+  // 两条都在跌：z-score 仍会让「跌得少」的那条拿正分。没有绝对动量过滤，
+  // 配置器会在全面下跌里继续满仓做多；叠加时序动量后应该持币。
+  const inputs: FactorInput[] = [
+    { symbol: "DOWN-A", bars: bars(Array.from({ length: 60 }, (_, i) => 200 - i * 0.5)) },
+    { symbol: "DOWN-B", bars: bars(Array.from({ length: 60 }, (_, i) => 200 - i * 2)) },
+  ];
+  const r = allocateByFactors(inputs, {
+    limits: { maxPositionWeight: 0.5, grossCap: 1 },
+    optimize: { method: "score", factorWeights: {}, targetVol: 0, minPositions: 0 },
+    grossCap: 1,
+    slowWindow: 48,
+  });
+  assert.deepEqual(r.result.weights, {}, `全池下跌应空仓，实际 ${JSON.stringify(r.result.weights)}`);
+  assert.equal(r.result.cashWeight, 1);
+});
+
+test("因子配置器：绝对动量过滤只留真正上涨的标的", () => {
+  const inputs: FactorInput[] = [
+    { symbol: "UP", bars: bars(Array.from({ length: 60 }, (_, i) => 100 + i)) },
+    { symbol: "DOWN", bars: bars(Array.from({ length: 60 }, (_, i) => 200 - i * 0.5)) },
+  ];
+  const r = allocateByFactors(inputs, {
+    limits: { maxPositionWeight: 0.5, grossCap: 1 },
+    optimize: { method: "score", factorWeights: {}, targetVol: 0, minPositions: 0 },
+    grossCap: 1,
+    slowWindow: 48,
+  });
+  assert.ok((r.result.weights.UP ?? 0) > 0, "上涨标的应保留");
+  assert.equal(r.result.weights.DOWN ?? 0, 0, "下跌标的应被绝对动量过滤掉");
+});

@@ -308,6 +308,7 @@ export function buildPipeline(
             Math.max(0, (p.quantity * (book.last(p.symbol) ?? p.avgCost)) / Math.max(1, portfolio.equity())),
           ]),
         ),
+        slowWindow: config.strategy.slowWindow,
       }).result;
     },
   };

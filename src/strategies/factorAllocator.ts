@@ -41,6 +41,12 @@ export interface ScoreAllocationOptions {
    * 用于「领先优势不足时沿用现有持仓」，避免横截面排名抖动导致反复换仓。
    */
   currentWeights?: Record<string, number>;
+  /**
+   * 时序动量过滤的回看窗口（通常传策略 slowWindow）。
+   * 横截面 z-score 只回答「谁相对更好」；全池下跌时仍有一半为正分，
+   * 纯横截面会永远满仓做多。叠加绝对动量过滤后，全池走弱就空仓。
+   */
+  slowWindow?: number;
 }
 
 /** 领先优势门槛（标准差单位）：第一名领先不足此值时不算「明确领先」。 */
@@ -73,11 +79,38 @@ export function allocateByFactors(
    * 差本来就小且抖，没有优势门槛的排名就是噪声放大器。只有现任领先者
    * **掉出正分池**或被明显反超（≥ LEAD_EDGE）才交棒。
    */
-  const positive = scored.filter((s) => s.score > 0);
+  /*
+   * 绝对动量过滤（时序动量 + 横截面动量的组合，Moskowitz/Ooi/Pedersen）：
+   * z-score 是池内相对排名，哪怕所有标的都在跌，也总有一半是正分；
+   * 没有这层过滤，配置器在全面下跌里仍会满仓做多。
+   */
+  const lookback = Math.max(2, options.slowWindow ?? 48);
+  const absoluteMomentum = (symbol: string): number => {
+    const bars = inputs.find((i) => i.symbol === symbol)?.bars ?? [];
+    if (bars.length < lookback + 1) return 1; // 数据不足时不额外限制（因子自身会处理）
+    const past = bars[bars.length - 1 - lookback]!.close;
+    const now = bars[bars.length - 1]!.close;
+    return past > 0 && Number.isFinite(now) ? now / past - 1 : 0;
+  };
+  const positive = scored.filter((s) => s.score > 0 && absoluteMomentum(s.symbol) > 0);
   const incumbent = Object.entries(options.currentWeights ?? {})
     .filter(([, w]) => w > 0.01)
     .sort((a, b) => b[1] - a[1])[0]?.[0];
-  let pool = positive.length > 0 ? positive : scored.slice(0, 1);
+  let pool = positive;
+  if (pool.length === 0) {
+    // 全池都没有「相对为正 + 绝对动量为正」的标的：持币观望。
+    return {
+      result: {
+        weights: {},
+        cashWeight: 1,
+        confidence: 0.5,
+        reason: `无正分标的（${lookback} 根绝对动量过滤后），保持空仓`,
+        source: "rules",
+        notes: [],
+      },
+      scored,
+    };
+  }
   if (
     incumbent &&
     positive.length > 1 &&
@@ -135,7 +168,7 @@ export function allocateByFactors(
   weights = maybeVolTarget(weights, inputs, options);
 
   const sum = Object.values(weights).reduce((a, b) => a + b, 0);
-  const leader = scored[0];
+  const leader = pool[0];
   return {
     result: {
       weights,

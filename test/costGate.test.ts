@@ -102,3 +102,34 @@ test("成本闸门：透传 null 与平仓信号", async () => {
   const r = await gated.generate({ symbol: "T", bars: genBars(3, 0.001, 0.001) });
   assert.equal(r, null);
 });
+
+test("成本闸门：持有视野跟随策略窗口（长窗口不会被固定 8 根误杀）", async () => {
+  // 16/48 的 MA 差是 32 根积累出来的；按住 8 根折算会把它除以 4，
+  // 长窗口策略因此永远够不到门槛。默认视野应等于 slow。
+  const bars = genBars(160, 0.0004, 0.0005);
+  const stub: Strategy = {
+    name: "stub",
+    warmup: 1,
+    generate: async (ctx: StrategyContext) => ({
+      symbol: ctx.symbol,
+      timestamp: ctx.bars[ctx.bars.length - 1]!.timestamp,
+      targetWeight: 0.5,
+      confidence: 1,
+      reason: "enterlong",
+    }),
+  };
+  const make = (holdHorizonBars?: number) =>
+    new CostAwareGate(stub, {
+      oneWayCost: 0.0007,
+      fast: 16,
+      slow: 48,
+      cooldownBars: 0,
+      ...(holdHorizonBars !== undefined ? { holdHorizonBars } : {}),
+    });
+  const ctx: StrategyContext = { symbol: "TEST", bars };
+  // 旧口径（固定 8 根）会拦截
+  assert.equal(await make(8).generate(ctx), null, "固定 8 根视野应拦掉这段温和趋势");
+  // 新口径（默认跟随 slow=48）应放行
+  const sig = await make().generate(ctx);
+  assert.equal(sig?.targetWeight, 0.5, "16/48 策略按自身窗口折算应放行");
+});
