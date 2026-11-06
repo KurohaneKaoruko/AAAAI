@@ -43,6 +43,7 @@ export function BotDetailPage({
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -50,8 +51,10 @@ export function BotDetailPage({
       const found = bots.find((b) => b.id === botId) ?? null;
       setBot(found);
       setMissing(!found);
-    } catch {
-      /* 轮询失败就等下一轮，不打断阅读 */
+      setLoadError(null);
+    } catch (err) {
+      // 轮询失败不打断阅读；但首屏失败必须说清楚，否则页面会永远停在「正在加载…」
+      setLoadError((err as Error).message);
     }
   }, [botId]);
 
@@ -93,7 +96,17 @@ export function BotDetailPage({
     return (
       <div className="page page-bots">
         <Panel title="机器人详情">
-          <Empty>正在加载…</Empty>
+          {loadError ? (
+            <Empty>
+              加载失败：{loadError}
+              <br />
+              <Button variant="ghost" onClick={() => void reload()}>
+                重试
+              </Button>
+            </Empty>
+          ) : (
+            <Empty>正在加载…</Empty>
+          )}
         </Panel>
       </div>
     );
