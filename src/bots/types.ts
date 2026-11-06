@@ -303,11 +303,6 @@ export interface BotView extends BotConfig {
   };
   /** 生效的模型实例名称，便于一眼确认"这个机器人在用谁" */
   modelLabels: string[];
-  /**
-   * 行情来源；模拟交易所下线后恒为 real。保留字段：历史状态文件与
-   * 前端类型还在引用，语义不变。
-   */
-  marketData: "real";
   /** 交易模式：现货 / 合约（合约允许做空与保证金记账） */
   tradingMode: "spot" | "futures";
 }

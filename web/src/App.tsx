@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sidebar, Toasts, TopBar } from "./components/Shell";
 import { Tour } from "./components/Tour";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -88,7 +88,16 @@ export function App() {
     /** 有密码 = 需要登录；没密码 = 免登录直进 */
     required: boolean;
     ok: boolean;
+    /** 服务端报「还没设过密码」：本次会话内展示首启引导（跳过后不再弹） */
+    needsSetup?: boolean;
   } | null>(null);
+  /**
+   * 首启引导的「跳过」只在本次浏览器会话内记住：服务端刻意不持久化 skip
+   *（auth.json 只存密码散列，skip 落盘会造出「想设密码也没入口」的状态），
+   * sessionStorage 与标签页同生命周期 —— 关掉标签页再开，引导会重新出现，
+   * 给用户一次重新考虑设密码的机会。
+   */
+  const setupSkipped = useRef(sessionStorage.getItem("aaaai.setup-skipped") === "1");
   // 使用指引：首访自动播；顶栏 ? 递增此 key 重播
   const [tourKey, setTourKey] = useState(0);
   /** 窄屏抽屉侧栏 */
@@ -99,7 +108,12 @@ export function App() {
   const checkAuth = useCallback(async () => {
     try {
       const s = await api.authStatus();
-      setAuth({ required: s.hasPassword, ok: s.authenticated });
+      setAuth({
+        required: s.hasPassword,
+        ok: s.authenticated,
+        // needsSetup 且本次会话没跳过、也没设过密码 → 首启引导
+        needsSetup: s.needsSetup && !setupSkipped.current,
+      });
     } catch {
       // 鉴权接口不可用时（例如旧版本服务端）直接放行
       setAuth({ required: false, ok: true });
@@ -260,6 +274,20 @@ export function App() {
 
   if (auth?.required && !auth.ok) {
     return <LoginPage needsSetup={false} onSuccess={() => void handleLoggedIn()} />;
+  }
+  // 首启引导：没密码（required=false 直进）但服务端说还没设过且本次会话未跳过
+  if (auth && !auth.required && auth.needsSetup) {
+    return (
+      <LoginPage
+        needsSetup
+        onSuccess={() => {
+          // 设置成功或跳过都进面板；跳过时记住（本次会话不再弹）
+          sessionStorage.setItem("aaaai.setup-skipped", "1");
+          setupSkipped.current = true;
+          void handleLoggedIn();
+        }}
+      />
+    );
   }
 
   return (

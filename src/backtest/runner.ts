@@ -57,11 +57,6 @@ export interface BacktestStrategyParams {
 }
 
 export interface BacktestResult {
-  /**
-   * 行情来源；模拟交易所下线后恒为 real。
-   * 保留字段：历史结果 JSON 与前端类型还在引用，语义不变。
-   */
-  marketData: "real";
   /** 现货 / 合约：合约结果可能含负持仓与保证金记账 */
   tradingMode: "spot" | "futures";
   /** 行情连接名（让人知道数据来自哪个交易所/数据源） */
@@ -180,8 +175,6 @@ export async function runBacktest(
     .filter((k) => k.bars.length > 0);
 
   return {
-    // 行情来源；模拟交易所下线后恒为 real。保留字段：历史结果与前端类型还在引用。
-    marketData: "real",
     tradingMode: adapter.meta.tradingMode ?? "spot",
     symbols: input.symbols,
     interval: input.interval,

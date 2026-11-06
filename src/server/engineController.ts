@@ -67,8 +67,6 @@ export interface RunTarget {
   connectionAdapterId: string | null;
   /** spot 现货 / futures 合约；界面据此显示做空、保证金相关提示 */
   tradingMode: "spot" | "futures";
-  /** 行情来源；模拟交易所下线后恒为 real。保留字段：前端类型还在引用，语义不变。 */
-  marketData: "real";
   interval: string;
   symbols: string[];
   /** 解析不出标的时的原因（能跑则为 null） */
@@ -409,7 +407,6 @@ export class EngineController {
         connectionLabel: t.connection.label,
         connectionAdapterId: t.connection.adapterId,
         tradingMode: tradingModeOf(adapter),
-        marketData: "real",
         interval: t.interval,
         symbols: t.symbols,
         error: null,
@@ -421,7 +418,6 @@ export class EngineController {
         connectionLabel: null,
         connectionAdapterId: null,
         tradingMode: "spot",
-        marketData: "real",
         interval: this.config.market.interval,
         symbols: [],
         error: (err as Error).message,

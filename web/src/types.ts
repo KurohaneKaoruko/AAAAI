@@ -14,8 +14,6 @@ export interface AdapterMeta {
   supportsTestnet: boolean;
   /** 现货/合约；缺省按现货处理 */
   tradingMode?: "spot" | "futures";
-  /** 行情来源：产品只使用真实行情 */
-  marketData?: "real";
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
@@ -278,8 +276,6 @@ export interface BotAction {
 
 /** 一次历史模拟（回测）的结果。成交一次性全出——它就是要把整段历史跑完。 */
 export interface BacktestResult {
-  /** 行情来源：产品只使用真实行情 */
-  marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
   connectionLabel?: string;
@@ -372,8 +368,6 @@ export interface Bot {
   modelLabels: string[];
   /** 连接名称（图表/卡片展示数据来自哪个交易所） */
   connectionLabel: string;
-  /** 行情来源：产品只使用真实行情 */
-  marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
   /** 拆单执行统计（paper 券商且开了拆单时才有） */
@@ -558,8 +552,6 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
-  /** 行情来源：产品只使用真实行情 */
-  marketData: "real";
   /** 现货 / 合约：合约模式下负仓位代表做空 */
   tradingMode: "spot" | "futures";
   connectionLabel?: string;
@@ -659,8 +651,6 @@ export interface EngineState {
     connectionAdapterId: string | null;
     /** 现货 / 合约 */
     tradingMode: "spot" | "futures";
-    /** 行情来源：产品只使用真实行情 */
-    marketData: "real";
     interval: string;
     symbols: string[];
     error: string | null;

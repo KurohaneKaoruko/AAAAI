@@ -76,8 +76,6 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
-  /** 行情来源；模拟交易所下线后恒为 real。保留字段：前端类型与历史结果还在引用。 */
-  marketData: "real";
   /** 本次对照的交易模式；合约模式允许负仓位与保证金记账 */
   tradingMode: TradingMode;
   /** 行情连接名 */
@@ -158,7 +156,6 @@ export async function runComparison(
   const results = contexts.map((ctx) => summarize(ctx, initialCash));
   const ranked = [...results].filter((r) => r.ok).sort((a, b) => b.totalReturn - a.totalReturn);
   const result: ComparisonResult = {
-    marketData: "real",
     tradingMode: options.adapter.meta.tradingMode ?? "spot",
     symbols: options.symbols,
     bars: bars.length,

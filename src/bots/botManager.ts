@@ -1245,17 +1245,11 @@ export class BotManager {
       state: this.state(bot.id),
       connectionLabel: this.connections.get(bot.connectionId)?.label ?? "未连接",
       modelLabels: labels,
-      marketData: this.marketDataOf(bot),
       tradingMode: this.tradingModeOf(bot),
       history: this.historyOf(bot.id),
       totals: this.totalsOf(bot.id),
       ...this.slicingOf(bot),
     };
-  }
-
-  /** 该机器人连接的行情来源；模拟交易所下线后恒为真实行情，字段保留给历史数据兼容。 */
-  private marketDataOf(_bot: BotConfig): "real" {
-    return "real";
   }
 
   /** 该机器人连接的交易模式；取不到时按现货（更保守）。 */
