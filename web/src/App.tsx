@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Sidebar, Toasts, TopBar } from "./components/Shell";
 import { Tour } from "./components/Tour";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Button, Notice, Panel } from "./components/ui";
 import { useAppStore } from "./state/useAppStore";
 import { useTheme } from "./lib/theme";
 import type { PageId } from "./components/Shell";
@@ -92,6 +93,8 @@ export function App() {
   const [tourKey, setTourKey] = useState(0);
   /** 窄屏抽屉侧栏 */
   const [navOpen, setNavOpen] = useState(false);
+  /** 首屏连接失败后的重试忙碌态 */
+  const [retrying, setRetrying] = useState(false);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -288,7 +291,31 @@ export function App() {
           onTourRestart={() => setTourKey((k) => k + 1)}
         />
         <main className="content">
-          <ErrorBoundary key={`${route.page}:${route.botId ?? ""}`}>{render()}</ErrorBoundary>
+          {store.state === null && store.bootError ? (
+            <div className="page">
+              <Panel title="无法连接 AAAAI 服务" subtitle="界面已加载，但后端没有响应">
+                <Notice tone="error">{store.bootError}</Notice>
+                <p className="dim small" style={{ marginTop: 10 }}>
+                  请确认服务已启动、端口可访问。开发模式下前端在 5173、后端在 8787；
+                  生产模式由同一个 Express 服务托管。
+                </p>
+                <div className="btn-row">
+                  <Button
+                    variant="primary"
+                    busy={retrying}
+                    onClick={() => {
+                      setRetrying(true);
+                      void store.reloadAll().finally(() => setRetrying(false));
+                    }}
+                  >
+                    重新连接
+                  </Button>
+                </div>
+              </Panel>
+            </div>
+          ) : (
+            <ErrorBoundary key={`${route.page}:${route.botId ?? ""}`}>{render()}</ErrorBoundary>
+          )}
         </main>
       </div>
       <Toasts store={store} />

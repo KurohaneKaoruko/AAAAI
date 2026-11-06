@@ -49,6 +49,8 @@ export interface AppStore {
   adapters: AdapterMeta[];
   watchlist: WatchItem[];
   connected: boolean;
+  /** 首屏 /api/state 拉取失败的原因；null = 正常或尚未失败 */
+  bootError: string | null;
   toasts: Toast[];
   toast: (tone: Toast["tone"], text: string) => void;
   dismiss: (id: number) => void;
@@ -68,6 +70,7 @@ export function useAppStore(): AppStore {
   const [adapters, setAdapters] = useState<AdapterMeta[]>([]);
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [connected, setConnected] = useState(false);
+  const [bootError, setBootError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastSeq = useRef(0);
 
@@ -113,8 +116,10 @@ export function useAppStore(): AppStore {
     try {
       const next = await api.state();
       setState(next);
-    } catch {
-      /* 服务未就绪时忽略 */
+      setBootError(null);
+    } catch (err) {
+      // 以前完全静默：服务没起时所有页面永远停在「正在连接…」，用户不知道该重试还是重新安装。
+      setBootError((err as Error).message);
     }
   }, []);
 
@@ -160,6 +165,7 @@ export function useAppStore(): AppStore {
     adapters,
     watchlist,
     connected,
+    bootError,
     toasts,
     toast,
     dismiss,
