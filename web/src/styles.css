@@ -1973,6 +1973,19 @@ a:focus-visible,
   .topbar { padding: 10px 14px; }
   .topbar-actions { position: static; }
   .content { padding: 14px 14px 24px; }
+  /* 窄屏下标题与操作分成两行：挤在同一行时按钮会被压成图标宽，或顶出面板 */
+  .panel-head { align-items: flex-start; flex-wrap: wrap; }
+  .panel-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .connection-row { flex-direction: column; align-items: stretch; }
+  .connection-actions { width: 100%; flex-wrap: wrap; }
+  .connection-actions .btn { flex: 1 1 auto; }
+  .bot-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .bot-actions .btn { flex: 1 1 auto; }
+  .adapter-grid { grid-template-columns: 1fr; }
+  .search-row { flex-wrap: wrap; }
+  .search-row input { flex: 1 1 160px; }
+  .page-tabs { overflow-x: auto; }
+  .page-tab { flex-shrink: 0; }
 }
 @media (max-width: 820px) and (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
