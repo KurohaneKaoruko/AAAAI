@@ -209,7 +209,14 @@ export function BacktestPage() {
             {symbols.length === 0 && <span className="dim small">先选至少一个标的</span>}
             {!local && <span className="dim small">该策略的决策来源不支持回测</span>}
           </div>
-          {err && <div className="bot-error">{err}</div>}
+          {err && (
+            <div className="bot-error">
+              {err}
+              <Button variant="ghost" onClick={() => void load()} disabled={loading}>
+                重试
+              </Button>
+            </div>
+          )}
         </div>
       </Panel>
 
