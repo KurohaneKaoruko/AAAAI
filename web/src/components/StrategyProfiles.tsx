@@ -39,6 +39,7 @@ export function StrategyList({
   selectedId,
   onSelect,
   onChanged,
+  onCreated,
   running,
 }: {
   items: StrategyProfile[];
@@ -46,6 +47,8 @@ export function StrategyList({
   selectedId: string;
   onSelect: (id: string) => void;
   onChanged: () => void | Promise<void>;
+  /** 新建/复制成功后把新策略交给父层选中，避免用户建完还得自己去列表里找 */
+  onCreated?: (id: string) => void;
   running?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -91,10 +94,11 @@ export function StrategyList({
   const add = async () => {
     const n = name.trim();
     if (!n) return;
-    await guard(async () => {
+    setError(null);
+    try {
       // 复制当前选中那条作为模板：新建时少填一遍参数
       const base = items.find((i) => i.id === selectedId);
-      await api.createStrategy({
+      const created = await api.createStrategy({
         name: n,
         ...(base
           ? {
@@ -112,9 +116,14 @@ export function StrategyList({
             }
           : {}),
       });
-    });
-    setAdding(false);
-    setName("");
+      await onChanged();
+      // 失败时保留输入框内容：以前无论成功失败都关掉，用户白输一遍
+      setAdding(false);
+      setName("");
+      onCreated?.(created.strategy.id);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   return (
@@ -177,7 +186,18 @@ export function StrategyList({
                   small
                   variant="ghost"
                   disabled={running}
-                  onClick={() => void guard(() => api.duplicateStrategy(s.id))}
+                  onClick={() => {
+                    void (async () => {
+                      setError(null);
+                      try {
+                        const copied = await api.duplicateStrategy(s.id);
+                        await onChanged();
+                        onCreated?.(copied.strategy.id);
+                      } catch (err) {
+                        setError((err as Error).message);
+                      }
+                    })();
+                  }}
                 >
                   复制
                 </Button>

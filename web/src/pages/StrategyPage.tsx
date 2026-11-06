@@ -223,6 +223,15 @@ export function StrategyPage({
                 selectedId={editing.id}
                 onSelect={selectStrategy}
                 onChanged={loadStrategies}
+                onCreated={(id) => {
+                  // 当前草稿有未保存修改时不抢焦点：直接切走会静默丢掉用户刚调的内容
+                  if (dirtyFields.length > 0) {
+                    store.toast("info", "新策略已创建；当前策略还有未保存修改，保存或放弃后再切换");
+                    return;
+                  }
+                  setSelectedId(id);
+                  store.toast("success", "已创建策略，可直接在右侧编辑参数");
+                }}
                 running={running}
               />
             </Panel>
