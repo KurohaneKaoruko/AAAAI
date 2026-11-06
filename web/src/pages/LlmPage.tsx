@@ -62,6 +62,8 @@ export function LlmPage({ store }: { store: AppStore }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tab, setTab] = useState<"chat" | "systemone" | "balance">("chat");
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [results, setResults] = useState<Record<string, string>>({});
   /** 待确认删除的实例（自绘二次确认） */
@@ -84,11 +86,13 @@ export function LlmPage({ store }: { store: AppStore }) {
         setOverview(data.overview);
         setStrategy(data.strategy as BalanceStrategy);
         setStrategyOptions(data.strategies);
+        setLoadError(null);
         if (!wasOnline.current) {
           wasOnline.current = true;
           toast("success", "模型实例状态已恢复");
         }
       } catch (err) {
+        setLoadError((err as Error).message);
         if (wasOnline.current) {
           wasOnline.current = false;
           toast("error", `模型实例读取失败：${(err as Error).message}`);
@@ -96,6 +100,8 @@ export function LlmPage({ store }: { store: AppStore }) {
           // 手动刷新/操作后的失败仍要反馈（轮询失败已经提醒过一次了）
           toast("error", (err as Error).message);
         }
+      } finally {
+        setLoaded(true);
       }
     },
     [toast],
@@ -199,6 +205,13 @@ export function LlmPage({ store }: { store: AppStore }) {
           负载均衡与统计
         </button>
       </div>
+
+      {loadError && (
+        <Notice tone="error">
+          模型实例读取失败：{loadError}
+          {loaded && profiles.length > 0 ? "（当前显示的是上次成功读取的数据）" : ""}
+        </Notice>
+      )}
 
       {tab === "balance" && (
         <>
@@ -401,7 +414,9 @@ export function LlmPage({ store }: { store: AppStore }) {
           </div>
         )}
 
-        {kindList.length === 0 ? (
+        {!loaded ? (
+          <div className="loading-inline">正在读取模型实例…</div>
+        ) : kindList.length === 0 ? (
           <Empty>
             还没有{tab === "systemone" ? "决策模型" : "对话模型"}实例。
             点击右上「添加{tab === "systemone" ? "决策模型" : "对话模型"}」接入。
