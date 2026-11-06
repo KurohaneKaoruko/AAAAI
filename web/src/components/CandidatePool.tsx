@@ -89,7 +89,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
           <div className="dim small">
             {adapter.name} 没有标的，只有自带的 {slots.length} 条走向
             {slots.length > 0 ? `（${slots.join(" / ")}）` : ""}。
-            看的不是一个品种，是策略在不同行情下的盈利；直接去「交易机器人」/「回测」/「对照实验」页开跑即可。
+            看的不是一个品种，是策略在不同行情下的盈利；直接去「交易机器人」/「回测」/「模拟对照」页开跑即可。
           </div>
         </div>
       </details>
@@ -102,7 +102,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
   const add = async (s: { symbol: string; name: string; assetClass: string; currency: string }) => {
     try {
       await api.addWatch({ ...s, assetClass: s.assetClass as "crypto" | "stock", connectionId });
-      store.toast("success", `${s.symbol} 已加入候选池`);
+      store.toast("success", `${s.symbol} 已加入标的`);
       await store.reloadWatchlist();
       await refreshPopular(connectionId);
     } catch (err) {
@@ -181,7 +181,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
                 <button
                   type="button"
                   className="chip-x"
-                  title="移出候选池"
+                  title="移出标的"
                   onClick={() => void remove(w.id)}
                 >
                   ×
@@ -195,7 +195,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
       <div className="hint-line">
         {live === false
           ? "当前无法获取实时价格（可能是外网不可达），列表与选取仍可正常使用。"
-          : "价格与涨跌幅来自交易所实时数据，点击卡片加入候选池。"}
+          : "价格与涨跌幅来自交易所实时数据，点击卡片加入标的。"}
       </div>
 
       {loading ? (
@@ -210,7 +210,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
                 type="button"
                 className="symbol-card"
                 onClick={() => void add(p)}
-                title={`加入候选池：${p.name}`}
+                title={`加入标的：${p.name}`}
               >
                 <span className="symbol-card-code mono">{p.symbol}</span>
                 <span className="symbol-card-name">{p.name}</span>
@@ -234,7 +234,7 @@ export function ConnectionSymbols({ store, connectionId }: { store: AppStore; co
       ) : popular.length === 0 ? (
         <Empty>该交易所没有提供常用标的清单，可用下方搜索或「手动添加代码」加入。</Empty>
       ) : (
-        <Empty>常用标的都已加入候选池，可用下方搜索添加更多。</Empty>
+        <Empty>常用标的都已加入，可用下方搜索添加更多。</Empty>
       )}
 
       <div className="search-row" style={{ marginTop: 12 }}>

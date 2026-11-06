@@ -197,7 +197,7 @@ export function BotsPage({
           <Empty>
             {store.connections.length === 0 ? (
               <>
-                还没有行情连接 —— 机器人得先知道去哪儿取行情。
+                还没有交易所连接 —— 机器人得先知道去哪儿取行情。
                 <div className="btn-row" style={{ marginTop: 12, justifyContent: "center" }}>
                   <Button
                     small
@@ -629,7 +629,7 @@ function BotForm({
     <div className="connection-form">
       {connections.length === 0 && (
         <Notice tone="warn">
-          还没有行情连接：先到「交易所连接」页添加一条并挑好标的，再回来建机器人。
+          还没有交易所连接：先到「交易所连接」页添加一条并挑好标的，再回来建机器人。
         </Notice>
       )}
       <div className="grid-2">
@@ -645,7 +645,7 @@ function BotForm({
           </div>
         )}
         <SelectField
-          label="行情连接"
+          label="交易所连接"
           value={connectionId}
           options={connections.map((c) => ({
             value: c.id,
@@ -748,7 +748,7 @@ function BotForm({
               ? `量化交易：双均线 ${chosen.fastWindow}/${chosen.slowWindow}，趋势强度按噪声归一（弱于噪声不进场），目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}，不调用任何模型。`
               : `${chosen.decisionSource === "hybrid" ? "混合决策" : chosen.decisionSource === "chat" ? "对话模型" : "决策模型"}；` +
                 (chosen.selfAllocating
-                  ? `由 AI 在候选池里自选资产（最多 ${chosen.maxPositions} 个、总仓位 ${pct(chosen.maxGrossExposure, 0)}，每 ${chosen.allocationInterval} 轮配置一次）。`
+                  ? `由 AI 在已配置的标的里自选资产（最多 ${chosen.maxPositions} 个、总仓位 ${pct(chosen.maxGrossExposure, 0)}，每 ${chosen.allocationInterval} 轮配置一次）。`
                   : `按上面的标的逐个定仓位，目标仓位最高 ${pct(chosen.maxTargetWeight, 0)}。`)}
             {chosen.decisionSource === "hybrid" && `分析影响力 ${pct(chosen.hybridInfluence, 0)}。`}
           </p>

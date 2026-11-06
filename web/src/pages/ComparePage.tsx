@@ -240,7 +240,7 @@ export function ComparePage({
         </div>
 
         <div className="field" style={{ marginTop: 8 }}>
-          <span className="field-label">对照标的（来自候选池，服务端按连接解析）</span>
+          <span className="field-label">对照标的（来自交易所连接下配置的标的，服务端按连接解析）</span>
           <div className="chip-row" style={{ marginTop: 6 }}>
             {symbols.length > 0 ? (
               symbols.map((s) => (
@@ -329,9 +329,9 @@ export function ComparePage({
 
         {error && <Notice tone="error">{error}</Notice>}
         <Notice tone="info">
-          对照只在模拟盘中进行，绝不会发出真实订单。所有选手共用<b>同一份行情</b>与初始资金；
+          对照只在本地模拟成交中进行，绝不会发出真实订单。所有选手共用<b>同一份行情</b>与初始资金；
           每位选手只跑自己那一类决策来源，因此是单变量比较。机器人参赛时用它引用的策略与模型，
-          但资金按对照实验统一设定（不用机器人自己的资金配置）。
+          但资金按模拟对照统一设定（不用机器人自己的资金配置）。
           {futuresTarget && (
             <div className="small" style={{ marginTop: 4 }}>
               当前连接是<b>合约模式</b>：负持仓代表做空，组合按保证金账户记账（权益 = 现金 + 未实现盈亏）。

@@ -14,13 +14,13 @@ export interface AdapterMeta {
   supportsTestnet: boolean;
   /** 现货/合约；缺省按现货处理 */
   tradingMode?: "spot" | "futures";
-  /** 行情来源：模拟交易所下线后恒为真实行情 */
+  /** 行情来源：产品只使用真实行情 */
   marketData?: "real";
   klineIntervals: string[];
   keyFields: { key: "apiKey" | "apiSecret"; label: string; secret: boolean; placeholder?: string }[];
   notes?: string[];
   /**
-   * 交易物由交易所自己定：用户不需要也不能挑（模拟交易所的几条走向）。
+   * 交易物由交易所自己定：用户不需要也不能挑（服务端预留能力）。
    */
   builtinSymbols?: boolean;
   /** 常用/自带交易物清单 */
@@ -74,7 +74,7 @@ export interface Ticker {
   changePct: number;
   volume: number;
   timestamp: number;
-  /** 这条行情来自哪个连接（候选池行情按连接分开显示） */
+  /** 这条行情来自哪个连接（同一代码在不同连接上也能分开显示） */
   connectionId?: string;
 }
 
@@ -278,7 +278,7 @@ export interface BotAction {
 
 /** 一次历史模拟（回测）的结果。成交一次性全出——它就是要把整段历史跑完。 */
 export interface BacktestResult {
-  /** 行情来源：模拟交易所下线后恒为 real */
+  /** 行情来源：产品只使用真实行情 */
   marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
@@ -287,7 +287,7 @@ export interface BacktestResult {
   interval: string;
   barCount: number;
   bars: number;
-  /** 回测实际使用的 K 线；盘面必须用这份，重新拉模拟行情会换路径 */
+  /** 回测实际使用的 K 线；盘面必须用这份，重新拉行情会换一段样本 */
   kline: { symbol: string; bars: KlineBar[] }[];
   /** 本次策略参数快照（之后改策略不影响这份结果） */
   strategyParams: {
@@ -372,7 +372,7 @@ export interface Bot {
   modelLabels: string[];
   /** 连接名称（图表/卡片展示数据来自哪个交易所） */
   connectionLabel: string;
-  /** 行情来源：模拟交易所下线后恒为 real */
+  /** 行情来源：产品只使用真实行情 */
   marketData: "real";
   /** 现货 / 合约 */
   tradingMode: "spot" | "futures";
@@ -558,7 +558,7 @@ export interface RunnerResult {
 }
 
 export interface ComparisonResult {
-  /** 行情来源：模拟交易所下线后恒为 real */
+  /** 行情来源：产品只使用真实行情 */
   marketData: "real";
   /** 现货 / 合约：合约模式下负仓位代表做空 */
   tradingMode: "spot" | "futures";
@@ -605,7 +605,7 @@ export interface AppConfig {
     slowWindow: number;
     maxTargetWeight: number;
     allowShort: boolean;
-    /** AI 在候选池里自行选资产并配权重 */
+    /** AI 在已配置的标的里自行选资产并配权重 */
     selfAllocating: boolean;
     maxPositions: number;
     maxGrossExposure: number;
@@ -643,7 +643,7 @@ export interface AppConfig {
 }
 
 /**
- * 全局状态：只有配置、候选池行情、模拟对照。
+ * 全局状态：只有配置、标的行情、模拟对照。
  * 运行相关的数据都在机器人那边（/api/bots）—— 单账户引擎已删除。
  */
 export interface EngineState {
@@ -655,16 +655,16 @@ export interface EngineState {
   runTarget: {
     connectionId: string | null;
     connectionLabel: string | null;
-    /** 适配器 id（simulated = 随机行情），界面据此标注 */
+    /** 适配器 id，界面据此标注数据源 */
     connectionAdapterId: string | null;
     /** 现货 / 合约 */
     tradingMode: "spot" | "futures";
-    /** 模拟交易所下线后恒为真实行情 */
+    /** 行情来源：产品只使用真实行情 */
     marketData: "real";
     interval: string;
     symbols: string[];
     error: string | null;
-    /** 标的由交易所自带（模拟交易所），界面不要展示/要求挑选 */
+    /** 标的由交易所自带（服务端预留能力），界面不要展示/要求挑选 */
     symbolsBuiltIn: boolean;
   };
 }

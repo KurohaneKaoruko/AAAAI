@@ -38,7 +38,7 @@ interface AgentNode {
 
 const AGENTS: AgentNode[] = [
   { name: "MarketAnalyst", zh: "市场分析", in: "K 线流", out: "市场解读（趋势/动量）" },
-  { name: "Allocator", zh: "资产配置", in: "K 线流 + 候选池", out: "资产配置 → 逐标的目标仓位", mode: "allocating" },
+  { name: "Allocator", zh: "资产配置", in: "K 线流 + 标的", out: "资产配置 → 逐标的目标仓位", mode: "allocating" },
   { name: "Strategist", zh: "策略决策", in: "市场解读 + 历史 K 线", out: "目标仓位信号", mode: "perSymbol" },
   { name: "RiskGuard", zh: "风控审查", in: "目标仓位", out: "下单意图 / 拦截" },
   { name: "Broker", zh: "执行", in: "下单意图", out: "成交回报" },
@@ -342,7 +342,7 @@ export function StrategyPage({
               </div>
 
               <Toggle
-                label="AI 自主选资产（关闭：按候选池逐个标的定仓位）"
+                label="AI 自主选资产（关闭：按已配置标的逐个定仓位）"
                 checked={form.selfAllocating}
                 onChange={(v) => setForm({ ...form, selfAllocating: v })}
               />
@@ -439,7 +439,7 @@ export function StrategyPage({
           <NewsPanel store={store} />
           <Panel title="大模型工具能力" subtitle="让模型自己查信息再决策">
             <Toggle
-              label="允许大模型调用只读工具（查新闻、看历史走势、看当前配置与持仓、列候选池）"
+              label="允许大模型调用只读工具（查新闻、看历史走势、看当前配置与持仓、列标的）"
               checked={config?.llm.agentEnabled ?? true}
               onChange={(v) => void store.patchConfig({ llm: { ...config!.llm, agentEnabled: v } })}
             />
@@ -464,7 +464,7 @@ export function StrategyPage({
                         决策前如果缺信息，它会自己调用工具去查：<b>search_news</b>（新闻与公告）、
                         <b>get_history</b>（历史走势、涨跌幅与回撤）、<b>get_quote</b>（最新价）、
                         <b>get_allocation</b>（当前资产配置）、<b>get_performance</b>（账户表现）、
-                        <b>list_candidates</b>（候选池）。
+                        <b>list_candidates</b>（标的池）。
                       </p>
                       <p className="dim">
                         工具全部只读，模型没有任何下单或改参数的能力；每次调用都会记进日志，可逐条核对。

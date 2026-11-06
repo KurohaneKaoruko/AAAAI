@@ -120,7 +120,7 @@ export function BacktestPage() {
         <div className="connection-form">
           <div className="grid-2">
             <SelectField
-              label="行情连接"
+              label="交易所连接"
               value={connectionId}
               options={connections.map((c) => ({ value: c.id, label: c.label }))}
               onChange={(v) => {
@@ -328,7 +328,7 @@ export function BacktestPage() {
             <div className="loading-inline">正在读取连接、策略与标的…</div>
           ) : connections.length === 0 ? (
             <Empty>
-              还没有可用的行情连接。先到「交易所连接」页加一条连接并挑好标的，再回来回测。
+              还没有可用的交易所连接。先到「交易所连接」页加一条连接并挑好标的，再回来回测。
             </Empty>
           ) : strategies.length === 0 ? (
             <Empty>还没有策略。先到「策略」页建一条量化策略，再回来回测。</Empty>

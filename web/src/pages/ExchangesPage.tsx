@@ -365,8 +365,8 @@ function ConnectionForm({
           ))}
           {adapter.supportsTestnet && (
             <Toggle
-              label="使用测试网 / 模拟盘"
-              hint="只影响下单/账户；K 线与候选池行情始终走主网真实数据"
+              label="使用测试网账户（仅影响下单）"
+              hint="行情始终走主网真实数据，测试网只切换下单/账户环境"
               checked={testnet}
               onChange={setTestnet}
             />

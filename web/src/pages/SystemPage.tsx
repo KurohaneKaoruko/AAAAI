@@ -62,6 +62,15 @@ export function SystemPage({ store }: { store: AppStore }) {
 
   if (!state) return <div className="loading">加载中…</div>;
 
+  const defaultConnection = store.connections.find((c) => c.id === state.config.execution.connectionId);
+  const defaultConnectionText = defaultConnection
+    ? `${defaultConnection.label} · ${defaultConnection.adapter.name}${defaultConnection.tradingMode === "futures" ? " · 合约" : ""}`
+    : state.config.execution.connectionId
+      ? `${state.config.execution.connectionId}（连接已不存在）`
+      : state.runTarget?.connectionLabel
+        ? `（自动：${state.runTarget.connectionLabel}）`
+        : "（自动选择第一个）";
+
   const persist = async () => {
     setError(null);
     setPersisting(true);
@@ -108,7 +117,7 @@ export function SystemPage({ store }: { store: AppStore }) {
               </tr>
               <tr>
                 <td>默认连接</td>
-                <td>{state.config.execution.connectionId || "（自动选择第一个）"}</td>
+                <td>{defaultConnectionText}</td>
               </tr>
               <tr>
                 <td>执行方式</td>
@@ -144,7 +153,7 @@ export function SystemPage({ store }: { store: AppStore }) {
                 <code>data/secrets.json</code> API 密钥（0600，已 gitignore）
               </li>
               <li>
-                <code>data/watchlist.json</code> 候选池（watchlist.json）
+                <code>data/watchlist.json</code> 标的（watchlist.json）
               </li>
               <li>
                 <code>config/default.yaml</code> 主配置（保存时写回）

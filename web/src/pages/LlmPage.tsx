@@ -469,7 +469,7 @@ export function LlmPage({ store }: { store: AppStore }) {
             <li>请求失败会自动故障转移到下一个可用实例，全部失败才回退动量基线并打 [fallback] 标记；</li>
             <li>对话模型需返回 JSON：<code>{'{"target_weight": 0.3, "confidence": 0.7, "reason": "..."}'}</code>，越界视为非法输出；</li>
             <li>决策模型走 System One 协议：只认 <code>POST /v1/systemone</code>，按档位概率换算目标仓位（Jev / laya / 百炼）；</li>
-            <li>两类模型各自成池，互不混用；策略通过「模型对照」页可以横向比较它们的效果。</li>
+            <li>两类模型各自成池，互不混用；策略通过「模拟对照」页可以横向比较它们的效果。</li>
           </ul>
         </div>
       </Panel>

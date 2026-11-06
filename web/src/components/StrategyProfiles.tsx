@@ -167,7 +167,7 @@ export function StrategyList({
                     small
                     variant="ghost"
                     disabled={running}
-                    title="设为默认：单次运行与对照实验使用它"
+                    title="设为默认：模拟对照使用它"
                     onClick={() => void guard(() => api.setDefaultStrategy(s.id))}
                   >
                     设为默认
