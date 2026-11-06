@@ -86,7 +86,7 @@ export class GateFuturesAdapter implements ExchangeAdapter {
     name: "Gate.io 合约（真实行情 / 模拟撮合）",
     assetClass: "crypto",
     description:
-      "Gate.io USDT 永续合约主网公共行情。行情真实，下单/撮合在本地模拟，不接真实资金。支持做空与保证金账户；不模拟资金费、强平与交易所保证金率。",
+      "Gate.io USDT 永续合约主网公共行情。行情真实，下单/撮合在本地模拟，不接真实资金。支持做空与保证金账户；资金费按交易所真实费率每 8 小时结算，不模拟强平与交易所保证金率。",
     requiresKeys: false,
     supportsTrading: false,
     supportsTestnet: false,
@@ -99,7 +99,7 @@ export class GateFuturesAdapter implements ExchangeAdapter {
       "公共行情固定走主网真实合约数据；测试网标记只影响连接展示，本适配器不下真实订单",
       "交易对写法：BTC_USDT（也接受 BTCUSDT / BTC-USDT，会自动转换）",
       "K 线为合约标记价格行情；成交量单位以交易所返回为准",
-      "不模拟资金费、维持保证金、逐仓强平与交易所强平引擎",
+      "资金费按真实费率结算；不模拟维持保证金、逐仓强平与交易所强平引擎",
       "下单/撮合在本地模拟，不会发送真实合约订单",
     ],
   };

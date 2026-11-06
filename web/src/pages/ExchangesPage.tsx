@@ -337,8 +337,8 @@ function ConnectionForm({
           {(dualMode ? tradingMode === "futures" : adapter.tradingMode === "futures") && (
             <Notice tone="warn">
               合约模式：真实合约行情 + 本地保证金记账，策略可直接做空。
-              当前<b>不发送真实合约订单</b>，也不模拟资金费、维持保证金与强平；
-              不要拿本地撮合结果当作真实收益证据。
+              当前<b>不发送真实合约订单</b>；资金费按交易所真实费率每 8 小时结算，
+              但不模拟维持保证金与强平；不要拿本地撮合结果当作真实收益证据。
             </Notice>
           )}
           {dualMode && (
