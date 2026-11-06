@@ -380,6 +380,11 @@ export function ComparePage({
                         <span className="runner-dot" style={{ background: PALETTE[i % PALETTE.length] }} />
                         {r.label}
                         {r.model && <span className="dim small"> · {r.model}</span>}
+                        {r.modelDecisions === 0 && (r.modelFailures ?? 0) > 0 && (
+                          <span title={`模型请求全部失败（${r.modelFailures} 次），本次实际跑的是规则回退`}>
+                            <Badge tone="warn">模型未生效</Badge>
+                          </span>
+                        )}
                       </td>
                       <td>
                         <Badge tone={r.origin?.type === "bot" ? "accent" : r.origin?.type === "model" ? "warn" : "neutral"}>

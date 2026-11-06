@@ -56,16 +56,19 @@ function parseDecisionCompat() {
   return parseAllocation('{"symbol":"BTC","target_weight":0.33,"confidence":0.5}');
 }
 
-test("决策解析：System One 小幅负期望权重钳为观望，大负值仍报错", () => {
-  // 空头档概率略占优时，期望权重落在 -0.05~0：语义是「看空但接近观望」，
-  // 现货拒收负目标 → 钳到 0（平仓/观望），不能按报错回退基线丢掉模型判断。
+test("决策解析：负权重是合法看空表达——现货钳 0，合约保留做空", () => {
+  // System One 的档位含 strong_short 等深负值。现货拒收负目标 → 钳到 0
+  //（看空 = 空仓），不能按报错回退基线（那会拿动量信号去持有多头）。
   const smallNeg = parseDecision('{"target_weight": -0.0131, "confidence": 0.42, "reason": "看空"}');
   assert.equal(smallNeg.targetWeight, 0);
   assert.equal(smallNeg.confidence, 0.42);
-  const boundary = parseDecision('{"target_weight": -0.25, "confidence": 0.5, "reason": "r"}');
-  assert.equal(boundary.targetWeight, 0);
-  // 超出容错的深负值才是真异常（比如模型输出了 -0.8）
-  assert.throws(() => parseDecision('{"target_weight": -0.8, "confidence": 0.5, "reason": "r"}'), /target_weight 非法/);
+  const deepNeg = parseDecision('{"target_weight": -0.8, "confidence": 0.5, "reason": "强空"}');
+  assert.equal(deepNeg.targetWeight, 0, "现货深负值也应钳到 0，而不是报错回退基线");
+  // 合约模式：负权重原样保留，做空信号不再被吞掉
+  assert.equal(parseDecision('{"target_weight": -0.8}', { minWeight: -1 }).targetWeight, -0.8);
+  assert.equal(parseDecision('{"target_weight": -0.25}', { minWeight: -1 }).targetWeight, -0.25);
+  // 超出 [-1, 1] 才是垃圾输出
+  assert.throws(() => parseDecision('{"target_weight": -1.2, "confidence": 0.5, "reason": "r"}'), /target_weight 非法/);
   assert.throws(() => parseDecision('{"target_weight": 1.5, "confidence": 0.5, "reason": "r"}'), /target_weight 非法/);
 });
 

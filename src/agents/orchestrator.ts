@@ -84,6 +84,11 @@ export interface Pipeline {
   portfolio: PortfolioManager;
   broker: Broker;
   strategy: Strategy;
+  /**
+   * 模型决策计数（只统计真正发出的请求）。纯规则路径 / 未接模型为 undefined。
+   * 对照实验用它识别「勾了模型选手、实际全程回退规则」的情况。
+   */
+  llmStats?: () => { decisions: number; failures: number };
   /** 资产配置器（开启 self_allocating 或混合决策时非空） */
   allocator: AllocatorAgent | null;
   /**
@@ -223,14 +228,17 @@ export function buildPipeline(
   const analyst = hybrid ? new HybridAnalyst(chatClient, hybridOpts) : null;
 
   let strategy: Strategy = baseStrategy;
+  let llmStrategy: LLMStrategy | null = null;
   if (source === "chat") {
-    strategy = chatClient
-      ? new LLMStrategy(baseStrategy, chatClient, config.llm.decisionInterval, newsProvider, toolBox, toolCtx, agentSteps)
-      : baseStrategy;
+    llmStrategy = chatClient
+      ? new LLMStrategy(baseStrategy, chatClient, config.llm.decisionInterval, newsProvider, toolBox, toolCtx, agentSteps, allowShort)
+      : null;
+    strategy = llmStrategy ?? baseStrategy;
   } else if (source === "systemone") {
-    strategy = soClient
-      ? new LLMStrategy(baseStrategy, soClient, config.llm.decisionInterval, newsProvider)
-      : baseStrategy;
+    llmStrategy = soClient
+      ? new LLMStrategy(baseStrategy, soClient, config.llm.decisionInterval, newsProvider, undefined, undefined, 0, allowShort)
+      : null;
+    strategy = llmStrategy ?? baseStrategy;
   }
   /*
    * 成本感知闸门（最外层）：所有引擎与 LLM 回退路径统一过闸。
@@ -390,12 +398,14 @@ export function buildPipeline(
     tradingMode,
   ).attach();
 
+  const statsRef = llmStrategy;
   return {
     bus,
     book,
     portfolio,
     broker,
     strategy,
+    ...(statsRef ? { llmStats: () => statsRef.stats } : {}),
     allocator,
     // 活引用：pipeline.primeMode = true 必须立刻对所有闸门生效
     get primeMode(): boolean {

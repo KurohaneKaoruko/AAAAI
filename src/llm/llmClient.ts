@@ -36,6 +36,8 @@ export function buildDecisionPrompt(args: {
   view?: { trend: string; momentum: number };
   /** 相关新闻摘要（外部来源，已标注不可信） */
   news?: string;
+  /** 合约模式：允许负权重（做空）；现货只能 0~1 */
+  allowShort?: boolean;
 }): string {
   const recent = args.bars.slice(-20);
   const lines = recent
@@ -47,6 +49,8 @@ export function buildDecisionPrompt(args: {
   const view = args.view
     ? `当前市场解读: 趋势=${args.view.trend}, 动量=${args.view.momentum.toFixed(4)}`
     : "当前市场解读: 无";
+  const allowShort = args.allowShort === true;
+  const range = allowShort ? "-1.0~1.0" : "0.0~1.0";
   return [
     `你是一名严谨的量化交易员，正在为 ${args.symbol} 做仓位决策。`,
     view,
@@ -55,30 +59,42 @@ export function buildDecisionPrompt(args: {
     lines,
     "",
     "请基于以上信息，输出一个 JSON 对象（不要输出任何其他文字）:",
-    '{"target_weight": 0.0-1.0, "confidence": 0.0-1.0, "reason": "不超过50字的决策理由"}',
+    `{"target_weight": ${range}, "confidence": 0.0-1.0, "reason": "不超过50字的决策理由"}`,
     "约束:",
-    "- target_weight 是目标仓位占总权益的比例，0 表示空仓；",
-    "- 信息不足或市场方向不明时，target_weight 应为 0；",
+    allowShort
+      ? "- target_weight 是目标仓位占总权益的比例：正数做多、负数做空、0 表示空仓；"
+      : "- target_weight 是目标仓位占总权益的比例，0 表示空仓；",
+    allowShort
+      ? "- 只有在下跌概率明显更大时才做空，方向不明时用 0，不要为了交易而交易；"
+      : "- 信息不足或市场方向不明时，target_weight 应为 0；",
     "- 只做什么都不做，不要虚构未提供的数据。",
   ].join("\n");
 }
 
-/** 解析 LLM 的 JSON 决策输出；容忍 ```json 围栏与前后杂文本。 */
-export function parseDecision(text: string): LLMDecision {
+/**
+ * 解析 LLM 的 JSON 决策输出；容忍 ```json 围栏与前后杂文本。
+ *
+ * 负权重是合法的看空表达（System One 的档位含 strong_short 等负值）。
+ * - minWeight = 0（默认，现货/混合决策）：负值一律钳到 0（看空 → 空仓）；
+ * - minWeight < 0（合约模式）：按 [-1, 1] 原样返回，负数就是做空。
+ *
+ * 以前把深负值（< -0.25）判为非法并回退动量基线 —— 模型明确看空时反而
+ * 拿基线信号去持有多头，是下跌行情里模型选手亏损的直接来源之一。
+ * 只有超出 [-1, 1] 的输入才当垃圾输出报错。
+ */
+export function parseDecision(text: string, opts: { minWeight?: number } = {}): LLMDecision {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("LLM 输出中未找到 JSON 对象");
   const raw = JSON.parse(match[0]) as Record<string, unknown>;
   const targetWeight = Number(raw.target_weight ?? raw.targetWeight);
   const confidence = Number(raw.confidence ?? 0);
   const reason = String(raw.reason ?? "").slice(0, 120);
-  // System One 的期望权重允许小幅负值：档位含做空方向（如 strong_short=-0.5），
-  // 空头概率略占优时期望落在 -0.05~0 附近——语义是「看空但接近观望」。
-  // 现货拒收负目标，这里钳到 0（平仓/观望），按报错回退基线反而丢掉模型的判断。
-  if (!Number.isFinite(targetWeight) || targetWeight < -0.25 || targetWeight > 1) {
+  const allowShort = (opts.minWeight ?? 0) < 0;
+  if (!Number.isFinite(targetWeight) || targetWeight < -1 || targetWeight > 1) {
     throw new Error(`LLM 输出 target_weight 非法: ${String(raw.target_weight)}`);
   }
   return {
-    targetWeight: Math.max(0, targetWeight),
+    targetWeight: allowShort ? targetWeight : Math.max(0, targetWeight),
     confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
     reason: reason || "llm-decision",
   };

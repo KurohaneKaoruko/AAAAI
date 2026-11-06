@@ -549,6 +549,10 @@ export interface RunnerResult {
   equityCurve: EquityPoint[];
   positions: Position[];
   llmCalls: number;
+  /** 实际发出的模型决策请求数（模型选手才有） */
+  modelDecisions?: number;
+  /** 其中失败次数；decisions=0 且 failures>0 = 全程回退规则 */
+  modelFailures?: number;
 }
 
 export interface ComparisonResult {

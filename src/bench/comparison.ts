@@ -73,6 +73,10 @@ export interface RunnerResult {
   equityCurve: EquityPoint[];
   positions: Position[];
   llmCalls: number;
+  /** 实际发出的模型决策请求数（模型选手才有；纯规则/未接模型为空） */
+  modelDecisions?: number;
+  /** 其中失败的次数；decisions=0 且 failures>0 = 全程回退规则 */
+  modelFailures?: number;
 }
 
 export interface ComparisonResult {
@@ -179,6 +183,7 @@ function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
   const { spec, strategy, pipeline } = ctx;
   const metrics = pipeline.portfolio.metrics();
   const trades = pipeline.portfolio.tradeHistory();
+  const modelStats = pipeline.llmStats?.();
   const base: RunnerResult = {
     id: spec.id,
     label: spec.label,
@@ -209,6 +214,7 @@ function summarize(ctx: RunnerCtx, initialCash: number): RunnerResult {
     equityCurve: pipeline.portfolio.equityCurve(),
     positions: pipeline.portfolio.positionsSnapshot(),
     llmCalls: countLlmCalls(trades),
+    ...(modelStats ? { modelDecisions: modelStats.decisions, modelFailures: modelStats.failures } : {}),
   };
   return { ...base, winRate: winRate(trades), profitFactor: profitFactor(trades) };
 }
