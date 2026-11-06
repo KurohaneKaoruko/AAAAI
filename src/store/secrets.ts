@@ -3,7 +3,8 @@
  * 交易所连接与 LLM 配置共用；按前缀命名空间隔离。
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { getLogger } from "../core/logger.js";
 
@@ -35,7 +36,7 @@ export class SecretStore {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(Object.fromEntries(this.cache), null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(Object.fromEntries(this.cache), null, 2), { mode: 0o600 });
     chmodSync(this.path, 0o600);
   }
 

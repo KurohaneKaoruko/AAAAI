@@ -12,7 +12,8 @@
  * 熔断：连续失败达到阈值后进入冷却期，冷却期内不再选中；到期后半开试探。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { LLMClient } from "./llmClient.js";
@@ -161,7 +162,7 @@ export class LlmManager implements LLMClient {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.profiles, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(this.profiles, null, 2), { mode: 0o600 });
   }
 
   // ---------------- CRUD ----------------

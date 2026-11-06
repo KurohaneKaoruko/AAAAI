@@ -7,7 +7,8 @@
  * - 新闻只作参考，不直接产生订单。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { getLogger } from "../core/logger.js";
@@ -52,7 +53,7 @@ export class NewsService {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.items.slice(-MAX_ITEMS), null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(this.items.slice(-MAX_ITEMS), null, 2), { mode: 0o600 });
   }
 
   /** 当前可用新闻（已按时效过滤）。 */

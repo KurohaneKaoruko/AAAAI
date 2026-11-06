@@ -14,7 +14,8 @@
  */
 
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, chmodSync, rmSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import type { NextFunction, Request, Response } from "express";
 import { getLogger } from "../core/logger.js";
@@ -64,7 +65,7 @@ export class AuthService {
       return;
     }
     mkdirSync(this.path.slice(0, this.path.lastIndexOf("/")), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(file, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(file, null, 2), { mode: 0o600 });
     chmodSync(this.path, 0o600);
     this.file = file;
   }

@@ -10,7 +10,8 @@
  *   stop(id)  -> 停轮询器、回撤熔断时自动调用
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventBus, Topic } from "../core/eventBus.js";
@@ -289,7 +290,7 @@ export class BotManager {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.bots, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(this.bots, null, 2), { mode: 0o600 });
   }
 
   // ---------------- 运行存档（跨重启保留） ----------------
@@ -332,7 +333,7 @@ export class BotManager {
       if (!this.bots.some((b) => b.id === botId)) continue;
       obj[botId] = runs;
     }
-    writeFileSync(this.historyPath, JSON.stringify(obj), { mode: 0o600 });
+    writeFileAtomic(this.historyPath, JSON.stringify(obj), { mode: 0o600 });
   }
 
   /** 记一次运行开始。 */

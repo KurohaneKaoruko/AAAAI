@@ -3,7 +3,8 @@
  * 元信息存 data/connections.json，密钥存 data/secrets.json（共享 SecretStore）。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAdapter, getAdapterMeta, UnsupportedAdapterError, ADAPTER_MIGRATIONS } from "./registry.js";
@@ -101,7 +102,7 @@ export class ConnectionManager {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.metaPath, JSON.stringify(this.connections, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.metaPath, JSON.stringify(this.connections, null, 2), { mode: 0o600 });
   }
 
   // ---------- CRUD ----------

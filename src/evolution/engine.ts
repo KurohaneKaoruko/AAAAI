@@ -5,7 +5,8 @@
  * 两者都写盘（data/evolution.json），重启后学习记录不丢。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { getLogger } from "../core/logger.js";
 import { PARAM_RULES } from "./types.js";
@@ -86,7 +87,7 @@ export class EvolutionEngine {
       lastEvaluatedAt: this.lastEvaluatedAt,
       cooldownUntil: this.cooldownUntil,
     };
-    writeFileSync(this.path, JSON.stringify(data, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.path, JSON.stringify(data, null, 2), { mode: 0o600 });
   }
 
   get evolution(): EvolutionSection {

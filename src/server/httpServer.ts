@@ -10,7 +10,7 @@
 
 import express, { type Express, type Request, type Response } from "express";
 import { existsSync } from "node:fs";
-import { writeFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join, resolve } from "node:path";
 import { dump as dumpYaml } from "js-yaml";
 import type { EngineController } from "./engineController.js";
@@ -175,7 +175,7 @@ export function createServer(controller: EngineController, options: ServerOption
     }
     try {
       const text = dumpYaml(serializeConfig(controller.getConfig()), { lineWidth: 100, noRefs: true });
-      writeFileSync(configPath, text, "utf8");
+      writeFileAtomic(configPath, text, { mode: 0o644 });
       ok(res, { saved: configPath });
     } catch (err) {
       fail(res, err);

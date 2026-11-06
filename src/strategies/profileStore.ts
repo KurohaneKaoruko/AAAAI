@@ -9,7 +9,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../core/safeWrite.js";
 import { join } from "node:path";
 import { getLogger } from "../core/logger.js";
 import { compileCustomCode } from "./customStrategy.js";
@@ -320,7 +321,7 @@ export class StrategyStore {
   private persist(): void {
     if (this.memoryOnly) return;
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(
+    writeFileAtomic(
       this.path,
       JSON.stringify({ defaultId: this.defaultId, presetVersion: this.presetVersion, strategies: this.profiles }, null, 2),
       { mode: 0o600 },

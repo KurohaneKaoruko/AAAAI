@@ -1,6 +1,7 @@
 /** 自选标的列表：持久化到 data/watchlist.json。 */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "./core/safeWrite.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AssetClass } from "./exchanges/types.js";
@@ -42,7 +43,7 @@ export class WatchlistManager {
 
   private persist(): void {
     mkdirSync(this.dataDir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.items, null, 2));
+    writeFileAtomic(this.path, JSON.stringify(this.items, null, 2));
   }
 
   list(): WatchItem[] {
